@@ -1,0 +1,24 @@
+[project]
+name = "ridgestone-floorplan"
+version = "0.1.0"
+description = "A deterministic floor-plan description and SVG rendering toolkit for Ridgestone house studies."
+readme = "docs/design/floor-plan-language-design.md"
+requires-python = ">=3.11"
+dependencies = [
+  "fastapi>=0.115",
+  "PyYAML>=6",
+  "uvicorn[standard]>=0.30",
+]
+
+[project.optional-dependencies]
+dev = [
+  "pytest>=8",
+  "ruff>=0.11",
+]
+
+[tool.ruff]
+line-length = 100
+target-version = "py311"
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]

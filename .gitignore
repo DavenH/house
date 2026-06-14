@@ -1,2 +1,12 @@
 *.blend1
 .idea
+artifacts/**/*.svg
+artifacts/**/*.png
+__pycache__/
+.pytest_cache/
+.ruff_cache/
+node_modules/
+dist/
+apps/editor/.svelte-kit/
+*.egg-info/
+pnpm-lock.yaml

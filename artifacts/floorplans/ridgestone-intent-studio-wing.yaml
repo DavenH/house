@@ -1,0 +1,176 @@
+type: intent_plan
+plan: ridgestone-intent-studio-wing
+unit: ft
+scale: 16
+notes:
+  - 'Principal Ridgestone candidate: studio/library/piano wing.'
+  - 'Promotes the left L-shaped wing into a semi-public library + office + piano + music studio suite, matching the driveway-facing privacy gradient.'
+  - 'The piano now sits inside the library wing for recording and office/studio overlap; the hearth shifts to the stair/great-room threshold as a central masonry anchor.'
+  - 'The former lower-left storage pocket is absorbed into the library/piano room for credible circulation; bulk storage is concentrated on the tower/service side.'
+  - 'Pattern basis: Library, Music Practice Rooms, Alcoves, Half-Open Wall, Intimacy Gradient, and Light on Two Sides of Every Room.'
+  - 'Upper-floor improvement: master bedroom claims the west upper bay for a real exterior window; hall becomes a windowed laundry/linen room close to the master suite.'
+datums:
+  x: {west: 1, storage_e: 8, left_w: 8, closet_w: 14, left_e: 21, stair_e: 30, piano_w: 29.5, tower_e: 38, right_w: 38, pantry_w: 42.5, room_split: 43.5, pantry_e: 46.5, dining_w: 51, right_e: 56, dining_e: 65}
+  y: {gable_n: 2, main_n: 7.5, ensuite_s: 11, bath_s: 15, stair_s: 18, public_split: 22, lower_storage_n: 24, entry_s: 28, tower_s: 30, gable_s: 32, main_s: 35}
+catalog:
+  piano_5x7: {size: [7, 5], label: PIANO, clearance: {around: 1}}
+  dining_table_3x7: {size: [7, 3], label: TABLE, clearance: {around: 2.5}}
+  couch_7x3: {size: [7, 3], label: COUCH, clearance: {around: 1.5}}
+  couch_3x7: {size: [3, 7], label: COUCH, clearance: {around: 1.5}}
+  chair_3x3: {size: [3, 3], label: CHAIR, clearance: {around: 1.5}}
+  queen_bed: {size: [6.67, 5], label: BED, clearance: {left: 0, right: 1, top: 1, foot: 2}}
+  pool_table_4x8: {size: [8, 4], label: 'POOL TABLE', clearance: {walls: 5}}
+  counter: {label: COUNTER}
+  bookcase_screen: {size: [1, 8], label: BOOK/SCREEN}
+  reading_seat: {size: [5, 2], label: READING/SEAT}
+  music_shelf: {size: [6, 1], label: MUSIC/SHELF}
+  stacked_laundry: {size: [3, 2.5], label: W/D}
+  linen: {size: [4, 1.5], label: LINEN}
+  refrigerator: {size: [3, 3], label: FRIDGE}
+  mechanicals: {size: [4, 2], label: MECH}
+  storage_cabinet: {size: [4, 1.5], label: STORAGE}
+  studio_desk: {size: [7, 2.5], label: DESK/COUNTER}
+masses:
+  shared_body:
+    levels:
+      - L1
+      - L2
+    rects:
+      - {x: [west, left_e], y: [main_n, entry_s]}
+      - {x: [left_w, left_e], y: [gable_n, bath_s]}
+      - {x: [left_w, left_e], y: [public_split, gable_s]}
+      - {x: [left_e, right_e], y: [main_n, entry_s]}
+      - {x: [right_w, right_e], y: [entry_s, main_s]}
+      - {x: [stair_e, tower_e], y: [public_split, tower_s]}
+  dining_extrusion: {level: L1, rect: {x: [right_e, dining_e], y: [bath_s, entry_s]}}
+levels:
+  L1:
+    title: 'First Floor - Studio Library Wing'
+    derive_partitions: true
+    spaces:
+      laundry: {x: [west, storage_e], y: [main_n, bath_s], label: MACHINE/ROOM, privacy: service}
+      bathroom: {x: [left_w, left_e], y: [gable_n, bath_s], privacy: private}
+      library: {x: [west, left_e], y: [bath_s, entry_s], label: LIBRARY/PIANO/OFFICE, label_at: [10.5, 19], label_size: 13, privacy: semi_private}
+      office_studio: {x: [left_w, left_e], y: [entry_s, gable_s], label: MUSIC/STUDIO, privacy: semi_private}
+      stair: {x: [left_e, stair_e], y: [main_n, stair_s], privacy: circulation}
+      hall: {x: [left_e, stair_e], y: [stair_s, public_split], label: HALL, label_size: 12, privacy: circulation}
+      entrance: {x: [left_e, stair_e], y: [public_split, entry_s], label: MUDROOM/ENTRANCE, label_size: 12, privacy: circulation}
+      tower_closet: {x: [stair_e, tower_e], y: [public_split, tower_s], label: TOWER/STORAGE, privacy: service}
+      piano: {rect: [30, 7, 8, 11], label: HEARTH/GALLERY, label_at: [35.5, 10], label_size: 11, privacy: public}
+      great_room: {x: [right_w, dining_w], y: [main_n, public_split], label: 'GREAT ROOM', privacy: public}
+      great_room_storage: {x: [dining_w, right_e], y: [main_n, bath_s], label: STORAGE, label_size: 10, privacy: service}
+      kitchen: {x: [right_w, right_e], y: [public_split, main_s], privacy: public}
+      pantry: {x: [pantry_w, pantry_e], y: [stair_s, public_split], privacy: service, label_size: 11}
+      dining: {x: [dining_w, dining_e], y: [bath_s, entry_s], label: 'DINING AREA', privacy: public}
+    features:
+      piano: {kind: piano_5x7, within: library, at: [6.5, 19], avoid_openings: true}
+      hearth: {at: [32.5, 15.5], size: [3, 5], label: HEARTH}
+      great_room_couch: {kind: couch_3x7, within: great_room, at: [42, 14.5]}
+      great_room_chair_w: {kind: chair_3x3, within: great_room, at: [47, 12]}
+      great_room_chair_e: {kind: chair_3x3, within: great_room, at: [47, 18]}
+      kitchen_south_counter: {kind: counter, along: {space: kitchen, side: south}, depth: 1.5}
+      kitchen_east_counter: {kind: counter, along: {space: kitchen, side: east}, depth: 1.5, at: [56.5, 30]}
+      kitchen_island: {size: [7, 3], at: [48.5, 29.5], label: ISLAND, clearance: {walls: 4}}
+      refrigerator: {kind: refrigerator, within: kitchen, at: [39.5, 26]}
+      mechanicals: {kind: mechanicals, within: laundry, at: [5, 13.5]}
+      dining_table: {kind: dining_table_3x7, within: dining, at: [58.5, 21.5]}
+      library_reading_seat: {kind: reading_seat, within: library, at: [4.5, 26.5]}
+      studio_desk: {kind: studio_desk, within: office_studio, at: [17, 30.5]}
+    connections:
+      - {between: [laundry, bathroom], width: 3}
+      - {between: [bathroom, library], width: 3, offset: 7}
+      - {between: [library, office_studio], kind: open}
+      - {between: [entrance, hall], kind: arch}
+      - {between: [hall, library], kind: arch}
+      - {between: [hall, stair], kind: arch, width: 3.5, position: end}
+      - {between: [stair, piano], kind: open}
+      - {between: [entrance, tower_closet], width: 3}
+      - {between: [piano, great_room], kind: open}
+      - {between: [great_room, great_room_storage], width: 2.5, offset: 1.5}
+      - {between: [great_room, kitchen], kind: open}
+    access:
+      - [entrance, hall]
+      - [hall, stair]
+      - [hall, library]
+      - [stair, piano]
+      - [entrance, tower_closet]
+      - [entrance, kitchen]
+      - [kitchen, dining]
+      - [kitchen, great_room]
+      - [kitchen, pantry]
+      - [great_room, great_room_storage]
+    openings:
+      - {id: front_door, space: entrance, side: south, width: 5, kind: door, swing: in-left}
+      - {id: bath_window, space: bathroom, side: north, width: 5, kind: window}
+      - {id: library_window, width: 4, kind: window, offset: 3, wall: exterior_11}
+      - {id: stair_window, space: stair, side: north, width: 4, kind: window}
+      - {id: great_room_window, space: great_room, side: north, width: 8, kind: window}
+      - {id: kitchen_window, space: kitchen, side: south, width: 8, kind: window}
+      - {id: office_window, space: office_studio, side: south, width: 7, kind: window}
+      - {id: dining_window, space: dining, side: east, width: 5, kind: window}
+      - {id: library_piano_south_window, wall: exterior_3, offset: 2.5, width: 3, kind: window}
+      - {id: studio_west_window, space: office_studio, side: west, width: 3, kind: window}
+      - {id: kitchen_east_window, wall: exterior_17, offset: 1.5, width: 4, kind: window}
+      - {id: dining_south_window, wall: exterior_5, offset: 2, width: 4, kind: window}
+  L2:
+    title: 'Second Floor - Windowed Master + Laundry Hall'
+    derive_partitions: true
+    spaces:
+      upper_storage: {x: [west, storage_e], y: [main_n, ensuite_s], label: STORAGE, label_size: 9, privacy: service}
+      lower_storage: {x: [west, storage_e], y: [lower_storage_n, entry_s], label: STORAGE, label_size: 9, privacy: service}
+      ensuite_bathroom: {x: [left_w, left_e], y: [gable_n, ensuite_s], label: ENSUITE/BATHROOM, privacy: private}
+      master_bedroom: {x: [west, closet_w], y: [ensuite_s, lower_storage_n], label: MASTER/BEDROOM, privacy: private}
+      walk_in_closet: {x: [closet_w, left_e], y: [ensuite_s, stair_s], label: WALK-IN/CLOSET, privacy: private}
+      suite_foyer: {x: [closet_w, left_e], y: [stair_s, lower_storage_n], label: FOYER, label_size: 12, privacy: circulation}
+      gym: {x: [left_w, left_e], y: [lower_storage_n, gable_s], privacy: semi_private}
+      stair: {x: [left_e, stair_e], y: [main_n, stair_s], privacy: circulation}
+      upper_hall: {x: [left_e, stair_e], y: [stair_s, entry_s], label: LAUNDRY/LINEN, label_at: [25.5, 20], label_size: 9, privacy: circulation}
+      tower: {x: [stair_e, tower_e], y: [public_split, tower_s], privacy: circulation}
+      room_1: {x: [stair_e, room_split], y: [main_n, stair_s], label: 'ROOM 1', privacy: private}
+      room_2: {x: [room_split, right_e], y: [main_n, stair_s], label: 'ROOM 2', privacy: private}
+      lounge: {x: [right_w, right_e], y: [stair_s, main_s], privacy: public}
+    features:
+      hearth: {kind: chimney, at: [32.5, 17], size: [1.5, 4], label: CHIMNEY, avoid_openings: true}
+      queen_bed: {kind: queen_bed, within: master_bedroom, at: [7.75, 17], avoid_openings: true}
+      hall_laundry_pair: {kind: stacked_laundry, within: upper_hall, at: [23, 26.5], label: W/D}
+      hall_linen: {kind: linen, within: upper_hall, at: [27.5, 27], label: LINEN}
+      pool_table: {kind: pool_table_4x8, at: [47, 28]}
+    connections:
+      - {between: [ensuite_bathroom, master_bedroom], width: 3.5}
+      - {between: [master_bedroom, walk_in_closet], width: 3}
+      - {between: [master_bedroom, suite_foyer], width: 3}
+      - {between: [walk_in_closet, suite_foyer], width: 3}
+      - {between: [master_bedroom, gym], width: 3}
+      - {between: [suite_foyer, gym], kind: arch}
+      - {between: [suite_foyer, upper_hall], kind: open}
+      - {between: [stair, upper_hall], kind: arch, width: 3.5, position: start}
+      - {between: [room_1, lounge], width: 3, swing: in-left}
+      - {between: [room_2, lounge], width: 3, position: end, swing: in-left}
+    access:
+      - [stair, upper_hall]
+      - [upper_hall, room_1]
+      - [upper_hall, room_2]
+      - [upper_hall, lounge]
+      - [suite_foyer, master_bedroom]
+      - [master_bedroom, ensuite_bathroom]
+      - [master_bedroom, walk_in_closet]
+      - [master_bedroom, gym]
+      - [suite_foyer, walk_in_closet]
+      - [suite_foyer, gym]
+      - [suite_foyer, upper_hall]
+    openings:
+      - {id: ensuite_window, space: ensuite_bathroom, side: north, width: 5, kind: window}
+      - {id: room_1_window, space: room_1, side: north, width: 5, kind: window}
+      - {id: room_2_window, space: room_2, side: north, width: 5, kind: window}
+      - {id: master_west_window, space: master_bedroom, side: west, width: 7, kind: window}
+      - {id: laundry_hall_view_window, space: upper_hall, side: south, width: 5, kind: window}
+      - {id: lounge_window, space: lounge, side: south, width: 10, kind: window}
+      - {id: gym_window, space: gym, side: south, width: 7, kind: window}
+stacks:
+  - {id: tower_stack, members: [L1.tower_closet, L2.tower], same: [x, y, w, h]}
+  - {id: stair_stack, members: [L1.stair, L2.stair], same: [x, y, w, h]}
+  - {id: hearth_stack, members: [L1.hearth, L2.hearth], same: [cx]}
+alignments:
+  - {id: left_front_gable, members: [L1.bathroom, L2.ensuite_bathroom], same: [x, w]}
+  - {id: left_back_gable, members: [L1.office_studio, L2.gym], same: [x, w]}
+  - {id: right_gable_width, members: [L1.kitchen, L2.lounge], same: [x, w]}
