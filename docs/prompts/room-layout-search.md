@@ -36,12 +36,10 @@ For instance:
 
 Could you please give me a matrix of connection probabilities, possibly defined sparsely if you decide most of the entries would be zero. This way I can use it for evolutionary search. Thank you!
 
-
-
-
 ------
 Initial Results: 
 
+```python
 # Ridgestone evolutionary topology priors
 # Sparse adjacency priors: p(A,B) in [0,1] is the prior probability that A directly connects to B.
 # Unlisted pairs can be treated as ~0.00–0.05 (your choice) for exploration.
@@ -94,9 +92,11 @@ PRIORS: Priors = {
     "Lo": { DELTA:0.55, "S":0.35, "Fi":0.25, "B":0.20},
     "Ri": { DELTA:0.60, "B":0.30, "S":0.20},
 }
+```
 
-# --- Optional helpers ---------------------------------------------------------
+# Optional helpers 
 
+```python
 def symmetrize_priors(priors: Mapping[Room, Mapping[Room, float]]) -> Priors:
     """
     Ensure PRIORS is symmetric: p(A,B) == p(B,A) == max(original values).
@@ -132,6 +132,7 @@ HARD_FORBID_EDGES = {
     ("Ri", "K"), ("K", "Ri"),
     ("Rm", "K"), ("K", "Rm"),
 }
+```
 
 # If you want the canonical symmetric version:
 PRIORS_SYM = symmetrize_priors(PRIORS)

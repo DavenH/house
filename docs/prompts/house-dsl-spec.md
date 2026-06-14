@@ -40,7 +40,7 @@ MR  machine room (can unify with La)
 La  laundry
 B   main bathroom
 S   staircase
-St  music studio
+Mu  music studio
 Lo  lounge (pool table)
 Rm  master bedroom
 W   walk-in closet
@@ -195,7 +195,7 @@ Avoid very high degree in private rooms, such as:
 - `EB`
 - `W`
 
-Discourage `St` becoming a junction.
+Discourage `Mu` becoming a junction.
 
 #### Corridor discipline
 
@@ -345,7 +345,7 @@ A good run should produce topologies where:
   - `K—G`
 - Not necessarily all three social edges are required, but they should appear often.
 - Bathrooms connect via transition `Δ` more than directly to `G`.
-- Studio `St` is reachable from `G` and/or `Pi`, but is not a central junction.
+- Studio `Mu` is reachable from `G` and/or `Pi`, but is not a central junction.
 - Private rooms connect through `Δ` rather than directly to the kitchen.
 - The hearth behaves like a place / anchor, not like a corridor node.
 - The piano is visually and socially connected to the great room, but does not become circulation.
