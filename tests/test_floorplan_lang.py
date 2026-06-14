@@ -465,6 +465,9 @@ def test_wall_plan_offsets_exterior_walls_outward() -> None:
                 "L1": {
                     "walls": [
                         {"id": "exterior_wall", "at": [0, 0], "dir": "E", "len": 10, "kind": "exterior"},
+                        {"id": "exterior_wall_e", "at": [10, 0], "dir": "S", "len": 2, "kind": "exterior"},
+                        {"id": "exterior_wall_s", "at": [10, 2], "dir": "W", "len": 10, "kind": "exterior"},
+                        {"id": "exterior_wall_w", "at": [0, 2], "dir": "N", "len": 2, "kind": "exterior"},
                         {"id": "interior_wall", "at": [0, 2], "dir": "E", "len": 10, "kind": "interior"},
                     ],
                     "zones": {"room": {"rect": [0, 0, 10, 2]}},
@@ -475,8 +478,9 @@ def test_wall_plan_offsets_exterior_walls_outward() -> None:
 
     svg = render_wall_plan_svg(plan)
 
-    assert 'class="exterior" d="M 0.000 0.000 L 160.000 0.000"' in svg
-    assert 'class="floor-mask"' in svg
+    assert 'class="exterior-wall"' in svg
+    assert 'M 0.000 0.000 L 160.000 0.000' in svg
+    assert 'class="floor-mask"' not in svg
     assert 'class="interior" x1="0.000" y1="32.000" x2="160.000" y2="32.000"' in svg
 
 

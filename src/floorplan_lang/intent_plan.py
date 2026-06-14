@@ -86,12 +86,43 @@ def _require_valid_intent_level(
 ) -> None:
     rules = level_data.get("validate") or {}
     errors = []
+    errors.extend(_validate_intent_references(level_id, level_data, spaces))
     if rules.get("cover_masses", False):
         errors.extend(_validate_mass_coverage(level_id, mass_rects, spaces))
     if rules.get("closed_space_access", False):
         errors.extend(_validate_closed_space_access(level_id, level_data))
     if errors:
         raise ValueError("Invalid intent plan:\n- " + "\n- ".join(errors))
+
+
+def _validate_intent_references(level_id: str, level_data: dict[str, Any], spaces: dict[str, Rect]) -> list[str]:
+    errors = []
+    space_ids = set(spaces)
+    for index, connection in enumerate(level_data.get("connections") or (), start=1):
+        data = _connection_data(connection)
+        for space_id in data.get("between") or ():
+            if space_id not in space_ids:
+                errors.append(f"{level_id}.connections[{index}] references missing space {space_id!r}")
+    for index, opening in enumerate(level_data.get("openings") or (), start=1):
+        if opening.get("space") is not None and opening["space"] not in space_ids:
+            errors.append(f"{level_id}.openings[{index}] references missing space {opening['space']!r}")
+        for space_id in opening.get("between") or ():
+            if space_id not in space_ids:
+                errors.append(f"{level_id}.openings[{index}] references missing space {space_id!r}")
+    for feature_id, feature in (level_data.get("features") or {}).items():
+        if feature.get("within") is not None and feature["within"] not in space_ids:
+            errors.append(f"{level_id}.{feature_id} references missing containing space {feature['within']!r}")
+        if feature.get("along", {}).get("space") is not None and feature["along"]["space"] not in space_ids:
+            errors.append(f"{level_id}.{feature_id} references missing along space {feature['along']['space']!r}")
+    for index, edge in enumerate(level_data.get("access") or (), start=1):
+        if isinstance(edge, dict):
+            endpoints = (edge.get("from"), edge.get("to"))
+        else:
+            endpoints = edge
+        for space_id in endpoints:
+            if space_id not in space_ids:
+                errors.append(f"{level_id}.access[{index}] references missing space {space_id!r}")
+    return errors
 
 
 def _validate_mass_coverage(level_id: str, mass_rects: list[Rect], spaces: dict[str, Rect]) -> list[str]:
@@ -486,7 +517,12 @@ def _compile_connections(connections: list[Any], context: IntentContext) -> list
             if kind == "open" or (kind == "arch" and "width" not in data)
             else min(width, overlap_end - overlap_start)
         )
-        offset = _opening_offset(wall, overlap_start, overlap_end, opening_width, data.get("position", "center"))
+        if "offset" in data:
+            min_offset = _offset_from_axis_start(wall, overlap_start, 0)
+            max_offset = _offset_from_axis_start(wall, overlap_end - opening_width, 0)
+            offset = max(min(float(data["offset"]), max(min_offset, max_offset)), min(min_offset, max_offset))
+        else:
+            offset = _opening_offset(wall, overlap_start, overlap_end, opening_width, data.get("position", "center"))
         openings.append(
             WallOpening(
                 id=data.get("id", f"{a_id}_{b_id}_{kind}_{index}"),

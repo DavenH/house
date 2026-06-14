@@ -265,7 +265,6 @@ def render_wall_plan_svg(
     total_height_ft = sum(box.h for box in level_boxes.values()) + max(0, len(level_boxes) - 1) * 8
     width = int((max_width_ft + padding * 2) * scale)
     height = int((total_height_ft + padding * 2) * scale)
-    exterior_stroke = EXTERIOR_WALL_THICKNESS_FT * scale
     interior_stroke = INTERIOR_WALL_STROKE_FT * scale
     exterior_opening_mask_stroke = (EXTERIOR_WALL_THICKNESS_FT + 0.2) * scale
     interior_opening_mask_stroke = (INTERIOR_WALL_STROKE_FT + 0.15) * scale
@@ -274,24 +273,28 @@ def render_wall_plan_svg(
         f'viewBox="0 0 {width} {height}">',
         f'<rect x="0" y="0" width="{width}" height="{height}" fill="#fff" />',
         "<style>",
-        f".exterior{{stroke:#111;stroke-width:{exterior_stroke:.3f};stroke-linecap:butt;stroke-linejoin:miter;fill:none}}",
-        ".exterior-wall{fill:#111;stroke:none}",
-        ".floor-mask{fill:#fff;stroke:none}",
-        f".interior{{stroke:#111;stroke-width:{interior_stroke:.3f};stroke-linecap:square}}",
+        ".exterior-wall{fill:#333;stroke:none;fill-rule:evenodd}",
+        f".interior{{stroke:#555;stroke-width:{interior_stroke:.3f};stroke-linecap:square}}",
         ".feature{stroke:#555;stroke-width:1.4;stroke-linecap:square;fill:none}",
         ".guide{stroke:#777;stroke-width:1.2;stroke-dasharray:5 4;stroke-linecap:square}",
         ".opening-mask{stroke:#fff;stroke-linecap:butt}",
         f".exterior-opening-mask{{stroke-width:{exterior_opening_mask_stroke:.3f}}}",
         f".interior-opening-mask{{stroke-width:{interior_opening_mask_stroke:.3f}}}",
+        ".opening-hit-target{stroke:transparent;stroke-width:18;fill:none;stroke-linecap:square}",
         ".window{stroke:#45718a;stroke-width:1.4;stroke-linecap:square}",
         ".door{stroke:#666;stroke-width:1.4;stroke-dasharray:3 2;fill:none;stroke-linecap:square}",
         ".arch{stroke:#555;stroke-width:1.4;stroke-dasharray:5 3;fill:none;stroke-linecap:square}",
         ".zone{stroke:#777;stroke-width:1.2;stroke-dasharray:5 4;fill:none}",
+        ".space-select-target{fill:transparent;stroke:none;pointer-events:all;cursor:pointer}",
         ".fixture{stroke:#444;stroke-width:1.4;fill:#f7f7f7}",
         ".clearance{stroke:#999;stroke-width:.8;stroke-dasharray:3 3;fill:none}",
-        ".label{font:18px Arial,Helvetica,sans-serif;fill:#111;text-anchor:middle;dominant-baseline:middle}",
-        ".feature-label{font:10px Arial,Helvetica,sans-serif;fill:#111;text-anchor:middle;dominant-baseline:middle}",
-        ".title{font:bold 21px Arial,Helvetica,sans-serif;fill:#111;letter-spacing:.5px}",
+        ".wall-select-target{stroke:transparent;stroke-width:12;fill:none;stroke-linecap:square;cursor:pointer}",
+        ".wall-grip-target{stroke:transparent;stroke-width:18;fill:none;stroke-linecap:square}",
+        ".wall-grip-dot{fill:#fff;stroke:#111;stroke-width:.8;pointer-events:none}",
+        ".label{font:18px Arial,Helvetica,sans-serif;fill:#111;text-anchor:middle;dominant-baseline:middle;-webkit-user-select:none;-moz-user-select:none;user-select:none;pointer-events:none}",
+        ".feature-label{font:10px Arial,Helvetica,sans-serif;fill:#111;text-anchor:middle;dominant-baseline:middle;-webkit-user-select:none;-moz-user-select:none;user-select:none;pointer-events:none}",
+        ".title{font:bold 21px Arial,Helvetica,sans-serif;fill:#111;letter-spacing:.5px;-webkit-user-select:none;-moz-user-select:none;user-select:none;pointer-events:none}",
+        "text,tspan{pointer-events:none;-webkit-user-select:none;-moz-user-select:none;user-select:none}",
         "</style>",
     ]
     y_cursor = padding
@@ -299,25 +302,30 @@ def render_wall_plan_svg(
         level_box = level_boxes[level_id]
         x_offset = (padding - level_box.x) * scale
         y_offset = (y_cursor - level_box.y) * scale
-        parts.append(f'<g id="{escape(level_id)}" transform="translate({x_offset:.3f} {y_offset:.3f})">')
-        parts.extend(_render_exterior_wall_paths(level, scale))
+        parts.append(
+            f'<g id="{escape(level_id)}" data-fp-kind="level" data-fp-level="{escape(level_id)}" '
+            f'data-fp-id="{escape(level_id)}" transform="translate({x_offset:.3f} {y_offset:.3f})">'
+        )
         for zone in level.zones:
-            parts.append(
-                f'<rect class="floor-mask" x="{zone.rect.x * scale:.3f}" y="{zone.rect.y * scale:.3f}" '
-                f'width="{zone.rect.w * scale:.3f}" height="{zone.rect.h * scale:.3f}" />'
-            )
+            parts.append(_render_space_select_target(zone, level.id, scale))
+        parts.extend(_render_exterior_wall_solids(level, scale))
+        openings_by_wall: dict[str, list[WallOpening]] = {}
+        for opening in level.openings:
+            openings_by_wall.setdefault(opening.wall, []).append(opening)
         for wall in level.walls:
             if wall.kind != "exterior":
                 parts.append(_render_wall_svg(wall, scale))
+            parts.append(_render_wall_hit_svg(wall, level.id, scale, openings_by_wall.get(wall.id, [])))
         wall_by_id = {wall.id: wall for wall in level.walls}
         for opening in level.openings:
             wall = wall_by_id[opening.wall]
-            parts.extend(_render_opening(opening, wall, scale))
+            parts.extend(_render_opening(opening, wall, level.id, scale))
         for zone in level.zones:
             if not zone.visible:
                 continue
             parts.append(
-                f'<rect class="zone" x="{zone.rect.x * scale:.3f}" y="{zone.rect.y * scale:.3f}" '
+                f'<rect class="zone" data-fp-kind="space" data-fp-level="{escape(level.id)}" '
+                f'data-fp-id="{escape(zone.id)}" x="{zone.rect.x * scale:.3f}" y="{zone.rect.y * scale:.3f}" '
                 f'width="{zone.rect.w * scale:.3f}" height="{zone.rect.h * scale:.3f}" />'
             )
         for feature in level.features:
@@ -326,17 +334,22 @@ def render_wall_plan_svg(
             if clearance:
                 clear_box = feature_box.padded(clearance)
                 parts.append(
-                    f'<rect class="clearance" x="{clear_box.x * scale:.3f}" y="{clear_box.y * scale:.3f}" '
+                    f'<rect class="clearance" data-fp-kind="feature-clearance" data-fp-level="{escape(level.id)}" '
+                    f'data-fp-id="{escape(feature.id)}" x="{clear_box.x * scale:.3f}" y="{clear_box.y * scale:.3f}" '
                     f'width="{clear_box.w * scale:.3f}" height="{clear_box.h * scale:.3f}" />'
                 )
             parts.append(
-                f'<rect class="fixture" x="{feature_box.x * scale:.3f}" y="{feature_box.y * scale:.3f}" '
+                f'<rect class="fixture" data-fp-kind="feature" data-fp-level="{escape(level.id)}" '
+                f'data-fp-id="{escape(feature.id)}" x="{feature_box.x * scale:.3f}" y="{feature_box.y * scale:.3f}" '
                 f'width="{feature_box.w * scale:.3f}" height="{feature_box.h * scale:.3f}" />'
             )
             if feature.label:
                 label_y = (feature_box.top - 0.35) * scale
                 parts.append(
-                    f'<text class="feature-label" x="{feature_box.cx * scale:.3f}" y="{label_y:.3f}">'
+                    f'<text class="feature-label" data-fp-kind="feature" data-fp-level="{escape(level.id)}" '
+                    f'data-fp-id="{escape(feature.id)}" pointer-events="none" unselectable="on" '
+                    f'style="-webkit-user-select:none;-moz-user-select:none;user-select:none" '
+                    f'x="{feature_box.cx * scale:.3f}" y="{label_y:.3f}">'
                     f"{escape(feature.label)}</text>"
                 )
         for area in level.areas:
@@ -351,11 +364,14 @@ def render_wall_plan_svg(
                 if area.angle:
                     transform = f' transform="rotate({area.angle:.1f} {x:.3f} {y:.3f})"'
                 parts.append(
-                    f'<text class="label" style="font-size:{font_size:.1f}px" x="{x:.3f}" '
+                    f'<text class="label" pointer-events="none" unselectable="on" '
+                    f'style="font-size:{font_size:.1f}px;-webkit-user-select:none;-moz-user-select:none;user-select:none" x="{x:.3f}" '
                     f'y="{y:.3f}"{transform}>{escape(line)}</text>'
                 )
         parts.append(
-            f'<text class="title" x="{level_box.x * scale:.3f}" y="{(level_box.y + 1.5) * scale:.3f}">'
+            f'<text class="title" pointer-events="none" unselectable="on" '
+            f'style="-webkit-user-select:none;-moz-user-select:none;user-select:none" '
+            f'x="{level_box.x * scale:.3f}" y="{(level_box.y + 1.5) * scale:.3f}">'
             f"{escape((level.title or level.id).upper())}</text>"
         )
         parts.append("</g>")
@@ -366,6 +382,14 @@ def render_wall_plan_svg(
         Path(path).parent.mkdir(parents=True, exist_ok=True)
         Path(path).write_text(svg)
     return svg
+
+
+def _render_space_select_target(zone: Zone, level_id: str, scale: float) -> str:
+    return (
+        f'<rect class="space-select-target" data-fp-kind="space" data-fp-level="{escape(level_id)}" '
+        f'data-fp-id="{escape(zone.id)}" x="{zone.rect.x * scale:.3f}" y="{zone.rect.y * scale:.3f}" '
+        f'width="{zone.rect.w * scale:.3f}" height="{zone.rect.h * scale:.3f}" />'
+    )
 
 
 def _validate_level(level: WallLevel) -> list[str]:
@@ -502,26 +526,40 @@ def _level_bbox(level: WallLevel) -> Rect:
     return bbox_union(boxes)
 
 
-def _render_opening(opening: WallOpening, wall: WallSegment, scale: float) -> list[str]:
-    start = wall.point_at(opening.offset)
-    end = wall.point_at(opening.offset + opening.width)
+def _render_opening(opening: WallOpening, wall: WallSegment, level_id: str, scale: float) -> list[str]:
+    mark_wall = _exterior_opening_mark_segment(wall) if wall.kind == "exterior" else wall
+    mask_wall = mark_wall if wall.kind == "exterior" else wall
+    start = mask_wall.point_at(opening.offset)
+    end = mask_wall.point_at(opening.offset + opening.width)
     mask_class = "exterior-opening-mask" if wall.kind == "exterior" else "interior-opening-mask"
+    orientation = "horizontal" if wall.direction in {"E", "W"} else "vertical"
+    editor_attrs = (
+        f'data-fp-kind="opening" data-fp-level="{escape(level_id)}" data-fp-id="{escape(opening.id)}" '
+        f'data-fp-wall="{escape(wall.id)}" data-fp-direction="{wall.direction}" '
+        f'data-fp-orientation="{orientation}" data-fp-offset="{opening.offset:.3f}" '
+        f'data-fp-width="{opening.width:.3f}" data-fp-wall-length="{wall.length:.3f}"'
+    )
     parts = [
-        f'<line class="opening-mask {mask_class}" x1="{start.x * scale:.3f}" y1="{start.y * scale:.3f}" '
+        f'<line class="opening-mask {mask_class}" {editor_attrs} '
+        f'x1="{start.x * scale:.3f}" y1="{start.y * scale:.3f}" '
         f'x2="{end.x * scale:.3f}" y2="{end.y * scale:.3f}" />'
     ]
-    mark_wall = _exterior_opening_mark_segment(wall) if wall.kind == "exterior" else wall
     mark_start = mark_wall.point_at(opening.offset)
     mark_end = mark_wall.point_at(opening.offset + opening.width)
     if opening.kind == "open":
         return parts
     if opening.kind == "arch":
-        parts.extend(_render_arch(mark_start, mark_end, wall.direction, scale))
+        parts.extend(_render_arch(mark_start, mark_end, wall.direction, scale, editor_attrs))
         return parts
     if opening.kind == "window":
-        parts.extend(_render_window(mark_start, mark_end, wall.direction, scale))
+        parts.extend(_render_window(mark_start, mark_end, wall.direction, scale, editor_attrs))
     else:
-        parts.extend(_render_door(mark_start, mark_end, wall.direction, opening.swing, scale))
+        parts.extend(_render_door(mark_start, mark_end, wall.direction, opening.swing, scale, editor_attrs))
+    parts.append(
+        f'<line class="opening-hit-target" {editor_attrs} '
+        f'x1="{mark_start.x * scale:.3f}" y1="{mark_start.y * scale:.3f}" '
+        f'x2="{mark_end.x * scale:.3f}" y2="{mark_end.y * scale:.3f}" />'
+    )
     return parts
 
 
@@ -560,34 +598,174 @@ def _render_wall_svg(wall: WallSegment, scale: float) -> str:
         return (
             f'<line class="{escape(wall.kind)}" x1="{wall.at.x * scale:.3f}" '
             f'y1="{wall.at.y * scale:.3f}" x2="{end.x * scale:.3f}" '
-            f'y2="{end.y * scale:.3f}" />'
+            f'y2="{end.y * scale:.3f}" data-fp-kind="wall-select" data-fp-id="{escape(wall.id)}" />'
         )
-    nx, ny = _normal(wall.direction)
-    offset = -EXTERIOR_WALL_THICKNESS_FT
-    start = wall.at
-    end = wall.end
-    points = (
-        f"{start.x * scale:.3f},{start.y * scale:.3f} "
-        f"{end.x * scale:.3f},{end.y * scale:.3f} "
-        f"{(end.x + nx * offset) * scale:.3f},{(end.y + ny * offset) * scale:.3f} "
-        f"{(start.x + nx * offset) * scale:.3f},{(start.y + ny * offset) * scale:.3f}"
+    raise ValueError("_render_wall_svg does not render exterior walls")
+
+
+def _render_wall_hit_svg(wall: WallSegment, level_id: str, scale: float, openings: list[WallOpening]) -> str:
+    render_wall = _render_wall_segment(wall)
+    end = render_wall.end
+    orientation = "horizontal" if wall.direction in {"E", "W"} else "vertical"
+    grip_span = _wall_grip_span(wall, openings)
+    grip_length = grip_span[1] - grip_span[0]
+    grip_start = render_wall.point_at(grip_span[0])
+    grip_end = render_wall.point_at(grip_span[1])
+    model_end = wall.end
+    model_attrs = (
+        f'data-fp-model-x1="{wall.at.x * scale:.3f}" data-fp-model-y1="{wall.at.y * scale:.3f}" '
+        f'data-fp-model-x2="{model_end.x * scale:.3f}" data-fp-model-y2="{model_end.y * scale:.3f}"'
     )
-    return f'<polygon class="exterior-wall" points="{points}" />'
+    parts = [
+        f'<line class="wall-select-target" x1="{render_wall.at.x * scale:.3f}" y1="{render_wall.at.y * scale:.3f}" '
+        f'x2="{end.x * scale:.3f}" y2="{end.y * scale:.3f}" data-fp-kind="wall-select" '
+        f'data-fp-level="{escape(level_id)}" data-fp-id="{escape(wall.id)}" '
+        f'data-fp-orientation="{orientation}" {model_attrs} />',
+        f'<line class="wall-grip-target" x1="{grip_start.x * scale:.3f}" y1="{grip_start.y * scale:.3f}" '
+        f'x2="{grip_end.x * scale:.3f}" y2="{grip_end.y * scale:.3f}" data-fp-kind="wall-grip" '
+        f'data-fp-level="{escape(level_id)}" data-fp-id="{escape(wall.id)}" '
+        f'data-fp-orientation="{orientation}" {model_attrs} />',
+    ]
+    parts.extend(_render_wall_grip_dots(render_wall, scale, grip_span))
+    return "".join(parts)
 
 
-def _render_exterior_wall_paths(level: WallLevel, scale: float) -> list[str]:
+def _wall_grip_span(wall: WallSegment, openings: list[WallOpening]) -> tuple[float, float]:
+    preferred_length = min(wall.length, 2.25)
+    clear_spans = _clear_wall_spans(wall, openings)
+    if not clear_spans:
+        center = wall.length / 2
+        half = preferred_length / 2
+        return (max(0, center - half), min(wall.length, center + half))
+    center = wall.length / 2
+    span = max(clear_spans, key=lambda item: (item[1] - item[0], -abs(((item[0] + item[1]) / 2) - center)))
+    available = span[1] - span[0]
+    length = min(preferred_length, available)
+    span_center = (span[0] + span[1]) / 2
+    start = max(span[0], min(span_center - length / 2, span[1] - length))
+    return (start, start + length)
+
+
+def _clear_wall_spans(wall: WallSegment, openings: list[WallOpening]) -> list[tuple[float, float]]:
+    blocked = sorted(
+        (max(0, opening.offset), min(wall.length, opening.offset + opening.width))
+        for opening in openings
+        if opening.offset < wall.length and opening.offset + opening.width > 0
+    )
+    spans = []
+    cursor = 0.0
+    min_span = 0.35
+    for start, end in blocked:
+        if start - cursor >= min_span:
+            spans.append((cursor, start))
+        cursor = max(cursor, end)
+    if wall.length - cursor >= min_span:
+        spans.append((cursor, wall.length))
+    return spans
+
+
+def _render_wall_grip_dots(wall: WallSegment, scale: float, grip_span: tuple[float, float]) -> list[str]:
+    count = 3
+    span_length = grip_span[1] - grip_span[0]
+    spacing = min(0.35, span_length / (count + 1))
+    center = (grip_span[0] + grip_span[1]) / 2
+    radius = 0.12 * scale
+    dots = []
+    for index in range(count):
+        offset = center + (index - (count - 1) / 2) * spacing
+        point = wall.point_at(max(0, min(wall.length, offset)))
+        dots.append(
+            f'<circle class="wall-grip-dot" cx="{point.x * scale:.3f}" cy="{point.y * scale:.3f}" '
+            f'r="{radius:.3f}" />'
+        )
+    return dots
+
+
+def _render_exterior_wall_solids(level: WallLevel, scale: float) -> list[str]:
     paths = []
     for points in _connected_wall_paths([wall for wall in level.walls if wall.kind == "exterior"]):
-        if len(points) < 2:
+        if len(points) < 4:
             continue
-        command = " ".join(
-            ("M" if index == 0 else "L") + f" {point.x * scale:.3f} {point.y * scale:.3f}"
-            for index, point in enumerate(points)
-        )
-        if points[0] == points[-1]:
-            command += " Z"
-        paths.append(f'<path class="exterior" d="{command}" />')
+        if not _same_point(points[0], points[-1]):
+            continue
+        outer = _offset_closed_orthogonal_loop(points, EXTERIOR_WALL_THICKNESS_FT)
+        if not outer:
+            continue
+        command = _path_command(points, scale) + " " + _path_command(list(reversed(outer)), scale)
+        paths.append(f'<path class="exterior-wall" d="{command}" />')
     return paths
+
+
+def _path_command(points: list[Point], scale: float) -> str:
+    command = " ".join(
+        ("M" if index == 0 else "L") + f" {point.x * scale:.3f} {point.y * scale:.3f}"
+        for index, point in enumerate(points)
+    )
+    return f"{command} Z"
+
+
+def _offset_closed_orthogonal_loop(points: list[Point], distance: float) -> list[Point]:
+    clean_points = points[:-1]
+    if len(clean_points) < 3:
+        return []
+    clockwise = _signed_area(clean_points) > 0
+    offset_lines = []
+    count = len(clean_points)
+    for index, start in enumerate(clean_points):
+        end = clean_points[(index + 1) % count]
+        direction = _segment_direction(start, end)
+        nx, ny = _normal(direction)
+        if clockwise:
+            nx, ny = -nx, -ny
+        offset_lines.append(
+            (
+                Point(start.x + nx * distance, start.y + ny * distance),
+                Point(end.x + nx * distance, end.y + ny * distance),
+            )
+        )
+    outer = []
+    for index in range(count):
+        previous = offset_lines[index - 1]
+        current = offset_lines[index]
+        outer.append(_line_intersection(previous, current))
+    outer.append(outer[0])
+    return outer
+
+
+def _segment_direction(start: Point, end: Point) -> Direction:
+    if abs(start.x - end.x) <= EPSILON:
+        return "S" if end.y > start.y else "N"
+    if abs(start.y - end.y) <= EPSILON:
+        return "E" if end.x > start.x else "W"
+    raise ValueError(f"Wall segment must be axis-aligned: {start} -> {end}")
+
+
+def _signed_area(points: list[Point]) -> float:
+    area = 0.0
+    for index, point in enumerate(points):
+        next_point = points[(index + 1) % len(points)]
+        area += point.x * next_point.y - next_point.x * point.y
+    return area / 2
+
+
+def _line_intersection(
+    first: tuple[Point, Point],
+    second: tuple[Point, Point],
+) -> Point:
+    (a, b), (c, d) = first, second
+    if abs(a.x - b.x) <= EPSILON:
+        x = a.x
+        y = c.y if abs(c.y - d.y) <= EPSILON else a.y
+    elif abs(c.x - d.x) <= EPSILON:
+        x = c.x
+        y = a.y if abs(a.y - b.y) <= EPSILON else c.y
+    elif abs(a.y - b.y) <= EPSILON:
+        y = a.y
+        x = c.x if abs(c.x - d.x) <= EPSILON else a.x
+    else:
+        y = c.y
+        x = a.x if abs(a.x - b.x) <= EPSILON else c.x
+    return Point(x, y)
 
 
 def _connected_wall_paths(walls: list[WallSegment]) -> list[list[Point]]:
@@ -805,20 +983,22 @@ def _wall_is_fully_open(wall: WallSegment, openings: list[WallOpening]) -> bool:
     )
 
 
-def _render_window(start: Point, end: Point, direction: Direction, scale: float) -> list[str]:
+def _render_window(
+    start: Point, end: Point, direction: Direction, scale: float, editor_attrs: str = ""
+) -> list[str]:
     nx, ny = _normal(direction)
     inset = 0.16
     parts = []
     for side in (-inset, inset):
         parts.append(
-            f'<line class="window" x1="{(start.x + nx * side) * scale:.3f}" '
+            f'<line class="window" {editor_attrs} x1="{(start.x + nx * side) * scale:.3f}" '
             f'y1="{(start.y + ny * side) * scale:.3f}" '
             f'x2="{(end.x + nx * side) * scale:.3f}" y2="{(end.y + ny * side) * scale:.3f}" />'
         )
     return parts
 
 
-def _render_arch(start: Point, end: Point, direction: Direction, scale: float) -> list[str]:
+def _render_arch(start: Point, end: Point, direction: Direction, scale: float, editor_attrs: str = "") -> list[str]:
     normal_x, normal_y = _normal(direction)
     tick = 0.32
     depth = 0.55
@@ -831,13 +1011,13 @@ def _render_arch(start: Point, end: Point, direction: Direction, scale: float) -
     control_x = mid_x + normal_x * depth
     control_y = mid_y + normal_y * depth
     return [
-        f'<line class="arch" x1="{(start.x - normal_x * tick) * scale:.3f}" '
+        f'<line class="arch" {editor_attrs} x1="{(start.x - normal_x * tick) * scale:.3f}" '
         f'y1="{(start.y - normal_y * tick) * scale:.3f}" '
         f'x2="{(start.x + normal_x * tick) * scale:.3f}" y2="{(start.y + normal_y * tick) * scale:.3f}" />',
-        f'<line class="arch" x1="{(end.x - normal_x * tick) * scale:.3f}" '
+        f'<line class="arch" {editor_attrs} x1="{(end.x - normal_x * tick) * scale:.3f}" '
         f'y1="{(end.y - normal_y * tick) * scale:.3f}" '
         f'x2="{(end.x + normal_x * tick) * scale:.3f}" y2="{(end.y + normal_y * tick) * scale:.3f}" />',
-        f'<path class="arch" d="M {start.x * scale:.3f} {start.y * scale:.3f} '
+        f'<path class="arch" {editor_attrs} d="M {start.x * scale:.3f} {start.y * scale:.3f} '
         f'L {spring_start.x * scale:.3f} {spring_start.y * scale:.3f} '
         f'Q {control_x * scale:.3f} {control_y * scale:.3f} '
         f'{spring_end.x * scale:.3f} {spring_end.y * scale:.3f} '
@@ -845,17 +1025,19 @@ def _render_arch(start: Point, end: Point, direction: Direction, scale: float) -
     ]
 
 
-def _render_door(start: Point, end: Point, direction: Direction, swing: str, scale: float) -> list[str]:
+def _render_door(
+    start: Point, end: Point, direction: Direction, swing: str, scale: float, editor_attrs: str = ""
+) -> list[str]:
     normal_x, normal_y = _normal(direction)
     del swing
     tick = 0.28
     return [
-        f'<line class="door" x1="{start.x * scale:.3f}" y1="{start.y * scale:.3f}" '
+        f'<line class="door" {editor_attrs} x1="{start.x * scale:.3f}" y1="{start.y * scale:.3f}" '
         f'x2="{end.x * scale:.3f}" y2="{end.y * scale:.3f}" />',
-        f'<line class="door" x1="{(start.x - normal_x * tick) * scale:.3f}" '
+        f'<line class="door" {editor_attrs} x1="{(start.x - normal_x * tick) * scale:.3f}" '
         f'y1="{(start.y - normal_y * tick) * scale:.3f}" '
         f'x2="{(start.x + normal_x * tick) * scale:.3f}" y2="{(start.y + normal_y * tick) * scale:.3f}" />',
-        f'<line class="door" x1="{(end.x - normal_x * tick) * scale:.3f}" '
+        f'<line class="door" {editor_attrs} x1="{(end.x - normal_x * tick) * scale:.3f}" '
         f'y1="{(end.y - normal_y * tick) * scale:.3f}" '
         f'x2="{(end.x + normal_x * tick) * scale:.3f}" y2="{(end.y + normal_y * tick) * scale:.3f}" />',
     ]
