@@ -164,6 +164,39 @@ Use `arch` for a doorless opening that should still read as architecturally defi
 
 Use `position` when privacy/pathing suggests a non-centered door. Let the compiler calculate exact offsets.
 
+## Stairs
+
+Use top-level `stairs` for cross-level staircases. A stair references the semantic stair spaces on both levels, generates the lower/upper access openings, solves the riser/tread layout, and renders realistic runs with flat landings and tread lines.
+
+```yaml
+story: {floor_to_floor: 10}
+stairs:
+  main_stair:
+    spaces: {lower: L1.stair, upper: L2.stair}
+    width: 3
+    lower_entry: {from: hall, side: south, position: east, kind: arch, width: 3.5}
+    upper_exit: {to: upper_landing, side: south, position: west, kind: arch, width: 3.5}
+    layout: {mode: solve, hug: perimeter, preferred_shape: u, turn_landings: flat, winders: false}
+    steps:
+      target: {rise_in: 7, run_in: 13}
+      limits: {rise_in: [6.5, 8], run_in: [10, 13]}
+      min_treads_per_run: 2
+```
+
+Fields:
+
+- `spaces.lower` and `spaces.upper`: level-qualified stair spaces, such as `L1.stair`.
+- `floor_to_floor`: optional per-stair override; otherwise uses top-level `story.floor_to_floor`.
+- `width`: stair width in feet, defaulting by convention to 3 ft.
+- `lower_entry.from`: lower-level room that enters the stair.
+- `upper_exit.to`: upper-level room that exits the stair.
+- `side` and `position`: semantic endpoint placement on the stair room perimeter.
+- `steps.target`: preferred rise/run in inches.
+- `steps.limits`: acceptable rise/run ranges in inches.
+- `steps.min_treads_per_run`: avoids awkward one-step runs in U-shaped solutions.
+
+The current solver enumerates perimeter-hugging paths with flat corner landings. Winders are reserved for a future fallback and are not emitted unless the solver is extended.
+
 ## Exterior Openings
 
 Use `openings` for exterior doors, pinned windows, or other openings that are not just room-to-room access.

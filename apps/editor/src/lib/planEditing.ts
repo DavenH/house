@@ -9,7 +9,7 @@ export function normalizeSvgKind(kind: string): SelectionKind {
   if (kind === "wall-select" || kind === "wall-grip") {
     return "wall";
   }
-  if (["space", "feature", "opening", "wall", "level"].includes(kind)) {
+  if (["space", "feature", "opening", "wall", "stair", "level"].includes(kind)) {
     return kind as SelectionKind;
   }
   return "";
@@ -34,6 +34,9 @@ export function resolveSelection(data: AnyRecord, selected: Selection): AnyRecor
   if (selected.kind === "connection") {
     const index = Number(selected.index ?? selected.id);
     return selectedLevel.connections?.[index] ?? null;
+  }
+  if (selected.kind === "stair") {
+    return ((data.stairs as AnyRecord | undefined) ?? {})[selected.id] ?? null;
   }
   return { id: selected.id };
 }
@@ -226,6 +229,8 @@ export function deleteSelection(data: AnyRecord, selected: Selection): Selection
     if (Array.isArray(selectedLevel.connections) && index >= 0) {
       selectedLevel.connections.splice(index, 1);
     }
+  } else if (selected.kind === "stair") {
+    delete (data.stairs as AnyRecord | undefined)?.[selected.id];
   }
   return { kind: "", level: "", id: "" };
 }

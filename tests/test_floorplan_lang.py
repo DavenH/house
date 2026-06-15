@@ -231,6 +231,101 @@ def test_intent_plan_clamps_explicit_open_wall_opening_to_wall_length() -> None:
     assert not plan.validate(strict_features=False)
 
 
+def test_intent_plan_compiles_semantic_stair_solver_and_endpoint_openings() -> None:
+    plan = intent_plan_from_dict(
+        {
+            "type": "intent_plan",
+            "plan": "semantic-stair-test",
+            "story": {"floor_to_floor": 10},
+            "levels": {
+                "L1": {
+                    "derive_partitions": True,
+                    "spaces": {
+                        "stair": {"rect": [0, 0, 10, 10]},
+                        "hall": {"rect": [0, 10, 10, 5]},
+                    },
+                },
+                "L2": {
+                    "derive_partitions": True,
+                    "spaces": {
+                        "stair": {"rect": [0, 0, 10, 10]},
+                        "upper_landing": {"rect": [0, 10, 10, 5]},
+                    },
+                },
+            },
+            "stairs": {
+                "main_stair": {
+                    "spaces": {"lower": "L1.stair", "upper": "L2.stair"},
+                    "width": 3,
+                    "lower_entry": {"from": "hall", "side": "south", "position": "east", "kind": "arch", "width": 3.5},
+                    "upper_exit": {"to": "upper_landing", "side": "south", "position": "west", "kind": "arch", "width": 3.5},
+                    "steps": {
+                        "target": {"rise_in": 7, "run_in": 13},
+                        "limits": {"rise_in": [6.5, 8], "run_in": [10, 13]},
+                        "min_treads_per_run": 2,
+                    },
+                }
+            },
+        }
+    )
+
+    stair = plan.stairs[0]
+
+    assert stair.risers == 16
+    assert stair.rise * 12 == pytest.approx(7.5)
+    assert stair.tread_depth * 12 == pytest.approx(13)
+    assert [run.treads for run in stair.runs] == [6, 3, 6]
+    assert len(stair.landings) == 2
+    assert plan.levels["L1"].openings[0].id == "main_stair_lower_entry"
+    assert plan.levels["L1"].openings[0].wall == "stair__hall_wall"
+    assert plan.levels["L1"].openings[0].offset == pytest.approx(6)
+    assert plan.levels["L2"].openings[0].id == "main_stair_upper_exit"
+    assert plan.levels["L2"].openings[0].offset == pytest.approx(0.5)
+    assert ("hall", "stair") in plan.levels["L1"].access
+    assert ("stair", "upper_landing") in plan.levels["L2"].access
+    assert not plan.validate()
+
+
+def test_wall_plan_renders_resolved_stairs_with_treads() -> None:
+    plan = wall_plan_from_dict(
+        {
+            "type": "wall_plan",
+            "plan": "stair-render-test",
+            "levels": {
+                "L1": {"zones": {"stair": {"rect": [0, 0, 10, 10]}}},
+                "L2": {"zones": {"stair": {"rect": [0, 0, 10, 10]}}},
+            },
+            "stairs": {
+                "main": {
+                    "lower_level": "L1",
+                    "upper_level": "L2",
+                    "lower_space": "stair",
+                    "upper_space": "stair",
+                    "width": 3,
+                    "floor_to_floor": 10,
+                    "risers": 16,
+                    "rise": 0.625,
+                    "tread_depth": 1,
+                    "runs": [{"rect": [7, 3, 3, 7], "dir": "N", "treads": 6}],
+                    "landings": [{"rect": [7, 0, 3, 3]}],
+                }
+            },
+        }
+    )
+
+    svg = render_wall_plan_svg(plan)
+
+    assert 'class="stair-run"' in svg
+    assert 'class="stair-run-bg"' in svg
+    assert 'class="stair-landing"' in svg
+    assert 'class="stair-tread"' in svg
+    assert 'class="stair-note"' in svg
+    assert 'class="stair-select-target" data-fp-kind="stair"' in svg
+    assert '<rect class="stair-run" x="112.000" y="64.000" width="48.000" height="96.000" />' in svg
+    assert "UP 16R" not in svg
+    assert "DN 16R" not in svg
+
+
 def test_intent_room_labels_include_room_dimensions() -> None:
     plan = intent_plan_from_dict(
         {
@@ -662,6 +757,28 @@ def test_wall_plan_offsets_exterior_walls_outward() -> None:
     assert 'class="interior" x="0.000" y="29.600" width="160.000" height="4.800"' in svg
 
 
+def test_wall_plan_grid_stops_at_exterior_perimeter() -> None:
+    plan = wall_plan_from_dict(
+        {
+            "type": "wall_plan",
+            "plan": "grid-clip-test",
+            "levels": {
+                "L1": {
+                    "perimeters": {"box": {"start": [0, 0], "walk": [["E", 10], ["S", 8], ["W", 10], ["N", 8]]}},
+                }
+            },
+        }
+    )
+
+    svg = render_wall_plan_svg(plan)
+
+    assert '<line class="grid-1ft" x1="80.000" y1="-48.000" x2="80.000" y2="192.000" />' not in svg
+    assert '<line class="grid-1ft" x1="80.000" y1="-48.000" x2="80.000" y2="-16.000" />' in svg
+    assert '<line class="grid-1ft" x1="80.000" y1="144.000" x2="80.000" y2="192.000" />' in svg
+    assert '<line class="grid-1ft" x1="-48.000" y1="64.000" x2="-16.000" y2="64.000" />' in svg
+    assert '<line class="grid-1ft" x1="176.000" y1="64.000" x2="224.000" y2="64.000" />' in svg
+
+
 def test_wall_plan_renders_doors_without_swing_arcs() -> None:
     plan = wall_plan_from_dict(
         {
@@ -872,6 +989,32 @@ def test_wall_plan_dimensions_keep_jog_ticks_on_local_side() -> None:
     assert '<text class="dimension-label" x="216.000" y="-41.600">5\'</text>' in svg
     assert '<text class="dimension-label" x="120.000" y="201.600">17\'</text>' in svg
     assert '<line class="dimension" x1="-16.000" y1="194.400" x2="256.000" y2="194.400" />' in svg
+
+
+def test_wall_plan_renders_compass_with_sun_arcs() -> None:
+    plan = wall_plan_from_dict(
+        {
+            "type": "wall_plan",
+            "plan": "compass-test",
+            "compass": {"up_bearing": 115, "latitude": 45.96},
+            "levels": {
+                "L1": {
+                    "perimeters": {"box": {"start": [0, 0], "walk": [["E", 10], ["S", 8], ["W", 10], ["N", 8]]}},
+                },
+                "L2": {
+                    "perimeters": {"box": {"start": [0, 0], "walk": [["E", 10], ["S", 8], ["W", 10], ["N", 8]]}},
+                },
+            },
+        }
+    )
+
+    svg = render_wall_plan_svg(plan)
+
+    assert '<g class="compass" aria-label="Compass">' in svg
+    assert 'class="sun-arc summer"' in svg
+    assert 'class="sun-arc winter"' in svg
+    assert ">SUM</text>" not in svg
+    assert ">WIN</text>" not in svg
 
 
 def test_wall_plan_validates_feature_wall_clearance() -> None:

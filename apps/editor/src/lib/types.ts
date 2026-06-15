@@ -1,6 +1,6 @@
 export type AnyRecord = Record<string, any>;
 
-export type SelectionKind = "space" | "feature" | "opening" | "connection" | "wall" | "level" | "";
+export type SelectionKind = "space" | "feature" | "opening" | "connection" | "wall" | "stair" | "level" | "";
 
 export type Selection = {
   kind: SelectionKind;

@@ -15,7 +15,6 @@
   export let connections: AnyRecord[] = [];
   export let selected: Selection = { kind: "", level: "", id: "" };
   export let selectPlan: (name: string) => void | Promise<void>;
-  export let renderCurrentYaml: () => void | Promise<void>;
   export let saveCurrentPlan: () => void | Promise<void>;
   export let addPaletteItem: (item: PaletteItem) => void;
   export let selectObject: (kind: SelectionKind, id: string, index?: number) => void;
@@ -55,7 +54,6 @@
       {/each}
     </select>
     <div class="actions">
-      <button type="button" on:click={() => renderCurrentYaml()}>Render</button>
       <button type="button" class="primary" disabled={!dirty} on:click={() => saveCurrentPlan()}>Save</button>
     </div>
   </section>

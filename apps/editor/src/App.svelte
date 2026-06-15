@@ -713,7 +713,6 @@
     {error}
     {svg}
     {selectPlan}
-    {renderCurrentYaml}
     {saveCurrentPlan}
     bind:canvasZoom
     bind:canvasElement

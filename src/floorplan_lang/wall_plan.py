@@ -4,13 +4,13 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from html import escape
-from math import cos, radians, sin
+from math import acos, cos, degrees, radians, sin
 from pathlib import Path
 from typing import Any, Literal
 
 import yaml
 
-from floorplan_lang.geometry import EPSILON, Point, Rect, bbox_union
+from floorplan_lang.geometry import EPSILON, Point, Poly, Rect, bbox_union
 
 Direction = Literal["N", "E", "S", "W"]
 
@@ -108,6 +108,30 @@ class WallOpening:
     swing: str = "in"
 
 
+@dataclass(frozen=True)
+class StairRun:
+    rect: Rect
+    direction: Direction
+    treads: int
+
+
+@dataclass(frozen=True)
+class Stair:
+    id: str
+    lower_level: str
+    upper_level: str
+    lower_space: str
+    upper_space: str
+    width: float
+    floor_to_floor: float
+    risers: int
+    rise: float
+    tread_depth: float
+    runs: list[StairRun] = field(default_factory=list)
+    landings: list[Rect] = field(default_factory=list)
+    warnings: list[str] = field(default_factory=list)
+
+
 @dataclass
 class WallLevel:
     id: str
@@ -130,6 +154,7 @@ class WallPlan:
     stacks: list[dict[str, Any]] = field(default_factory=list)
     alignments: list[dict[str, Any]] = field(default_factory=list)
     compass: dict[str, Any] = field(default_factory=dict)
+    stairs: list[Stair] = field(default_factory=list)
 
     def validate(self, *, strict_features: bool = True) -> list[str]:
         errors: list[str] = []
@@ -137,6 +162,7 @@ class WallPlan:
             errors.extend(_validate_level(level, strict_features=strict_features))
         errors.extend(_validate_named_constraints(self, self.stacks, "stack"))
         errors.extend(_validate_named_constraints(self, self.alignments, "alignment"))
+        errors.extend(_validate_stairs(self))
         return errors
 
     def require_valid(self, *, strict_features: bool = True) -> None:
@@ -255,7 +281,34 @@ def wall_plan_from_dict(data: dict[str, Any]) -> WallPlan:
             else:
                 level.access.append((edge[0], edge[1]))
         plan.levels[level_id] = level
+    for stair_id, stair_data in (data.get("stairs") or {}).items():
+        plan.stairs.append(_stair_from_dict(stair_id, stair_data))
     return plan
+
+
+def _stair_from_dict(stair_id: str, data: dict[str, Any]) -> Stair:
+    return Stair(
+        id=stair_id,
+        lower_level=data["lower_level"],
+        upper_level=data["upper_level"],
+        lower_space=data["lower_space"],
+        upper_space=data["upper_space"],
+        width=float(data.get("width", 3)),
+        floor_to_floor=float(data["floor_to_floor"]),
+        risers=int(data["risers"]),
+        rise=float(data["rise"]),
+        tread_depth=float(data["tread_depth"]),
+        runs=[
+            StairRun(
+                rect=_rect(run["rect"]),
+                direction=run["dir"],
+                treads=int(run["treads"]),
+            )
+            for run in data.get("runs") or []
+        ],
+        landings=[_rect(landing["rect"] if isinstance(landing, dict) else landing) for landing in data.get("landings") or []],
+        warnings=[str(warning) for warning in data.get("warnings") or []],
+    )
 
 
 def render_wall_plan_svg(
@@ -267,7 +320,7 @@ def render_wall_plan_svg(
     plan.require_valid(strict_features=False)
     scale = plan.scale
     level_boxes = {level_id: _level_bbox(level).padded(padding) for level_id, level in plan.levels.items()}
-    level_gap_ft = 5
+    level_gap_ft = 7.5
     total_width_ft = sum(box.w for box in level_boxes.values()) + max(0, len(level_boxes) - 1) * level_gap_ft
     max_height_ft = max(box.h for box in level_boxes.values())
     width = int((total_width_ft + padding * 2) * scale)
@@ -288,8 +341,27 @@ def render_wall_plan_svg(
         ".dimension{stroke:#68645f;stroke-width:.8;fill:none;pointer-events:none}",
         ".dimension-projection{stroke:#9a948d;stroke-width:.65;fill:none;pointer-events:none}",
         ".dimension-label{font:10px Arial,Helvetica,sans-serif;fill:#56514c;text-anchor:middle;dominant-baseline:middle;pointer-events:none;-webkit-user-select:none;-moz-user-select:none;user-select:none}",
-        ".compass-line{stroke:#333;stroke-width:1.4;fill:none;pointer-events:none}",
-        ".compass-label{font:bold 10px Arial,Helvetica,sans-serif;fill:#333;text-anchor:middle;dominant-baseline:middle;pointer-events:none;-webkit-user-select:none;-moz-user-select:none;user-select:none}",
+        ".compass-bg{fill:#fff;stroke:#c9c1b5;stroke-width:.8;opacity:.94;pointer-events:none}",
+        ".compass-ring{stroke:#605a52;stroke-width:.9;fill:none;pointer-events:none}",
+        ".compass-line{stroke:#333;stroke-width:1.2;fill:none;stroke-linecap:round;pointer-events:none}",
+        ".compass-center{fill:#333;pointer-events:none}",
+        ".compass-label{font:bold 9px Arial,Helvetica,sans-serif;fill:#333;text-anchor:middle;dominant-baseline:middle;pointer-events:none;-webkit-user-select:none;-moz-user-select:none;user-select:none}",
+        ".sun-arc{fill:none;stroke-width:1.4;stroke-linecap:round;stroke-linejoin:round;pointer-events:none}",
+        ".sun-arc.summer{stroke:#d2912f}",
+        ".sun-arc.winter{stroke:#7186a2}",
+        ".sun-dot{stroke:#fff;stroke-width:.8;pointer-events:none}",
+        ".sun-dot.summer{fill:#d2912f}",
+        ".sun-dot.winter{fill:#7186a2}",
+        ".stair-run{fill:#f8f6f1;stroke:#8c857b;stroke-width:.7;pointer-events:none}",
+        ".stair-run-bg{fill:#fbfaf6;stroke:none;pointer-events:none}",
+        ".stair-landing{fill:#fbfaf6;stroke:#8c857b;stroke-width:.7;pointer-events:none}",
+        ".stair-select-target{fill:transparent;stroke:transparent;stroke-width:.7;pointer-events:all}",
+        ".stair-tread{stroke:#6f6962;stroke-width:.65;pointer-events:none}",
+        ".stair-arrow{stroke:#5d5751;stroke-width:.75;fill:none;stroke-linecap:round;stroke-linejoin:round;pointer-events:none}",
+        ".stair-arrow-head{fill:#5d5751;pointer-events:none}",
+        ".stair-note-leader{stroke:#5d5751;stroke-width:.65;fill:none;stroke-linecap:round;stroke-linejoin:round;pointer-events:none}",
+        ".stair-note-dot{fill:#fff;stroke:#5d5751;stroke-width:.65;pointer-events:none}",
+        ".stair-note{font:8px Arial,Helvetica,sans-serif;fill:#4d4741;text-anchor:start;dominant-baseline:middle;pointer-events:none;-webkit-user-select:none;-moz-user-select:none;user-select:none}",
         ".interior{fill:#555;stroke:none}",
         ".feature{stroke:#555;stroke-width:1.4;stroke-linecap:square;fill:none}",
         ".guide{stroke:#777;stroke-width:1.2;stroke-dasharray:5 4;stroke-linecap:square}",
@@ -311,11 +383,11 @@ def render_wall_plan_svg(
         ".label{font:18px Arial,Helvetica,sans-serif;fill:#111;text-anchor:middle;dominant-baseline:middle;-webkit-user-select:none;-moz-user-select:none;user-select:none;pointer-events:none}",
         ".label-dimension{font:9px Arial,Helvetica,sans-serif;fill:#5f5750;text-anchor:middle;dominant-baseline:middle;-webkit-user-select:none;-moz-user-select:none;user-select:none;pointer-events:none}",
         ".feature-label{font:10px Arial,Helvetica,sans-serif;fill:#111;text-anchor:middle;dominant-baseline:middle;-webkit-user-select:none;-moz-user-select:none;user-select:none;pointer-events:none}",
-        ".title{font:bold 21px Arial,Helvetica,sans-serif;fill:#111;letter-spacing:.5px;-webkit-user-select:none;-moz-user-select:none;user-select:none;pointer-events:none}",
+        ".title{font:650 20px Arial,Helvetica,sans-serif;fill:#111;letter-spacing:.3px;-webkit-user-select:none;-moz-user-select:none;user-select:none;pointer-events:none}",
         "text,tspan{pointer-events:none;-webkit-user-select:none;-moz-user-select:none;user-select:none}",
         "</style>",
     ]
-    parts.extend(_render_compass(plan.compass, scale))
+    parts.extend(_render_compass(plan.compass, scale, _compass_center(plan.compass, level_boxes, padding, level_gap_ft, scale)))
     x_cursor = padding
     for level_id, level in plan.levels.items():
         level_box = level_boxes[level_id]
@@ -325,7 +397,7 @@ def render_wall_plan_svg(
             f'<g id="{escape(level_id)}" data-fp-kind="level" data-fp-level="{escape(level_id)}" '
             f'data-fp-id="{escape(level_id)}" transform="translate({x_offset:.3f} {y_offset:.3f})">'
         )
-        parts.extend(_render_grid(level_box, scale))
+        parts.extend(_render_grid(level_box, level, scale))
         parts.extend(_render_building_fills(level, scale))
         parts.extend(_render_perimeter_dimensions(level, scale))
         for zone in level.zones:
@@ -334,6 +406,7 @@ def render_wall_plan_svg(
         openings_by_wall: dict[str, list[WallOpening]] = {}
         for opening in level.openings:
             openings_by_wall.setdefault(opening.wall, []).append(opening)
+        stair_opening_ids = _stair_opening_ids(plan.stairs)
         for wall in level.walls:
             wall_openings = openings_by_wall.get(wall.id, [])
             if wall.kind != "exterior" and not _wall_is_fully_open(wall, wall_openings):
@@ -342,7 +415,8 @@ def render_wall_plan_svg(
         wall_by_id = {wall.id: wall for wall in level.walls}
         for opening in level.openings:
             wall = wall_by_id[opening.wall]
-            parts.extend(_render_opening(opening, wall, level.id, scale))
+            parts.extend(_render_opening(opening, wall, level.id, scale, editable=opening.id not in stair_opening_ids))
+        parts.extend(_render_stairs(plan.stairs, level.id, scale))
         for zone in level.zones:
             zone_rect = _inset_scope_rect(zone.rect)
             parts.append(
@@ -416,7 +490,7 @@ def render_wall_plan_svg(
         parts.append(
             f'<text class="title" pointer-events="none" unselectable="on" '
             f'style="-webkit-user-select:none;-moz-user-select:none;user-select:none" '
-            f'x="{level_box.cx * scale:.3f}" y="{(level_box.y + 1.5) * scale:.3f}">'
+            f'x="{level_box.cx * scale:.3f}" y="{(level_box.y - 1.35) * scale:.3f}">'
             f"{escape((level.title or level.id).upper())}</text>"
         )
         parts.append("</g>")
@@ -427,6 +501,178 @@ def render_wall_plan_svg(
         Path(path).parent.mkdir(parents=True, exist_ok=True)
         Path(path).write_text(svg)
     return svg
+
+
+def _render_stairs(stairs: list[Stair], level_id: str, scale: float) -> list[str]:
+    parts = []
+    for stair in stairs:
+        if level_id not in {stair.lower_level, stair.upper_level}:
+            continue
+        parts.append(f'<g class="stair" data-fp-kind="stair" data-fp-level="{escape(level_id)}" data-fp-id="{escape(stair.id)}">')
+        for landing in stair.landings:
+            parts.append(
+                f'<rect class="stair-landing" x="{landing.x * scale:.3f}" y="{landing.y * scale:.3f}" '
+                f'width="{landing.w * scale:.3f}" height="{landing.h * scale:.3f}" />'
+            )
+        visual_runs = [_visual_stair_run(run, stair.tread_depth) for run in stair.runs]
+        stair_bbox = _stair_bbox(visual_runs, stair.landings)
+        for run in stair.runs:
+            parts.append(
+                f'<rect class="stair-run-bg" x="{run.rect.x * scale:.3f}" y="{run.rect.y * scale:.3f}" '
+                f'width="{run.rect.w * scale:.3f}" height="{run.rect.h * scale:.3f}" />'
+            )
+        for run in visual_runs:
+            parts.append(
+                f'<rect class="stair-run" x="{run.rect.x * scale:.3f}" y="{run.rect.y * scale:.3f}" '
+                f'width="{run.rect.w * scale:.3f}" height="{run.rect.h * scale:.3f}" />'
+            )
+            parts.extend(_render_stair_treads(run, stair.tread_depth, scale))
+        parts.extend(_render_stair_arrow(visual_runs, stair.landings, scale))
+        if stair_bbox is not None:
+            parts.extend(_render_stair_annotation(stair, stair_bbox, scale))
+            parts.append(
+                f'<rect class="stair-select-target" data-fp-kind="stair" data-fp-level="{escape(level_id)}" '
+                f'data-fp-id="{escape(stair.id)}" x="{stair_bbox.x * scale:.3f}" y="{stair_bbox.y * scale:.3f}" '
+                f'width="{stair_bbox.w * scale:.3f}" height="{stair_bbox.h * scale:.3f}" />'
+            )
+        parts.append("</g>")
+    return parts
+
+
+def _visual_stair_run(run: StairRun, tread_depth: float) -> StairRun:
+    stepped_length = run.treads * tread_depth
+    if run.direction in {"N", "S"}:
+        length = min(stepped_length, run.rect.h)
+        if run.direction == "N":
+            rect = Rect(run.rect.x, run.rect.bottom - length, run.rect.w, length)
+        else:
+            rect = Rect(run.rect.x, run.rect.y, run.rect.w, length)
+    else:
+        length = min(stepped_length, run.rect.w)
+        if run.direction == "E":
+            rect = Rect(run.rect.x, run.rect.y, length, run.rect.h)
+        else:
+            rect = Rect(run.rect.right - length, run.rect.y, length, run.rect.h)
+    return StairRun(rect=rect, direction=run.direction, treads=run.treads)
+
+
+def _render_stair_treads(run: StairRun, tread_depth: float, scale: float) -> list[str]:
+    parts = []
+    length = run.rect.h if run.direction in {"N", "S"} else run.rect.w
+    for index in range(1, run.treads + 1):
+        offset = min(index * tread_depth, length)
+        if offset >= length - EPSILON:
+            continue
+        if run.direction == "N":
+            y = run.rect.bottom - offset
+            parts.append(
+                f'<line class="stair-tread" x1="{run.rect.left * scale:.3f}" y1="{y * scale:.3f}" '
+                f'x2="{run.rect.right * scale:.3f}" y2="{y * scale:.3f}" />'
+            )
+        elif run.direction == "S":
+            y = run.rect.top + offset
+            parts.append(
+                f'<line class="stair-tread" x1="{run.rect.left * scale:.3f}" y1="{y * scale:.3f}" '
+                f'x2="{run.rect.right * scale:.3f}" y2="{y * scale:.3f}" />'
+            )
+        elif run.direction == "E":
+            x = run.rect.left + offset
+            parts.append(
+                f'<line class="stair-tread" x1="{x * scale:.3f}" y1="{run.rect.top * scale:.3f}" '
+                f'x2="{x * scale:.3f}" y2="{run.rect.bottom * scale:.3f}" />'
+            )
+        else:
+            x = run.rect.right - offset
+            parts.append(
+                f'<line class="stair-tread" x1="{x * scale:.3f}" y1="{run.rect.top * scale:.3f}" '
+                f'x2="{x * scale:.3f}" y2="{run.rect.bottom * scale:.3f}" />'
+            )
+    return parts
+
+
+def _render_stair_arrow(runs: list[StairRun], landings: list[Rect], scale: float) -> list[str]:
+    if not runs:
+        return []
+    points = _stair_arrow_points(runs, landings)
+    if len(points) < 2:
+        return []
+    path = _rounded_polyline_command(points, scale, radius=0.35)
+    end_point = points[-1]
+    return [
+        f'<path class="stair-arrow" d="{path}" />',
+        _stair_arrow_head(end_point, points[-2], scale),
+    ]
+
+
+def _stair_arrow_points(runs: list[StairRun], landings: list[Rect]) -> list[Point]:
+    if len(runs) == 1:
+        return list(_stair_run_centerline(runs[0]))
+    points = [runs[0].rect.center]
+    for index, landing in enumerate(landings):
+        points.append(landing.center)
+        if index + 1 < len(runs):
+            points.append(runs[index + 1].rect.center)
+    if points[-1] != runs[-1].rect.center:
+        points.append(runs[-1].rect.center)
+    return _dedupe_points(points)
+
+
+def _stair_run_centerline(run: StairRun) -> tuple[Point, Point]:
+    if run.direction == "N":
+        return (Point(run.rect.cx, run.rect.bottom), Point(run.rect.cx, run.rect.top))
+    if run.direction == "S":
+        return (Point(run.rect.cx, run.rect.top), Point(run.rect.cx, run.rect.bottom))
+    if run.direction == "E":
+        return (Point(run.rect.left, run.rect.cy), Point(run.rect.right, run.rect.cy))
+    return (Point(run.rect.right, run.rect.cy), Point(run.rect.left, run.rect.cy))
+
+
+def _stair_arrow_head(point: Point, previous: Point, scale: float) -> str:
+    size = 0.24
+    dx = point.x - previous.x
+    dy = point.y - previous.y
+    length = max((dx * dx + dy * dy) ** 0.5, EPSILON)
+    ux = dx / length
+    uy = dy / length
+    px = -uy
+    py = ux
+    base = Point(point.x - ux * size, point.y - uy * size)
+    points = [
+        point,
+        Point(base.x + px * size * 0.6, base.y + py * size * 0.6),
+        Point(base.x - px * size * 0.6, base.y - py * size * 0.6),
+    ]
+    return (
+        f'<polygon class="stair-arrow-head" points="'
+        + " ".join(f"{p.x * scale:.3f},{p.y * scale:.3f}" for p in points)
+        + '" />'
+    )
+
+
+def _render_stair_annotation(stair: Stair, bbox: Rect, scale: float) -> list[str]:
+    start = Point(bbox.right - min(1.2, bbox.w * 0.2), bbox.top + min(2.2, bbox.h * 0.28))
+    elbow = Point(bbox.right + 0.8, start.y - (bbox.right + 0.8 - start.x))
+    label_at = Point(elbow.x + 1.1, elbow.y)
+    label = f'{stair.risers}R  {stair.rise * 12:.1f}" rise / {stair.tread_depth * 12:.1f}" tread'
+    return [
+        f'<circle class="stair-note-dot" cx="{start.x * scale:.3f}" cy="{start.y * scale:.3f}" r="{0.12 * scale:.3f}" />',
+        f'<path class="stair-note-leader" d="M {start.x * scale:.3f} {start.y * scale:.3f} '
+        f'L {elbow.x * scale:.3f} {elbow.y * scale:.3f} L {(label_at.x - 0.25) * scale:.3f} {elbow.y * scale:.3f}" />',
+        f'<text class="stair-note" x="{label_at.x * scale:.3f}" y="{label_at.y * scale:.3f}">{escape(label)}</text>',
+    ]
+
+
+def _stair_bbox(runs: list[StairRun], landings: list[Rect]) -> Rect | None:
+    boxes = [run.rect for run in runs] + landings
+    return bbox_union(boxes) if boxes else None
+
+
+def _dedupe_points(points: list[Point]) -> list[Point]:
+    out: list[Point] = []
+    for point in points:
+        if not out or not _same_point(out[-1], point):
+            out.append(point)
+    return out
 
 
 def _render_space_select_target(zone: Zone, level_id: str, scale: float) -> str:
@@ -567,6 +813,44 @@ def _validate_level(level: WallLevel, *, strict_features: bool = True) -> list[s
     return errors
 
 
+def _validate_stairs(plan: WallPlan) -> list[str]:
+    errors = []
+    zones_by_level = {level_id: {zone.id for zone in level.zones} for level_id, level in plan.levels.items()}
+    for stair in plan.stairs:
+        if stair.lower_level not in plan.levels:
+            errors.append(f"stair {stair.id!r} references missing lower level {stair.lower_level!r}")
+            continue
+        if stair.upper_level not in plan.levels:
+            errors.append(f"stair {stair.id!r} references missing upper level {stair.upper_level!r}")
+            continue
+        if stair.lower_space not in zones_by_level[stair.lower_level]:
+            errors.append(f"stair {stair.id!r} references missing lower space {stair.lower_level}.{stair.lower_space}")
+        if stair.upper_space not in zones_by_level[stair.upper_level]:
+            errors.append(f"stair {stair.id!r} references missing upper space {stair.upper_level}.{stair.upper_space}")
+        if stair.width <= 0:
+            errors.append(f"stair {stair.id!r} width must be positive")
+        if stair.floor_to_floor <= 0:
+            errors.append(f"stair {stair.id!r} floor_to_floor must be positive")
+        if stair.risers <= 0:
+            errors.append(f"stair {stair.id!r} risers must be positive")
+        elif abs(stair.risers * stair.rise - stair.floor_to_floor) > 0.02:
+            errors.append(f"stair {stair.id!r} rise does not reach floor_to_floor")
+        if stair.tread_depth <= 0:
+            errors.append(f"stair {stair.id!r} tread_depth must be positive")
+        if not stair.runs:
+            errors.append(f"stair {stair.id!r} needs at least one run")
+        for index, run in enumerate(stair.runs, start=1):
+            if run.direction not in {"N", "E", "S", "W"}:
+                errors.append(f"stair {stair.id!r} run {index} has invalid direction {run.direction!r}")
+            if run.treads <= 0:
+                errors.append(f"stair {stair.id!r} run {index} treads must be positive")
+                continue
+            run_length = run.rect.h if run.direction in {"N", "S"} else run.rect.w
+            if run.treads * stair.tread_depth > run_length + 0.02:
+                errors.append(f"stair {stair.id!r} run {index} treads exceed run length")
+    return errors
+
+
 def _open_zone_components(
     walls: list[WallSegment], openings_by_wall: dict[str, list[WallOpening]]
 ) -> dict[str, set[str]]:
@@ -648,19 +932,25 @@ def _level_bbox(level: WallLevel) -> Rect:
     return bbox_union(boxes)
 
 
-def _render_opening(opening: WallOpening, wall: WallSegment, level_id: str, scale: float) -> list[str]:
+def _stair_opening_ids(stairs: list[Stair]) -> set[str]:
+    return {opening_id for stair in stairs for opening_id in (f"{stair.id}_lower_entry", f"{stair.id}_upper_exit")}
+
+
+def _render_opening(opening: WallOpening, wall: WallSegment, level_id: str, scale: float, *, editable: bool = True) -> list[str]:
     mark_wall = _exterior_opening_mark_segment(wall) if wall.kind == "exterior" else wall
     mask_wall = mark_wall if wall.kind == "exterior" else wall
     start = mask_wall.point_at(opening.offset)
     end = mask_wall.point_at(opening.offset + opening.width)
     mask_class = "exterior-opening-mask" if wall.kind == "exterior" else "interior-opening-mask"
     orientation = "horizontal" if wall.direction in {"E", "W"} else "vertical"
-    editor_attrs = (
-        f'data-fp-kind="opening" data-fp-level="{escape(level_id)}" data-fp-id="{escape(opening.id)}" '
-        f'data-fp-wall="{escape(wall.id)}" data-fp-direction="{wall.direction}" '
-        f'data-fp-orientation="{orientation}" data-fp-offset="{opening.offset:.3f}" '
-        f'data-fp-width="{opening.width:.3f}" data-fp-wall-length="{wall.length:.3f}"'
-    )
+    editor_attrs = ""
+    if editable:
+        editor_attrs = (
+            f'data-fp-kind="opening" data-fp-level="{escape(level_id)}" data-fp-id="{escape(opening.id)}" '
+            f'data-fp-wall="{escape(wall.id)}" data-fp-direction="{wall.direction}" '
+            f'data-fp-orientation="{orientation}" data-fp-offset="{opening.offset:.3f}" '
+            f'data-fp-width="{opening.width:.3f}" data-fp-wall-length="{wall.length:.3f}"'
+        )
     parts = [
         f'<line class="opening-mask {mask_class}" {editor_attrs} '
         f'x1="{start.x * scale:.3f}" y1="{start.y * scale:.3f}" '
@@ -677,11 +967,12 @@ def _render_opening(opening: WallOpening, wall: WallSegment, level_id: str, scal
         parts.extend(_render_window(mark_start, mark_end, wall.direction, scale, editor_attrs))
     else:
         parts.extend(_render_door(mark_start, mark_end, wall.direction, opening.swing, scale, editor_attrs))
-    parts.append(
-        f'<line class="opening-hit-target" {editor_attrs} '
-        f'x1="{mark_start.x * scale:.3f}" y1="{mark_start.y * scale:.3f}" '
-        f'x2="{mark_end.x * scale:.3f}" y2="{mark_end.y * scale:.3f}" />'
-    )
+    if editable:
+        parts.append(
+            f'<line class="opening-hit-target" {editor_attrs} '
+            f'x1="{mark_start.x * scale:.3f}" y1="{mark_start.y * scale:.3f}" '
+            f'x2="{mark_end.x * scale:.3f}" y2="{mark_end.y * scale:.3f}" />'
+        )
     return parts
 
 
@@ -832,25 +1123,97 @@ def _render_exterior_wall_solids(level: WallLevel, scale: float) -> list[str]:
     return paths
 
 
-def _render_grid(box: Rect, scale: float) -> list[str]:
+def _render_grid(box: Rect, level: WallLevel, scale: float) -> list[str]:
     left = int(box.left // 1)
     right = int(box.right // 1) + 1
     top = int(box.top // 1)
     bottom = int(box.bottom // 1) + 1
+    clip_loops = _grid_clip_loops(level)
     parts = []
     for x in range(left, right + 1):
         class_name = "grid-10ft" if x % 10 == 0 else "grid-1ft"
-        parts.append(
-            f'<line class="{class_name}" x1="{x * scale:.3f}" y1="{top * scale:.3f}" '
-            f'x2="{x * scale:.3f}" y2="{bottom * scale:.3f}" />'
-        )
+        for start, end in _grid_segments_outside_loops("vertical", x, top, bottom, clip_loops):
+            parts.append(
+                f'<line class="{class_name}" x1="{x * scale:.3f}" y1="{start * scale:.3f}" '
+                f'x2="{x * scale:.3f}" y2="{end * scale:.3f}" />'
+            )
     for y in range(top, bottom + 1):
         class_name = "grid-10ft" if y % 10 == 0 else "grid-1ft"
-        parts.append(
-            f'<line class="{class_name}" x1="{left * scale:.3f}" y1="{y * scale:.3f}" '
-            f'x2="{right * scale:.3f}" y2="{y * scale:.3f}" />'
-        )
+        for start, end in _grid_segments_outside_loops("horizontal", y, left, right, clip_loops):
+            parts.append(
+                f'<line class="{class_name}" x1="{start * scale:.3f}" y1="{y * scale:.3f}" '
+                f'x2="{end * scale:.3f}" y2="{y * scale:.3f}" />'
+            )
     return parts
+
+
+def _grid_clip_loops(level: WallLevel) -> list[list[Point]]:
+    loops = []
+    for points in _exterior_loops(level):
+        outer = _offset_closed_orthogonal_loop(points, EXTERIOR_WALL_THICKNESS_FT)
+        loops.append(outer or points)
+    return loops
+
+
+def _grid_segments_outside_loops(
+    axis: Literal["horizontal", "vertical"],
+    fixed: float,
+    start: float,
+    end: float,
+    loops: list[list[Point]],
+) -> list[tuple[float, float]]:
+    if not loops:
+        return [(start, end)]
+    breaks = [start, end]
+    for loop in loops:
+        breaks.extend(_grid_line_breakpoints(axis, fixed, start, end, loop))
+    values = _unique_sorted(value for value in breaks if start - EPSILON <= value <= end + EPSILON)
+    segments = []
+    for segment_start, segment_end in zip(values, values[1:]):
+        if segment_end - segment_start <= EPSILON:
+            continue
+        midpoint = (segment_start + segment_end) / 2
+        point = Point(fixed, midpoint) if axis == "vertical" else Point(midpoint, fixed)
+        if _point_in_or_on_any_loop(point, loops):
+            continue
+        segments.append((segment_start, segment_end))
+    return segments
+
+
+def _grid_line_breakpoints(
+    axis: Literal["horizontal", "vertical"],
+    fixed: float,
+    start: float,
+    end: float,
+    loop: list[Point],
+) -> list[float]:
+    breaks = []
+    for first, second in zip(loop, loop[1:]):
+        horizontal_edge = abs(first.y - second.y) <= EPSILON
+        vertical_edge = abs(first.x - second.x) <= EPSILON
+        if axis == "vertical":
+            if horizontal_edge and _between(fixed, first.x, second.x):
+                breaks.append(first.y)
+            elif vertical_edge and abs(fixed - first.x) <= EPSILON:
+                breaks.extend([first.y, second.y])
+        else:
+            if vertical_edge and _between(fixed, first.y, second.y):
+                breaks.append(first.x)
+            elif horizontal_edge and abs(fixed - first.y) <= EPSILON:
+                breaks.extend([first.x, second.x])
+    return [value for value in breaks if start - EPSILON <= value <= end + EPSILON]
+
+
+def _point_in_or_on_any_loop(point: Point, loops: list[list[Point]]) -> bool:
+    for loop in loops:
+        clean_loop = loop[:-1] if loop and _same_point(loop[0], loop[-1]) else loop
+        if len(clean_loop) >= 3 and Poly(clean_loop).contains_point(point):
+            return True
+    return False
+
+
+def _between(value: float, first: float, second: float) -> bool:
+    return min(first, second) - EPSILON <= value <= max(first, second) + EPSILON
 
 
 def _render_building_fills(level: WallLevel, scale: float) -> list[str]:
@@ -860,14 +1223,32 @@ def _render_building_fills(level: WallLevel, scale: float) -> list[str]:
     return paths
 
 
-def _render_compass(compass: dict[str, Any], scale: float) -> list[str]:
+def _compass_center(
+    compass: dict[str, Any],
+    level_boxes: dict[str, Rect],
+    padding: float,
+    level_gap_ft: float,
+    scale: float,
+) -> tuple[float, float]:
+    if "at" in compass:
+        at = compass["at"]
+        return (float(at[0]) * scale, float(at[1]) * scale)
+    boxes = list(level_boxes.values())
+    if len(boxes) >= 2:
+        return ((padding + boxes[0].w + level_gap_ft / 2) * scale, (padding + 4.9) * scale)
+    return (3.3 * scale, 3.2 * scale)
+
+
+def _render_compass(compass: dict[str, Any], scale: float, center: tuple[float, float]) -> list[str]:
     if not compass:
         return []
     up_bearing = float(compass.get("up_bearing", 90))
-    cx = 3.3 * scale
-    cy = 3.2 * scale
-    axis = 1.8 * scale
-    label = 2.25 * scale
+    cx, cy = center
+    axis = 2.175 * scale
+    ring = 3.225 * scale
+    label = 2.73 * scale
+    sun_outer = 2.43 * scale
+    sun_inner = 1.8 * scale
 
     def point_for_bearing(bearing: float, distance: float) -> tuple[float, float]:
         screen_degrees = (bearing - up_bearing + 270) % 360
@@ -886,13 +1267,62 @@ def _render_compass(compass: dict[str, Any], scale: float) -> list[str]:
     }
     parts = [
         '<g class="compass" aria-label="Compass">',
-        f'<line class="compass-line" x1="{n[0]:.3f}" y1="{n[1]:.3f}" x2="{s[0]:.3f}" y2="{s[1]:.3f}" />',
-        f'<line class="compass-line" x1="{e[0]:.3f}" y1="{e[1]:.3f}" x2="{w[0]:.3f}" y2="{w[1]:.3f}" />',
+        f'<circle class="compass-bg" cx="{cx:.3f}" cy="{cy:.3f}" r="{ring:.3f}" />',
+        f'<circle class="compass-ring" cx="{cx:.3f}" cy="{cy:.3f}" r="{(ring - 0.28 * scale):.3f}" />',
     ]
+    if "latitude" in compass:
+        latitude = float(compass["latitude"])
+        parts.extend(_render_sun_arc(latitude, 23.44, up_bearing, cx, cy, sun_outer, "summer"))
+        parts.extend(_render_sun_arc(latitude, -23.44, up_bearing, cx, cy, sun_inner, "winter"))
+    parts.extend(
+        [
+            f'<line class="compass-line" x1="{n[0]:.3f}" y1="{n[1]:.3f}" x2="{s[0]:.3f}" y2="{s[1]:.3f}" />',
+            f'<line class="compass-line" x1="{e[0]:.3f}" y1="{e[1]:.3f}" x2="{w[0]:.3f}" y2="{w[1]:.3f}" />',
+            f'<circle class="compass-center" cx="{cx:.3f}" cy="{cy:.3f}" r="{(0.09 * scale):.3f}" />',
+        ]
+    )
     for text, (x, y) in labels.items():
         parts.append(f'<text class="compass-label" x="{x:.3f}" y="{y:.3f}">{text}</text>')
     parts.append("</g>")
     return parts
+
+
+def _render_sun_arc(
+    latitude: float,
+    declination: float,
+    up_bearing: float,
+    cx: float,
+    cy: float,
+    radius: float,
+    season: str,
+) -> list[str]:
+    sunrise, sunset = _sunrise_sunset_bearings(latitude, declination)
+
+    def point_for_bearing(bearing: float) -> tuple[float, float]:
+        screen_degrees = (bearing - up_bearing + 270) % 360
+        angle = radians(screen_degrees)
+        return (cx + cos(angle) * radius, cy + sin(angle) * radius)
+
+    steps = 32
+    points = [point_for_bearing(sunrise + (sunset - sunrise) * index / steps) for index in range(steps + 1)]
+    path = " ".join(
+        ("M" if index == 0 else "L") + f" {point[0]:.3f} {point[1]:.3f}" for index, point in enumerate(points)
+    )
+    start = points[0]
+    end = points[-1]
+    dot_radius = 0.08 * radius
+    return [
+        f'<path class="sun-arc {season}" d="{path}" />',
+        f'<circle class="sun-dot {season}" cx="{start[0]:.3f}" cy="{start[1]:.3f}" r="{dot_radius:.3f}" />',
+        f'<circle class="sun-dot {season}" cx="{end[0]:.3f}" cy="{end[1]:.3f}" r="{dot_radius:.3f}" />',
+    ]
+
+
+def _sunrise_sunset_bearings(latitude: float, declination: float) -> tuple[float, float]:
+    cos_azimuth = sin(radians(declination)) / max(cos(radians(latitude)), EPSILON)
+    cos_azimuth = max(-1.0, min(1.0, cos_azimuth))
+    sunrise = degrees(acos(cos_azimuth))
+    return (sunrise, 360 - sunrise)
 
 
 def _render_perimeter_dimensions(level: WallLevel, scale: float) -> list[str]:
@@ -1067,6 +1497,29 @@ def _polyline_command(points: list[Point], scale: float) -> str:
         ("M" if index == 0 else "L") + f" {point.x * scale:.3f} {point.y * scale:.3f}"
         for index, point in enumerate(points)
     )
+
+
+def _rounded_polyline_command(points: list[Point], scale: float, *, radius: float) -> str:
+    if len(points) <= 2:
+        return _polyline_command(points, scale)
+    commands = [f"M {points[0].x * scale:.3f} {points[0].y * scale:.3f}"]
+    for index in range(1, len(points) - 1):
+        previous = points[index - 1]
+        corner = points[index]
+        next_point = points[index + 1]
+        in_dx = corner.x - previous.x
+        in_dy = corner.y - previous.y
+        out_dx = next_point.x - corner.x
+        out_dy = next_point.y - corner.y
+        in_length = max((in_dx * in_dx + in_dy * in_dy) ** 0.5, EPSILON)
+        out_length = max((out_dx * out_dx + out_dy * out_dy) ** 0.5, EPSILON)
+        trim = min(radius, in_length / 2, out_length / 2)
+        before = Point(corner.x - in_dx / in_length * trim, corner.y - in_dy / in_length * trim)
+        after = Point(corner.x + out_dx / out_length * trim, corner.y + out_dy / out_length * trim)
+        commands.append(f"L {before.x * scale:.3f} {before.y * scale:.3f}")
+        commands.append(f"Q {corner.x * scale:.3f} {corner.y * scale:.3f} {after.x * scale:.3f} {after.y * scale:.3f}")
+    commands.append(f"L {points[-1].x * scale:.3f} {points[-1].y * scale:.3f}")
+    return " ".join(commands)
 
 
 def _rect_path(rect: Rect, scale: float) -> str:

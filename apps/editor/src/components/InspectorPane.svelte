@@ -46,6 +46,11 @@
         .map((item, index) => ({ item, index }))
         .filter((row) => connectionIsScoped(row.item, row.index))
     : [];
+  $: scopedOpeningRows = relationScopeKey
+    ? openings
+        .map((item, index) => ({ item, index }))
+        .filter((row) => openingIsScoped(row.item, row.index))
+    : [];
   $: scopedAccessRows = relationScopeKey
     ? access
         .map((item, index) => ({ item, index }))
@@ -64,6 +69,7 @@
   $: scopedDatumRows = relationScopeKey && spaces && datums && selectedObject !== undefined ? selectedDatumRows() : [];
   $: hasScopedRelations =
     scopedConnectionRows.length > 0 ||
+    scopedOpeningRows.length > 0 ||
     scopedAccessRows.length > 0 ||
     scopedStackRows.length > 0 ||
     scopedAlignmentRows.length > 0 ||
@@ -109,6 +115,15 @@
     { value: "rectangle", label: "Rectangle" },
     ...Object.keys(catalog).map((kind) => ({ value: kind, label: kind }))
   ];
+  $: selectedStair =
+    selected.kind === "stair"
+      ? (((planData.stairs as AnyRecord | undefined) ?? {})[selected.id] ?? selectedObject ?? {})
+      : undefined;
+  $: storyHeight = Number((planData.story as AnyRecord | undefined)?.floor_to_floor ?? selectedStair?.floor_to_floor ?? 10);
+
+  const sideOptions = ["north", "east", "south", "west"];
+  const positionOptions = ["west", "east", "north", "south", "start", "end"];
+  const openingKindOptions = ["door", "arch", "open"];
 
   function connectionIndex() {
     return selected.index ?? Number(selected.id) ?? 0;
@@ -182,6 +197,20 @@
     }
   }
 
+  function updateStairNumber(path: Array<string | number>, value: string) {
+    const numberValue = Number(value);
+    if (!Number.isNaN(numberValue)) {
+      updateField(["stairs", selected.id, ...path], numberValue);
+    }
+  }
+
+  function updateStoryHeight(value: string) {
+    const numberValue = Number(value);
+    if (!Number.isNaN(numberValue)) {
+      updateField(["story", "floor_to_floor"], numberValue);
+    }
+  }
+
   function splitList(value: string) {
     return value
       .split(",")
@@ -218,16 +247,47 @@
     updateField(["levels", activeLevel, "connections"], next);
   }
 
-  function addConnection() {
+  function updateOpeningAt(index: number, field: string, value: unknown) {
+    const current = { ...(openings[index] ?? {}) };
+    if (value === undefined || value === "") {
+      delete current[field];
+    } else {
+      current[field] = value;
+    }
+    updateField(["levels", activeLevel, "openings", index], current);
+  }
+
+  function updateOpeningNumberAt(index: number, field: string, value: string) {
+    const numberValue = Number(value);
+    updateOpeningAt(index, field, Number.isNaN(numberValue) ? undefined : numberValue);
+  }
+
+  function removeOpeningAt(index: number) {
+    const next = openings.slice();
+    next.splice(index, 1);
+    updateField(["levels", activeLevel, "openings"], next);
+  }
+
+  function addConnection(kind = "door", width = 3) {
     const subject = subjectSpaceId();
-    const target = spaces.find(([spaceId]) => spaceId !== subject)?.[0] ?? "";
+    const target = connectionTargetSpaceId(subject);
     if (!subject || !target) {
       return;
     }
     updateField(["levels", activeLevel, "connections"], [
       ...connections,
-      { between: [subject, target], width: 3 }
+      { between: [subject, target], kind, width }
     ]);
+  }
+
+  function canAddConnection() {
+    const subject = subjectSpaceId();
+    const target = connectionTargetSpaceId(subject);
+    if (!subject || !target) {
+      return false;
+    }
+    const wallPair = selectedWallSpacePair();
+    return !wallPair || !connections.some((item) => relationIncludesPair(connectionData(item), wallPair));
   }
 
   function updateAccessAt(index: number, value: string) {
@@ -418,6 +478,19 @@
     if (!length) {
       return;
     }
+    const pair = selectedWallSpacePair();
+    if (pair) {
+      const connectionIndex = connections.findIndex((item) => relationIncludesPair(connectionData(item), pair));
+      const fullWidth = roundHalf(length);
+      if (connectionIndex >= 0) {
+        const next = connections.slice();
+        next[connectionIndex] = { ...connectionData(next[connectionIndex]), between: pair, kind: "open", width: fullWidth };
+        updateField(["levels", activeLevel, "connections"], next);
+        return;
+      }
+      addConnection("open", fullWidth);
+      return;
+    }
     const openingId = uniqueListId(openings, `${selected.id}_open`);
     updateField(["levels", activeLevel, "openings"], [
       ...openings,
@@ -427,6 +500,25 @@
 
   function selectedWallCanBeRemoved() {
     return selected.kind === "wall" && (partitions.some((partition) => partition.id === selected.id) || Boolean(selectedWallLength(selected.id)));
+  }
+
+  function selectedWallSpacePair(): [string, string] | null {
+    return selected.kind === "wall" ? wallSpacePair(selected.id) : null;
+  }
+
+  function wallSpacePair(wallId: string): [string, string] | null {
+    if (wallId.match(/^(.+)__(.+)_(north|east|south|west)_wall$/)) {
+      return null;
+    }
+    const shared = wallId.match(/^(.+)__(.+)_wall$/);
+    if (!shared) {
+      return null;
+    }
+    const pair: [string, string] = [shared[1], shared[2]];
+    if (!spaceRect(pair[0]) || !spaceRect(pair[1]) || selectedWallLength(wallId) <= 0) {
+      return null;
+    }
+    return pair;
   }
 
   function selectedWallLength(wallId: string) {
@@ -454,6 +546,37 @@
       return Math.min(first.right, second.right) - Math.max(first.left, second.left);
     }
     return 0;
+  }
+
+  function adjacentSpaceIds(spaceId: string) {
+    const rect = spaceRect(spaceId);
+    if (!rect) {
+      return [];
+    }
+    return spaces
+      .filter(([otherId]) => otherId !== spaceId)
+      .filter(([otherId]) => {
+        const other = spaceRect(otherId);
+        if (!other) {
+          return false;
+        }
+        const verticalTouch =
+          (Math.abs(rect.right - other.left) < 0.01 || Math.abs(other.right - rect.left) < 0.01) &&
+          Math.min(rect.bottom, other.bottom) - Math.max(rect.top, other.top) > 0.01;
+        const horizontalTouch =
+          (Math.abs(rect.bottom - other.top) < 0.01 || Math.abs(other.bottom - rect.top) < 0.01) &&
+          Math.min(rect.right, other.right) - Math.max(rect.left, other.left) > 0.01;
+        return verticalTouch || horizontalTouch;
+      })
+      .map(([otherId]) => otherId);
+  }
+
+  function connectionTargetSpaceId(subject: string) {
+    const wallPair = selectedWallSpacePair();
+    if (wallPair) {
+      return wallPair.find((spaceId) => spaceId !== subject) ?? "";
+    }
+    return adjacentSpaceIds(subject)[0] ?? spaces.find(([spaceId]) => spaceId !== subject)?.[0] ?? "";
   }
 
   function uniqueListId(items: AnyRecord[], prefix: string) {
@@ -525,6 +648,10 @@
     if (selected.kind === "connection" && connection?.between) {
       return connection.between;
     }
+    const wallPair = selectedWallSpacePair();
+    if (wallPair) {
+      return wallPair;
+    }
     return [];
   }
 
@@ -532,13 +659,35 @@
     if (selected.kind === "connection" && selected.level === activeLevel) {
       return connectionIndex() === index;
     }
+    const wallPair = selectedWallSpacePair();
+    if (wallPair) {
+      return relationIncludesPair(connectionData(item), wallPair);
+    }
     const ids = selectedSpaceIds();
     return ids.length > 0 && ids.some((id) => connectionData(item).between?.includes?.(id));
   }
 
+  function openingIsScoped(item: AnyRecord, index: number) {
+    if (selected.kind === "opening" && selected.level === activeLevel) {
+      return (selected.index ?? -1) === index;
+    }
+    if (selected.kind === "wall") {
+      return item.wall === selected.id;
+    }
+    return false;
+  }
+
   function accessIsScoped(item: AnyRecord | string[]) {
+    const wallPair = selectedWallSpacePair();
+    if (wallPair) {
+      return relationIncludesPair(accessData(item), wallPair);
+    }
     const ids = selectedSpaceIds();
     return ids.length > 0 && ids.some((id) => accessData(item).between?.includes?.(id));
+  }
+
+  function relationIncludesPair(item: AnyRecord, pair: [string, string]) {
+    return pair.every((id) => item.between?.includes?.(id));
   }
 
   function constraintIsScoped(item: AnyRecord) {
@@ -559,6 +708,9 @@
     }
     if (selected.kind === "opening" && selectedObject?.space) {
       return spaceDisplayName(selectedObject.space);
+    }
+    if (selected.kind === "stair") {
+      return selected.id;
     }
     return selectedObject?.label || selected.id;
   }
@@ -763,6 +915,91 @@
           <option value="out-left">out-left</option>
           <option value="out-right">out-right</option>
         </select>
+      {:else if selected.kind === "stair" && selectedStair}
+        <div class="field-label">ID</div>
+        <input value={selected.id} disabled />
+
+        <div class="field-label">Spaces</div>
+        <div class="field-grid stair-field-grid">
+          <label>lower<input value={selectedStair.spaces?.lower ?? ""} on:input={(event) => updateField(["stairs", selected.id, "spaces", "lower"], event.currentTarget.value)} /></label>
+          <label>upper<input value={selectedStair.spaces?.upper ?? ""} on:input={(event) => updateField(["stairs", selected.id, "spaces", "upper"], event.currentTarget.value)} /></label>
+        </div>
+
+        <div class="field-label">Dimensions</div>
+        <div class="field-grid stair-field-grid">
+          <label>width<input type="number" step="0.5" value={selectedStair.width ?? 3} on:input={(event) => updateStairNumber(["width"], event.currentTarget.value)} /></label>
+          <label>story<input type="number" step="0.5" value={storyHeight} on:input={(event) => updateStoryHeight(event.currentTarget.value)} /></label>
+        </div>
+
+        <div class="field-label">Lower Entry</div>
+        <div class="field-grid stair-field-grid">
+          <label>from<input value={selectedStair.lower_entry?.from ?? ""} on:input={(event) => updateField(["stairs", selected.id, "lower_entry", "from"], event.currentTarget.value)} /></label>
+          <label>side
+            <select value={selectedStair.lower_entry?.side ?? "south"} on:change={(event) => updateField(["stairs", selected.id, "lower_entry", "side"], event.currentTarget.value)}>
+              {#each sideOptions as option}
+                <option value={option}>{option}</option>
+              {/each}
+            </select>
+          </label>
+          <label>pos
+            <select value={selectedStair.lower_entry?.position ?? "east"} on:change={(event) => updateField(["stairs", selected.id, "lower_entry", "position"], event.currentTarget.value)}>
+              {#each positionOptions as option}
+                <option value={option}>{option}</option>
+              {/each}
+            </select>
+          </label>
+          <label>kind
+            <select value={selectedStair.lower_entry?.kind ?? "arch"} on:change={(event) => updateField(["stairs", selected.id, "lower_entry", "kind"], event.currentTarget.value)}>
+              {#each openingKindOptions as option}
+                <option value={option}>{option}</option>
+              {/each}
+            </select>
+          </label>
+          <label>width<input type="number" step="0.5" value={selectedStair.lower_entry?.width ?? 3} on:input={(event) => updateStairNumber(["lower_entry", "width"], event.currentTarget.value)} /></label>
+        </div>
+
+        <div class="field-label">Upper Exit</div>
+        <div class="field-grid stair-field-grid">
+          <label>to<input value={selectedStair.upper_exit?.to ?? ""} on:input={(event) => updateField(["stairs", selected.id, "upper_exit", "to"], event.currentTarget.value)} /></label>
+          <label>side
+            <select value={selectedStair.upper_exit?.side ?? "south"} on:change={(event) => updateField(["stairs", selected.id, "upper_exit", "side"], event.currentTarget.value)}>
+              {#each sideOptions as option}
+                <option value={option}>{option}</option>
+              {/each}
+            </select>
+          </label>
+          <label>pos
+            <select value={selectedStair.upper_exit?.position ?? "west"} on:change={(event) => updateField(["stairs", selected.id, "upper_exit", "position"], event.currentTarget.value)}>
+              {#each positionOptions as option}
+                <option value={option}>{option}</option>
+              {/each}
+            </select>
+          </label>
+          <label>kind
+            <select value={selectedStair.upper_exit?.kind ?? "arch"} on:change={(event) => updateField(["stairs", selected.id, "upper_exit", "kind"], event.currentTarget.value)}>
+              {#each openingKindOptions as option}
+                <option value={option}>{option}</option>
+              {/each}
+            </select>
+          </label>
+          <label>width<input type="number" step="0.5" value={selectedStair.upper_exit?.width ?? 3} on:input={(event) => updateStairNumber(["upper_exit", "width"], event.currentTarget.value)} /></label>
+        </div>
+
+        <div class="field-label">Steps</div>
+        <div class="field-grid stair-field-grid">
+          <label>rise<input type="number" step="0.25" value={selectedStair.steps?.target?.rise_in ?? 7} on:input={(event) => updateStairNumber(["steps", "target", "rise_in"], event.currentTarget.value)} /></label>
+          <label>run<input type="number" step="0.25" value={selectedStair.steps?.target?.run_in ?? 13} on:input={(event) => updateStairNumber(["steps", "target", "run_in"], event.currentTarget.value)} /></label>
+          <label>minR<input type="number" step="0.25" value={selectedStair.steps?.limits?.rise_in?.[0] ?? 6.5} on:input={(event) => updateStairNumber(["steps", "limits", "rise_in", 0], event.currentTarget.value)} /></label>
+          <label>maxR<input type="number" step="0.25" value={selectedStair.steps?.limits?.rise_in?.[1] ?? 8} on:input={(event) => updateStairNumber(["steps", "limits", "rise_in", 1], event.currentTarget.value)} /></label>
+          <label>minT<input type="number" step="0.25" value={selectedStair.steps?.limits?.run_in?.[0] ?? 10} on:input={(event) => updateStairNumber(["steps", "limits", "run_in", 0], event.currentTarget.value)} /></label>
+          <label>maxT<input type="number" step="0.25" value={selectedStair.steps?.limits?.run_in?.[1] ?? 13} on:input={(event) => updateStairNumber(["steps", "limits", "run_in", 1], event.currentTarget.value)} /></label>
+          <label>min#
+            <input type="number" step="1" value={selectedStair.steps?.min_treads_per_run ?? 2} on:input={(event) => updateStairNumber(["steps", "min_treads_per_run"], event.currentTarget.value)} />
+          </label>
+          <label>wind
+            <input type="checkbox" checked={Boolean(selectedStair.layout?.winders)} on:change={(event) => updateField(["stairs", selected.id, "layout", "winders"], event.currentTarget.checked)} />
+          </label>
+        </div>
       {:else if selected.kind === "wall"}
         <p class="muted">Wall inspection is available. Wall moving uses constrained orthogonal handles for supported shared and exterior edges.</p>
         <dl>
@@ -770,9 +1007,10 @@
           <dd>{selected.id}</dd>
         </dl>
         <div class="field-label">Action</div>
-        <button type="button" class="danger" disabled={!selectedWallCanBeRemoved()} on:click={removeSelectedWall}>
-          Remove wall
-        </button>
+        <div class="button-row">
+          <button type="button" disabled={!canAddConnection()} on:click={() => addConnection("door", 3)}>Add door</button>
+          <button type="button" class="danger" disabled={!selectedWallCanBeRemoved()} on:click={removeSelectedWall}>Remove wall</button>
+        </div>
       {:else}
         <p class="muted">Select a room, feature, opening, or wall.</p>
       {/if}
@@ -837,12 +1075,40 @@
               </div>
             </div>
           {/each}
-          {#if subjectSpaceId()}
-            <button type="button" class="relation-add" on:click={addConnection}>+</button>
+          {#if canAddConnection()}
+            <button type="button" class="relation-add" on:click={() => addConnection()}>+</button>
           {/if}
         </div>
-      {:else if subjectSpaceId()}
-        <button type="button" class="relation-add" on:click={addConnection}>+</button>
+      {:else if canAddConnection()}
+        <button type="button" class="relation-add" on:click={() => addConnection()}>+</button>
+      {/if}
+
+      {#if scopedOpeningRows.length}
+        <div class="relation-list">
+          {#each scopedOpeningRows as { item, index }}
+            <div class="relation-card">
+              <div class="relation-card-title">
+                <button type="button" class="relation-heading" on:click={() => selectObject("opening", item.id, index)}>
+                  Opening {item.id ?? index + 1}
+                </button>
+                <button type="button" class="relation-remove" aria-label="Remove opening" on:click={() => removeOpeningAt(index)}>x</button>
+              </div>
+              <div class="relation-fields">
+                <div class="field-label">Kind</div>
+                <select value={item.kind ?? "window"} on:change={(event) => updateOpeningAt(index, "kind", event.currentTarget.value)}>
+                  <option value="window">window</option>
+                  <option value="door">door</option>
+                  <option value="arch">arch</option>
+                  <option value="open">open</option>
+                </select>
+                <div class="field-label">Width</div>
+                <input type="number" step="0.5" value={item.width ?? ""} on:input={(event) => updateOpeningNumberAt(index, "width", event.currentTarget.value)} />
+                <div class="field-label">Offset</div>
+                <input type="number" step="0.5" value={item.offset ?? ""} on:input={(event) => updateOpeningNumberAt(index, "offset", event.currentTarget.value)} />
+              </div>
+            </div>
+          {/each}
+        </div>
       {/if}
 
       {#if scopedDatumRows.length}

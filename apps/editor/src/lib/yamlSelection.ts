@@ -4,6 +4,9 @@ export function findYamlRangeForSelection(
   yamlText: string,
   selected: Selection
 ): { start: number; end: number } | null {
+  if (selected.kind === "stair") {
+    return findTopLevelMappingEntryRange(yamlText, "stairs", selected.id);
+  }
   const levelOffset = yamlText.indexOf(`  ${selected.level}:\n`);
   if (levelOffset < 0) {
     return null;
@@ -24,6 +27,33 @@ export function findYamlRangeForSelection(
     return findIndexedListItemRange(yamlText, levelOffset, levelEnd, "connections", index);
   }
   return null;
+}
+
+function findTopLevelMappingEntryRange(yamlText: string, section: string, id: string) {
+  const sectionStart = yamlText.indexOf(`${section}:\n`);
+  if (sectionStart < 0) {
+    return null;
+  }
+  const sectionEnd = findNextTopLevelSectionOffset(yamlText, sectionStart + 1);
+  const entryStart = yamlText.indexOf(`  ${id}:`, sectionStart);
+  if (entryStart < 0 || entryStart >= sectionEnd) {
+    return null;
+  }
+  return { start: entryStart, end: findNextTopLevelChildEntryOffset(yamlText, entryStart + 1, sectionEnd) };
+}
+
+function findNextTopLevelSectionOffset(yamlText: string, after: number): number {
+  const pattern = /\n[A-Za-z0-9_-]+:/g;
+  pattern.lastIndex = after;
+  const match = pattern.exec(yamlText);
+  return match ? match.index + 1 : yamlText.length;
+}
+
+function findNextTopLevelChildEntryOffset(yamlText: string, after: number, limit: number) {
+  const pattern = /\n  [A-Za-z0-9_-]+:/g;
+  pattern.lastIndex = after;
+  const match = pattern.exec(yamlText);
+  return match && match.index < limit ? match.index + 1 : limit;
 }
 
 function findNextLevelOffset(yamlText: string, after: number): number {

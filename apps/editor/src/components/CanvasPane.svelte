@@ -12,7 +12,6 @@
   export let canvasZoom = 0.7;
   export let canvasElement: HTMLDivElement;
   export let selectPlan: (name: string) => void | Promise<void>;
-  export let renderCurrentYaml: () => void | Promise<void>;
   export let saveCurrentPlan: () => void | Promise<void>;
   export let handleCanvasPointerDown: (event: PointerEvent) => void;
   export let preventCanvasSelection: (event: Event) => void;
@@ -31,6 +30,24 @@
       return;
     }
     await navigator.clipboard?.writeText(error);
+  }
+
+  function exportSvg() {
+    if (!svg) {
+      return;
+    }
+    const blob = new Blob([svg], { type: "image/svg+xml;charset=utf-8" });
+    const url = URL.createObjectURL(blob);
+    const link = globalThis.document.createElement("a");
+    link.href = url;
+    link.download = exportFilename();
+    link.click();
+    URL.revokeObjectURL(url);
+  }
+
+  function exportFilename() {
+    const source = document?.name ?? selectedPlan ?? "floor-plan";
+    return source.replace(/\.(ya?ml|json)$/i, "") + ".svg";
   }
 
   function clearSelectHighlight(event: Event) {
@@ -116,7 +133,7 @@
             {/each}
           </select>
         </label>
-        <button type="button" on:click={() => renderCurrentYaml()}>Render</button>
+        <button type="button" disabled={!svg} on:click={exportSvg}>Export SVG</button>
         <button type="button" class="primary" disabled={!dirty} on:click={() => saveCurrentPlan()}>Save</button>
         <span class:dirty class="status-text">{status}</span>
       </div>

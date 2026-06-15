@@ -8,6 +8,7 @@ the explicit wall-plan representation used by the renderer and validators.
 from __future__ import annotations
 
 from dataclasses import dataclass
+from math import ceil, floor
 from pathlib import Path
 from typing import Any, Literal
 
@@ -18,6 +19,8 @@ from floorplan_lang.wall_plan import (
     AreaLabel,
     Feature,
     FeatureAnchor,
+    Stair,
+    StairRun,
     WallExtrusion,
     WallLevel,
     WallOpening,
@@ -54,6 +57,7 @@ def intent_plan_from_dict(data: dict[str, Any]) -> WallPlan:
     )
     catalog = data.get("catalog") or {}
     global_datums = _parse_datums(data.get("datums") or {})
+    contexts: dict[str, IntentContext] = {}
 
     for level_id, level_data in (data.get("levels") or {}).items():
         datums = _merge_datums(global_datums, _parse_datums(level_data.get("datums") or {}))
@@ -69,6 +73,7 @@ def intent_plan_from_dict(data: dict[str, Any]) -> WallPlan:
             level.walls.extend(_space_partition_walls(spaces))
         level.walls.extend(_partition_walls(level_data.get("partitions") or [], datums))
         context = IntentContext(datums=datums, spaces=spaces, walls={wall.id: wall for wall in level.walls})
+        contexts[level_id] = context
 
         level.zones.extend(_compile_zones(level_data.get("spaces") or {}, spaces))
         level.areas.extend(_compile_area_labels(level_data.get("spaces") or {}, spaces))
@@ -78,6 +83,8 @@ def intent_plan_from_dict(data: dict[str, Any]) -> WallPlan:
         level.openings.extend(_compile_auto_windows(level_data, context, level.openings))
         level.access.extend(_compile_access(level_data.get("access") or [], level.openings))
         plan.levels[level_id] = level
+
+    _compile_stairs(data.get("stairs") or {}, data.get("story") or {}, plan, contexts)
 
     return plan
 
@@ -702,6 +709,405 @@ def _compile_access(access: list[Any], openings: list[WallOpening]) -> list[tupl
             explicit.append((edge[0], edge[1]))
     del openings
     return explicit
+
+
+def _compile_stairs(
+    stairs: dict[str, Any],
+    story: dict[str, Any],
+    plan: WallPlan,
+    contexts: dict[str, IntentContext],
+) -> None:
+    for stair_id, stair_data in stairs.items():
+        spaces = stair_data["spaces"]
+        lower_level, lower_space = _level_space_ref(spaces["lower"])
+        upper_level, upper_space = _level_space_ref(spaces["upper"])
+        if lower_level not in contexts or upper_level not in contexts:
+            raise ValueError(f"Stair {stair_id!r} references missing level")
+        lower_context = contexts[lower_level]
+        upper_context = contexts[upper_level]
+        lower_rect = lower_context.spaces[lower_space]
+        upper_rect = upper_context.spaces[upper_space]
+        width = float(stair_data.get("width", 3))
+        floor_to_floor = float(stair_data.get("floor_to_floor", story.get("floor_to_floor", 10)))
+        lower_entry = stair_data.get("lower_entry") or {}
+        upper_exit = stair_data.get("upper_exit") or {}
+
+        lower_adjacent = _stair_endpoint_adjacent(lower_entry, "from")
+        upper_adjacent = _stair_endpoint_adjacent(upper_exit, "to")
+        if lower_adjacent:
+            _append_stair_connection(
+                plan.levels[lower_level],
+                lower_context,
+                stair_id,
+                "lower_entry",
+                lower_entry,
+                lower_adjacent,
+                lower_space,
+            )
+        if upper_adjacent:
+            _append_stair_connection(
+                plan.levels[upper_level],
+                upper_context,
+                stair_id,
+                "upper_exit",
+                upper_exit,
+                upper_space,
+                upper_adjacent,
+            )
+
+        lower_side = _stair_endpoint_side(lower_entry, lower_rect, lower_context.spaces.get(lower_adjacent))
+        upper_side = _stair_endpoint_side(upper_exit, upper_rect, upper_context.spaces.get(upper_adjacent))
+        start_corner = _stair_endpoint_corner(lower_side, lower_entry.get("corner") or lower_entry.get("position"))
+        end_corner = _stair_endpoint_corner(upper_side, upper_exit.get("corner") or upper_exit.get("position"))
+        plan.stairs.append(
+            _solve_stair(
+                stair_id=stair_id,
+                lower_level=lower_level,
+                upper_level=upper_level,
+                lower_space=lower_space,
+                upper_space=upper_space,
+                lower_rect=lower_rect,
+                upper_rect=upper_rect,
+                width=width,
+                floor_to_floor=floor_to_floor,
+                start_corner=start_corner,
+                end_corner=end_corner,
+                steps=stair_data.get("steps") or {},
+                layout=stair_data.get("layout") or {},
+            )
+        )
+
+
+def _level_space_ref(value: str | dict[str, Any]) -> tuple[str, str]:
+    if isinstance(value, dict):
+        return (value["level"], value["space"])
+    if "." not in value:
+        raise ValueError(f"Stair space reference must include level: {value!r}")
+    return tuple(value.split(".", 1))  # type: ignore[return-value]
+
+
+def _stair_endpoint_adjacent(endpoint: dict[str, Any], preferred_key: str) -> str | None:
+    return endpoint.get(preferred_key) or endpoint.get("space") or endpoint.get("room")
+
+
+def _append_stair_connection(
+    level: WallLevel,
+    context: IntentContext,
+    stair_id: str,
+    endpoint_id: str,
+    endpoint: dict[str, Any],
+    first_space: str,
+    second_space: str,
+) -> None:
+    data = {
+        "id": endpoint.get("id", f"{stair_id}_{endpoint_id}"),
+        "between": [first_space, second_space],
+        "kind": endpoint.get("kind", "arch"),
+        "width": float(endpoint.get("width", 3)),
+    }
+    for field in ("position", "offset", "swing"):
+        if field in endpoint:
+            data[field] = endpoint[field]
+    opening = _compile_connections([data], context)[0]
+    if not _opening_exists(level.openings, opening):
+        level.openings.append(opening)
+    edge = (first_space, second_space)
+    if edge not in level.access and (edge[1], edge[0]) not in level.access:
+        level.access.append(edge)
+
+
+def _opening_exists(openings: list[WallOpening], candidate: WallOpening) -> bool:
+    for opening in openings:
+        if opening.id == candidate.id:
+            return True
+        if (
+            opening.wall == candidate.wall
+            and opening.kind == candidate.kind
+            and abs(opening.offset - candidate.offset) <= 0.02
+            and abs(opening.width - candidate.width) <= 0.02
+        ):
+            return True
+    return False
+
+
+def _stair_endpoint_side(endpoint: dict[str, Any], stair: Rect, adjacent: Rect | None) -> Side:
+    if "side" in endpoint:
+        return _side(endpoint["side"])
+    if adjacent is not None:
+        if abs(stair.bottom - adjacent.top) <= EPSILON:
+            return "south"
+        if abs(stair.top - adjacent.bottom) <= EPSILON:
+            return "north"
+        if abs(stair.right - adjacent.left) <= EPSILON:
+            return "east"
+        if abs(stair.left - adjacent.right) <= EPSILON:
+            return "west"
+    return "south"
+
+
+def _stair_endpoint_corner(side: Side, position: str | None) -> str:
+    normalized = (position or "center").lower()
+    aliases = {"start": "west" if side in {"north", "south"} else "north", "end": "east" if side in {"north", "south"} else "south"}
+    normalized = aliases.get(normalized, normalized)
+    if normalized in {"nw", "ne", "se", "sw"}:
+        return normalized.upper()
+    if side == "north":
+        return "NE" if normalized in {"east", "right"} else "NW"
+    if side == "south":
+        return "SE" if normalized in {"east", "right"} else "SW"
+    if side == "east":
+        return "SE" if normalized in {"south", "bottom"} else "NE"
+    return "SW" if normalized in {"south", "bottom"} else "NW"
+
+
+def _solve_stair(
+    *,
+    stair_id: str,
+    lower_level: str,
+    upper_level: str,
+    lower_space: str,
+    upper_space: str,
+    lower_rect: Rect,
+    upper_rect: Rect,
+    width: float,
+    floor_to_floor: float,
+    start_corner: str,
+    end_corner: str,
+    steps: dict[str, Any],
+    layout: dict[str, Any],
+) -> Stair:
+    rect = lower_rect
+    warnings = []
+    if any(
+        abs(left - right) > 0.02
+        for left, right in (
+            (lower_rect.left, upper_rect.left),
+            (lower_rect.top, upper_rect.top),
+            (lower_rect.w, upper_rect.w),
+            (lower_rect.h, upper_rect.h),
+        )
+    ):
+        warnings.append("lower and upper stair spaces do not have the same footprint")
+        rect = _intersection_rect(lower_rect, upper_rect) or lower_rect
+    if rect.w < width * 2 or rect.h < width * 2:
+        raise ValueError(f"Stair {stair_id!r} footprint is too small for {width:g}ft stair width")
+
+    target = steps.get("target") or {}
+    limits = steps.get("limits") or {}
+    target_rise = float(target.get("rise_in", 7)) / 12
+    target_run = float(target.get("run_in", 13)) / 12
+    rise_min, rise_max = _inch_limits(limits.get("rise_in"), (6.5, 8))
+    run_min, run_max = _inch_limits(limits.get("run_in"), (10, 13))
+    min_treads_per_run = int(steps.get("min_treads_per_run", 2))
+    allow_winders = bool(layout.get("winders", False))
+    if allow_winders:
+        warnings.append("winder stairs are not solved yet; using flat landings")
+
+    min_risers = max(1, ceil(floor_to_floor / rise_max))
+    max_risers = floor(floor_to_floor / rise_min)
+    paths = _stair_corner_paths(start_corner, end_corner)
+    best: tuple[float, Stair] | None = None
+    for risers in range(min_risers, max_risers + 1):
+        rise = floor_to_floor / risers
+        treads = max(risers - 1, 1)
+        for path in paths:
+            segments = _stair_path_segments(rect, width, path)
+            lengths = [segment["length"] for segment in segments]
+            for counts in _stair_tread_allocations(treads, lengths, run_min, min_treads_per_run):
+                max_depth = min(length / count for length, count in zip(lengths, counts, strict=True))
+                tread_depth = min(target_run, run_max, max_depth)
+                if tread_depth + EPSILON < run_min:
+                    continue
+                runs = [
+                    StairRun(rect=segment["rect"], direction=segment["direction"], treads=count)
+                    for segment, count in zip(segments, counts, strict=True)
+                ]
+                landings = [_landing_rect(rect, width, corner) for corner in path[1:-1]]
+                score = _stair_score(rise, tread_depth, target_rise, target_run, counts, path)
+                stair = Stair(
+                    id=stair_id,
+                    lower_level=lower_level,
+                    upper_level=upper_level,
+                    lower_space=lower_space,
+                    upper_space=upper_space,
+                    width=width,
+                    floor_to_floor=floor_to_floor,
+                    risers=risers,
+                    rise=rise,
+                    tread_depth=tread_depth,
+                    runs=runs,
+                    landings=landings,
+                    warnings=list(warnings),
+                )
+                if best is None or score < best[0]:
+                    best = (score, stair)
+    if best is None:
+        raise ValueError(
+            f"Stair {stair_id!r} cannot fit {floor_to_floor:g}ft floor-to-floor height "
+            f"inside {rect.w:g}ft x {rect.h:g}ft footprint with {width:g}ft width"
+        )
+    return best[1]
+
+
+def _inch_limits(value: Any, default: tuple[float, float]) -> tuple[float, float]:
+    if value is None:
+        low, high = default
+    else:
+        low, high = value
+    return (float(low) / 12, float(high) / 12)
+
+
+def _intersection_rect(first: Rect, second: Rect) -> Rect | None:
+    left = max(first.left, second.left)
+    right = min(first.right, second.right)
+    top = max(first.top, second.top)
+    bottom = min(first.bottom, second.bottom)
+    if right <= left + EPSILON or bottom <= top + EPSILON:
+        return None
+    return Rect(left, top, right - left, bottom - top)
+
+
+def _stair_corner_paths(start_corner: str, end_corner: str) -> list[list[str]]:
+    order = ["NW", "NE", "SE", "SW"]
+    if start_corner not in order or end_corner not in order:
+        raise ValueError(f"Unsupported stair corner path {start_corner!r} -> {end_corner!r}")
+    paths = []
+    for step in (1, -1):
+        path = [start_corner]
+        index = order.index(start_corner)
+        while path[-1] != end_corner:
+            index = (index + step) % len(order)
+            path.append(order[index])
+        paths.append(path)
+    return sorted(paths, key=len, reverse=True)
+
+
+def _stair_path_segments(rect: Rect, width: float, path: list[str]) -> list[dict[str, Any]]:
+    segments = []
+    for index, (start, end) in enumerate(zip(path, path[1:])):
+        direction = _corner_travel_direction(start, end)
+        turn_start = index > 0
+        turn_end = index < len(path) - 2
+        run_rect = _stair_run_rect(rect, width, start, end, direction, turn_start, turn_end)
+        length = run_rect.h if direction in {"N", "S"} else run_rect.w
+        if length > EPSILON:
+            segments.append({"rect": run_rect, "direction": direction, "length": length})
+    return segments
+
+
+def _corner_travel_direction(start: str, end: str) -> Direction:
+    mapping: dict[tuple[str, str], Direction] = {
+        ("NW", "NE"): "E",
+        ("NE", "SE"): "S",
+        ("SE", "SW"): "W",
+        ("SW", "NW"): "N",
+        ("NE", "NW"): "W",
+        ("SE", "NE"): "N",
+        ("SW", "SE"): "E",
+        ("NW", "SW"): "S",
+    }
+    if (start, end) not in mapping:
+        raise ValueError(f"Unsupported stair segment {start!r} -> {end!r}")
+    return mapping[(start, end)]
+
+
+def _stair_run_rect(
+    rect: Rect,
+    width: float,
+    start: str,
+    end: str,
+    direction: Direction,
+    turn_start: bool,
+    turn_end: bool,
+) -> Rect:
+    trim_start = width if turn_start else 0
+    trim_end = width if turn_end else 0
+    side = _corner_side(start, end)
+    if side == "east":
+        top = rect.top + (trim_end if direction == "N" else trim_start)
+        bottom = rect.bottom - (trim_start if direction == "N" else trim_end)
+        return Rect(rect.right - width, top, width, bottom - top)
+    if side == "west":
+        top = rect.top + (trim_start if direction == "S" else trim_end)
+        bottom = rect.bottom - (trim_end if direction == "S" else trim_start)
+        return Rect(rect.left, top, width, bottom - top)
+    if side == "north":
+        left = rect.left + (trim_end if direction == "W" else trim_start)
+        right = rect.right - (trim_start if direction == "W" else trim_end)
+        return Rect(left, rect.top, right - left, width)
+    left = rect.left + (trim_start if direction == "E" else trim_end)
+    right = rect.right - (trim_end if direction == "E" else trim_start)
+    return Rect(left, rect.bottom - width, right - left, width)
+
+
+def _corner_side(start: str, end: str) -> Side:
+    if {start, end} == {"NE", "SE"}:
+        return "east"
+    if {start, end} == {"NW", "SW"}:
+        return "west"
+    if {start, end} == {"NW", "NE"}:
+        return "north"
+    if {start, end} == {"SW", "SE"}:
+        return "south"
+    raise ValueError(f"Unsupported stair side {start!r} -> {end!r}")
+
+
+def _landing_rect(rect: Rect, width: float, corner: str) -> Rect:
+    if corner == "NW":
+        return Rect(rect.left, rect.top, width, width)
+    if corner == "NE":
+        return Rect(rect.right - width, rect.top, width, width)
+    if corner == "SE":
+        return Rect(rect.right - width, rect.bottom - width, width, width)
+    if corner == "SW":
+        return Rect(rect.left, rect.bottom - width, width, width)
+    raise ValueError(f"Unsupported landing corner {corner!r}")
+
+
+def _stair_tread_allocations(
+    total_treads: int,
+    lengths: list[float],
+    min_tread_depth: float,
+    min_treads_per_run: int,
+) -> list[list[int]]:
+    max_counts = [int(length // min_tread_depth) for length in lengths]
+    if not lengths or sum(max_counts) < total_treads:
+        return []
+    allocations: list[list[int]] = []
+
+    def search(index: int, remaining: int, current: list[int]) -> None:
+        if index == len(lengths):
+            if remaining == 0:
+                allocations.append(current.copy())
+            return
+        runs_left = len(lengths) - index - 1
+        min_count = min_treads_per_run
+        max_count = min(max_counts[index], remaining - runs_left * min_treads_per_run)
+        for count in range(min_count, max_count + 1):
+            if remaining - count > sum(max_counts[index + 1 :]):
+                continue
+            current.append(count)
+            search(index + 1, remaining - count, current)
+            current.pop()
+
+    search(0, total_treads, [])
+    return allocations
+
+
+def _stair_score(
+    rise: float,
+    tread_depth: float,
+    target_rise: float,
+    target_run: float,
+    counts: list[int],
+    path: list[str],
+) -> float:
+    rise_penalty = abs(rise - target_rise) * 12
+    run_penalty = abs(tread_depth - target_run) * 12
+    one_step_penalty = 20 if min(counts) <= 1 else 0
+    distribution_penalty = (max(counts) - min(counts)) * 0.08
+    direct_path_penalty = 0.6 if len(path) <= 2 else 0
+    return rise_penalty * 1.3 + run_penalty + one_step_penalty + distribution_penalty + direct_path_penalty
 
 
 def _shared_wall(context: IntentContext, a: Rect, b: Rect) -> tuple[WallSegment, float, float]:
