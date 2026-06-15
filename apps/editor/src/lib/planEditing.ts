@@ -146,6 +146,66 @@ export function setPath(root: AnyRecord, path: Array<string | number>, value: un
   current[path[path.length - 1]] = value;
 }
 
+export function setFeatureAt(data: AnyRecord, levelId: string, featureId: string, at: [number, number]) {
+  const feature = ((data.levels as AnyRecord)?.[levelId]?.features ?? {})[featureId] as AnyRecord | undefined;
+  if (!feature) {
+    return;
+  }
+  feature.at = at;
+  syncStackedFeaturePlacement(data, levelId, featureId, at);
+}
+
+export function setFeatureAtCoordinate(
+  data: AnyRecord,
+  levelId: string,
+  featureId: string,
+  axisIndex: 0 | 1,
+  value: number
+) {
+  const feature = ((data.levels as AnyRecord)?.[levelId]?.features ?? {})[featureId] as AnyRecord | undefined;
+  if (!feature) {
+    return;
+  }
+  const at: [number, number] = [
+    Number(feature.at?.[0] ?? 20),
+    Number(feature.at?.[1] ?? 20)
+  ];
+  at[axisIndex] = value;
+  setFeatureAt(data, levelId, featureId, at);
+}
+
+function syncStackedFeaturePlacement(data: AnyRecord, levelId: string, featureId: string, at: [number, number]) {
+  const sourceRef = `${levelId}.${featureId}`;
+  for (const stack of (data.stacks ?? []) as AnyRecord[]) {
+    const members = Array.isArray(stack.members) ? stack.members : [];
+    const same = Array.isArray(stack.same) ? stack.same : [];
+    if (!members.includes(sourceRef) || !same.some((rule: string) => ["center", "cx", "cy"].includes(rule))) {
+      continue;
+    }
+    for (const member of members) {
+      if (member === sourceRef || typeof member !== "string" || !member.includes(".")) {
+        continue;
+      }
+      const [targetLevel, targetFeature] = member.split(".", 2);
+      const feature = ((data.levels as AnyRecord)?.[targetLevel]?.features ?? {})[targetFeature] as AnyRecord | undefined;
+      if (!feature) {
+        continue;
+      }
+      const nextAt: [number, number] = [
+        Number(feature.at?.[0] ?? at[0]),
+        Number(feature.at?.[1] ?? at[1])
+      ];
+      if (same.includes("center") || same.includes("cx")) {
+        nextAt[0] = at[0];
+      }
+      if (same.includes("center") || same.includes("cy")) {
+        nextAt[1] = at[1];
+      }
+      feature.at = nextAt;
+    }
+  }
+}
+
 export function deleteSelection(data: AnyRecord, selected: Selection): Selection {
   if (!selected.kind || !selected.level) {
     return selected;
@@ -168,6 +228,132 @@ export function deleteSelection(data: AnyRecord, selected: Selection): Selection
     }
   }
   return { kind: "", level: "", id: "" };
+}
+
+export function mergeSpaceInto(data: AnyRecord, levelId: string, sourceId: string, targetId: string): Selection {
+  if (!sourceId || !targetId || sourceId === targetId) {
+    return { kind: "space", level: levelId, id: sourceId };
+  }
+  const levelData = ensureLevel(data, levelId);
+  const source = levelData.spaces?.[sourceId];
+  const target = levelData.spaces?.[targetId];
+  const sourceRect = resolveSpaceRect(data, levelId, sourceId);
+  const targetRect = resolveSpaceRect(data, levelId, targetId);
+  if (!source || !target || !sourceRect || !targetRect) {
+    return { kind: "space", level: levelId, id: sourceId };
+  }
+  const left = Math.min(sourceRect.left, targetRect.left);
+  const top = Math.min(sourceRect.top, targetRect.top);
+  const right = Math.max(sourceRect.right, targetRect.right);
+  const bottom = Math.max(sourceRect.bottom, targetRect.bottom);
+  levelData.spaces[targetId] = {
+    ...target,
+    rect: [left, top, right - left, bottom - top]
+  };
+  delete levelData.spaces[sourceId];
+  replaceSpaceReferences(levelData, sourceId, targetId);
+  return { kind: "space", level: levelId, id: targetId };
+}
+
+function replaceSpaceReferences(levelData: AnyRecord, sourceId: string, targetId: string) {
+  for (const feature of Object.values((levelData.features ?? {}) as AnyRecord)) {
+    const featureData = feature as AnyRecord;
+    if (featureData.within === sourceId) {
+      featureData.within = targetId;
+    }
+    if (featureData.along?.space === sourceId) {
+      featureData.along.space = targetId;
+    }
+  }
+  if (Array.isArray(levelData.openings)) {
+    for (const opening of levelData.openings as AnyRecord[]) {
+      if (opening.space === sourceId) {
+        opening.space = targetId;
+      }
+      if (Array.isArray(opening.between)) {
+        opening.between = opening.between.map((spaceId: string) => (spaceId === sourceId ? targetId : spaceId));
+      }
+    }
+  }
+  if (Array.isArray(levelData.connections)) {
+    levelData.connections = levelData.connections
+      .map((connection: unknown) => {
+        const connectionData = Array.isArray(connection) ? { between: connection } : { ...((connection ?? {}) as AnyRecord) };
+        if (Array.isArray(connectionData.between)) {
+          connectionData.between = connectionData.between.map((spaceId: string) =>
+            spaceId === sourceId ? targetId : spaceId
+          );
+        }
+        return connectionData;
+      })
+      .filter((connection: AnyRecord) => !isSelfEdge(connection.between));
+  }
+  if (Array.isArray(levelData.access)) {
+    const seen = new Set<string>();
+    levelData.access = levelData.access
+      .map((edge: unknown) => {
+        if (Array.isArray(edge)) {
+          return edge.map((spaceId: string) => (spaceId === sourceId ? targetId : spaceId));
+        }
+        const edgeData = { ...((edge ?? {}) as AnyRecord) };
+        if (edgeData.from === sourceId) {
+          edgeData.from = targetId;
+        }
+        if (edgeData.to === sourceId) {
+          edgeData.to = targetId;
+        }
+        return edgeData;
+      })
+      .filter((edge: unknown) => {
+        const endpoints = Array.isArray(edge) ? edge : [(edge as AnyRecord).from, (edge as AnyRecord).to];
+        if (isSelfEdge(endpoints)) {
+          return false;
+        }
+        const key = endpoints.join("->");
+        if (seen.has(key)) {
+          return false;
+        }
+        seen.add(key);
+        return true;
+      });
+  }
+}
+
+function isSelfEdge(endpoints: unknown) {
+  return Array.isArray(endpoints) && endpoints.length >= 2 && endpoints[0] === endpoints[1];
+}
+
+function resolveSpaceRect(data: AnyRecord, levelId: string, spaceId: string) {
+  const space = ((data.levels as AnyRecord)?.[levelId]?.spaces ?? {})[spaceId] as AnyRecord | undefined;
+  if (!space) {
+    return null;
+  }
+  if (Array.isArray(space.rect)) {
+    const [x, y, w, h] = space.rect.map(Number);
+    return { left: x, top: y, right: x + w, bottom: y + h };
+  }
+  if (Array.isArray(space.x) && Array.isArray(space.y)) {
+    const left = datumValue(data, "x", space.x[0]);
+    const right = datumValue(data, "x", space.x[1]);
+    const top = datumValue(data, "y", space.y[0]);
+    const bottom = datumValue(data, "y", space.y[1]);
+    if ([left, right, top, bottom].some((value) => value === null)) {
+      return null;
+    }
+    return { left: left as number, top: top as number, right: right as number, bottom: bottom as number };
+  }
+  return null;
+}
+
+function datumValue(data: AnyRecord, axis: "x" | "y", value: unknown): number | null {
+  if (typeof value === "number") {
+    return value;
+  }
+  if (typeof value === "string") {
+    const datums = ((data.datums ?? {}) as AnyRecord)[axis] ?? {};
+    return typeof datums[value] === "number" ? datums[value] : null;
+  }
+  return null;
 }
 
 export function removeSpaceReferences(levelData: AnyRecord, spaceId: string) {

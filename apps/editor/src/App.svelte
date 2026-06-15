@@ -9,21 +9,18 @@
     type PlanSummary
   } from "./lib/api";
   import CanvasPane from "./components/CanvasPane.svelte";
-  import EditorSidebar from "./components/EditorSidebar.svelte";
   import InspectorPane from "./components/InspectorPane.svelte";
+  import YamlPane from "./components/YamlPane.svelte";
   import type {
     AnyRecord,
     DragState,
-    PaletteItem,
     Selection,
     SelectionKind,
     SpaceRect,
     WallDirection
   } from "./lib/types";
-  import { palette } from "./lib/palette";
   import { dumpPlanYaml } from "./lib/yamlFormat";
   import {
-    addPaletteItemToData,
     cleanupYamlDanglingReferences,
     connectionOpeningIndex,
     deleteSelection,
@@ -33,11 +30,14 @@
     normalizeSvgKind,
     openingIndex,
     resolveSelection,
+    setFeatureAt,
+    setFeatureAtCoordinate,
     setPath
   } from "./lib/planEditing";
   import {
     clamp,
     findMassEdgeRefs,
+    moveContainedWall,
     moveExteriorWall,
     moveOpening,
     moveSharedWall,
@@ -50,6 +50,7 @@
     lineFromSvgElement,
     markSelectedInSvg,
     moveFeatureSvg,
+    previewContainedWallSvg,
     previewExteriorWallSvg,
     previewOpeningSvg,
     previewSharedWallSvg,
@@ -80,16 +81,26 @@
   let renderGeneration = 0;
   let canvasPointerActive = false;
   let drag: DragState = null;
+  let canvasZoom = 0.7;
+  let yamlOpen = false;
 
 
   $: levelIds = Object.keys((data.levels as AnyRecord | undefined) ?? {});
-  $: level = ((data.levels as AnyRecord | undefined)?.[activeLevel] ?? {}) as AnyRecord;
-  $: spaces = entries(level.spaces);
-  $: features = entries(level.features);
-  $: openings = Array.isArray(level.openings) ? level.openings : [];
+  $: inspectorLevelId = selected.level || activeLevel;
+  $: inspectorLevel = ((data.levels as AnyRecord | undefined)?.[inspectorLevelId] ?? {}) as AnyRecord;
+  $: spaces = entries(inspectorLevel.spaces);
+  $: connections = Array.isArray(inspectorLevel.connections) ? inspectorLevel.connections : [];
+  $: openings = Array.isArray(inspectorLevel.openings) ? inspectorLevel.openings : [];
+  $: partitions = Array.isArray(inspectorLevel.partitions) ? inspectorLevel.partitions : [];
+  $: access = Array.isArray(inspectorLevel.access) ? inspectorLevel.access : [];
+  $: stacks = Array.isArray(data.stacks) ? data.stacks : [];
+  $: alignments = Array.isArray(data.alignments) ? data.alignments : [];
+  $: catalog = ((data.catalog as AnyRecord | undefined) ?? {}) as AnyRecord;
+  $: constraintRefs = buildConstraintRefs(data);
   $: selectedObject = resolveSelection(data, selected);
 
   onMount(() => {
+    document.addEventListener("keydown", handleGlobalKeydown);
     document.addEventListener("pointerdown", blockCanvasSelectionStart, { capture: true });
     document.addEventListener("pointermove", blockCanvasSelectionMove, { capture: true });
     document.addEventListener("pointerup", stopCanvasSelectionSuppression, { capture: true });
@@ -101,6 +112,7 @@
     document.addEventListener("selectionchange", clearAccidentalSelection);
     void loadInitialPlan();
     return () => {
+      document.removeEventListener("keydown", handleGlobalKeydown);
       document.removeEventListener("pointerdown", blockCanvasSelectionStart, { capture: true });
       document.removeEventListener("pointermove", blockCanvasSelectionMove, { capture: true });
       document.removeEventListener("pointerup", stopCanvasSelectionSuppression, { capture: true });
@@ -112,6 +124,13 @@
       document.removeEventListener("selectionchange", clearAccidentalSelection);
     };
   });
+
+  function handleGlobalKeydown(event: KeyboardEvent) {
+    if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === "s") {
+      event.preventDefault();
+      void saveCurrentPlan();
+    }
+  }
 
   async function loadInitialPlan() {
     try {
@@ -412,12 +431,15 @@
     const scale = Number(data.scale ?? 16);
     const dx = (current.x - drag.startPoint.x) / scale;
     const dy = (current.y - drag.startPoint.y) / scale;
-    if (drag.type === "wall" || drag.type === "exterior-wall") {
+    if (drag.type === "wall" || drag.type === "contained-wall" || drag.type === "exterior-wall") {
       const delta = drag.orientation === "vertical" ? dx : dy;
       data = structuredClone(drag.snapshot);
       if (drag.type === "wall") {
         moveSharedWall(data, drag, snapToGrid(delta));
         previewSharedWallSvg(canvasElement, drag, snapToGrid(delta), scale);
+      } else if (drag.type === "contained-wall") {
+        moveContainedWall(data, drag, snapToGrid(delta));
+        previewContainedWallSvg(canvasElement, drag, snapToGrid(delta), scale);
       } else {
         moveExteriorWall(data, drag, snapToGrid(delta));
         previewExteriorWallSvg(canvasElement, drag.id, drag.line, drag.orientation, snapToGrid(delta), scale);
@@ -443,7 +465,7 @@
       snapToGrid(drag.startAt[0] + dx),
       snapToGrid(drag.startAt[1] + dy)
     ];
-    feature.at = nextAt;
+    setFeatureAt(data, drag.level, drag.id, nextAt);
     moveFeatureSvg(canvasElement, data, drag.level, drag.id, nextAt);
     yamlText = dumpPlanYaml(data);
     dirty = true;
@@ -465,6 +487,10 @@
   }
 
   function createWallDrag(id: string, levelId: string, event: PointerEvent, element: SVGGraphicsElement) {
+    const contained = id.match(/^(.+)__(.+)_(north|east|south|west)_wall$/);
+    if (contained) {
+      return createContainedWallDrag(id, levelId, contained[2], contained[3], event, element);
+    }
     const pair = id.match(/^(.+)__(.+)_wall$/);
     if (!pair) {
       return createExteriorWallDrag(id, levelId, event, element);
@@ -496,6 +522,38 @@
       orientation,
       spaces: [pair[1], pair[2]] as [string, string],
       startRects: [leftSpace, rightSpace] as [SpaceRect, SpaceRect],
+      snapshot: structuredClone(data)
+    };
+  }
+
+  function createContainedWallDrag(
+    id: string,
+    levelId: string,
+    innerSpaceId: string,
+    side: string,
+    event: PointerEvent,
+    element: SVGGraphicsElement
+  ) {
+    const innerSpace = resolveSpaceRect(data, levelId, innerSpaceId);
+    const line = lineFromSvgElement(element, Number(data.scale ?? 16));
+    const levelData = ((data.levels as AnyRecord | undefined)?.[levelId] ?? {}) as AnyRecord;
+    if (!innerSpace || !levelData.spaces?.[innerSpaceId] || !line) {
+      setError(`Could not resolve contained wall ${id}.`);
+      return null;
+    }
+    const edge: "left" | "right" | "top" | "bottom" =
+      side === "west" ? "left" : side === "east" ? "right" : side === "north" ? "top" : "bottom";
+    const orientation: "vertical" | "horizontal" = side === "west" || side === "east" ? "vertical" : "horizontal";
+    return {
+      type: "contained-wall" as const,
+      id,
+      level: levelId,
+      startPoint: svgPoint(canvasElement, event),
+      orientation,
+      innerSpace: innerSpaceId,
+      edge,
+      startRect: innerSpace,
+      line,
       snapshot: structuredClone(data)
     };
   }
@@ -568,29 +626,28 @@
   }
 
   function selectObject(kind: SelectionKind, id: string, index?: number) {
-    selected = { kind, level: activeLevel, id, index };
+    selected = { kind, level: selected.level || activeLevel, id, index };
     void tick().then(() => markSelectedInSvg(canvasElement, selected));
     void tick().then(jumpToSelectedYaml);
   }
 
-  function jumpToSelectedYaml() {
+  async function jumpToSelectedYaml() {
     if (!yamlTextarea || !selected.kind || !selected.id) {
+      return;
+    }
+    if (!yamlOpen) {
       return;
     }
     const range = findYamlRangeForSelection(yamlText, selected);
     if (!range) {
       return;
     }
+    await tick();
     yamlTextarea.focus({ preventScroll: true });
     yamlTextarea.setSelectionRange(range.start, range.end);
     const lineHeight = Number.parseFloat(getComputedStyle(yamlTextarea).lineHeight) || 18;
     const line = yamlText.slice(0, range.start).split("\n").length - 1;
     yamlTextarea.scrollTop = Math.max(0, line * lineHeight - yamlTextarea.clientHeight * 0.35);
-  }
-
-  function addPaletteItem(item: PaletteItem) {
-    selected = addPaletteItemToData(data, activeLevel, item);
-    syncDataToYaml();
   }
 
   function updateField(path: Array<string | number>, value: unknown) {
@@ -601,6 +658,16 @@
   function updateNumber(path: Array<string | number>, value: string) {
     const numberValue = Number(value);
     if (!Number.isNaN(numberValue)) {
+      if (
+        path[0] === "levels" &&
+        path[2] === "features" &&
+        path[4] === "at" &&
+        (path[5] === 0 || path[5] === 1)
+      ) {
+        setFeatureAtCoordinate(data, String(path[1]), String(path[3]), path[5], numberValue);
+        syncDataToYaml();
+        return;
+      }
       updateField(path, numberValue);
     }
   }
@@ -616,50 +683,71 @@
     syncDataToYaml();
   }
 
+  function buildConstraintRefs(source: AnyRecord) {
+    const refs: Array<{ value: string; label: string }> = [];
+    const levels = (source.levels as AnyRecord | undefined) ?? {};
+    for (const [levelId, levelData] of Object.entries(levels)) {
+      const levelRecord = levelData as AnyRecord;
+      for (const [id, object] of entries(levelRecord.spaces)) {
+        refs.push({ value: `${levelId}.${id}`, label: `${levelId} room: ${(object.label || id).toString().replaceAll("/", " ")}` });
+      }
+      for (const [id, object] of entries(levelRecord.features)) {
+        refs.push({ value: `${levelId}.${id}`, label: `${levelId} feature: ${(object.label || object.kind || id).toString().replaceAll("/", " ")}` });
+      }
+    }
+    return refs;
+  }
+
   function setError(err: unknown) {
     error = err instanceof Error ? err.message : String(err);
   }
 </script>
 
 <main class="editor-shell">
-  <EditorSidebar
+  <CanvasPane
+    document={planDocument}
     {plans}
     bind:selectedPlan
     {status}
     {dirty}
-    {palette}
-    {levelIds}
-    bind:activeLevel
-    {spaces}
-    {features}
-    {openings}
-    {selected}
+    {error}
+    {svg}
     {selectPlan}
     {renderCurrentYaml}
     {saveCurrentPlan}
-    {addPaletteItem}
-    {selectObject}
-  />
-
-  <CanvasPane
-    document={planDocument}
-    {selected}
-    {error}
-    {svg}
+    bind:canvasZoom
     bind:canvasElement
     {handleCanvasPointerDown}
     {preventCanvasSelection}
     {handleCanvasClick}
   />
 
+  <YamlPane
+    {yamlText}
+    open={yamlOpen}
+    bind:yamlTextarea
+    {onYamlInput}
+    onToggle={() => (yamlOpen = !yamlOpen)}
+  />
+
   <InspectorPane
     {selected}
     {selectedObject}
-    {yamlText}
-    bind:yamlTextarea
+    planData={data}
+    activeLevel={inspectorLevelId}
+    {spaces}
+    datums={(data.datums as AnyRecord | undefined) ?? {}}
+    {connections}
+    {openings}
+    {partitions}
+    {access}
+    {stacks}
+    {alignments}
+    {catalog}
+    {constraintRefs}
     {deleteSelected}
+    {selectObject}
     {updateField}
     {updateNumber}
-    {onYamlInput}
   />
 </main>

@@ -61,6 +61,19 @@ export type SharedWallDrag = {
   snapshot: AnyRecord;
 };
 
+export type ContainedWallDrag = {
+  type: "contained-wall";
+  id: string;
+  level: string;
+  startPoint: { x: number; y: number };
+  orientation: "vertical" | "horizontal";
+  innerSpace: string;
+  edge: "left" | "right" | "top" | "bottom";
+  startRect: SpaceRect;
+  line: WallLine;
+  snapshot: AnyRecord;
+};
+
 export type ExteriorWallDrag = {
   type: "exterior-wall";
   id: string;
@@ -88,4 +101,4 @@ export type OpeningDrag = {
   snapshot: AnyRecord;
 };
 
-export type DragState = FeatureDrag | SharedWallDrag | ExteriorWallDrag | OpeningDrag | null;
+export type DragState = FeatureDrag | SharedWallDrag | ContainedWallDrag | ExteriorWallDrag | OpeningDrag | null;

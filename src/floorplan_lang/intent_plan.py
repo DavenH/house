@@ -50,6 +50,7 @@ def intent_plan_from_dict(data: dict[str, Any]) -> WallPlan:
         notes=list(data.get("notes") or ()),
         stacks=list(data.get("stacks") or ()),
         alignments=list(data.get("alignments") or ()),
+        compass=dict(data.get("compass") or {}),
     )
     catalog = data.get("catalog") or {}
     global_datums = _parse_datums(data.get("datums") or {})
@@ -331,22 +332,70 @@ def _partition_walls(partitions: list[dict[str, Any]], datums: dict[str, dict[st
 def _space_partition_walls(spaces: dict[str, Rect]) -> list[WallSegment]:
     walls = []
     seen: set[tuple[str, float, float, float]] = set()
+
+    def add_wall(wall_id: str, orientation: str, const: float, start: float, end: float) -> None:
+        if end <= start + EPSILON:
+            return
+        key = (orientation, round(const, 6), round(start, 6), round(end, 6))
+        if key in seen:
+            return
+        seen.add(key)
+        if orientation == "horizontal":
+            walls.append(WallSegment(id=wall_id, at=Point(start, const), direction="E", length=end - start))
+        else:
+            walls.append(WallSegment(id=wall_id, at=Point(const, start), direction="S", length=end - start))
+
     items = list(spaces.items())
     for left_index, (left_id, left) in enumerate(items):
         for right_id, right in items[left_index + 1 :]:
             shared = _shared_rect_boundary(left, right)
-            if shared is None:
+            if shared is not None:
+                orientation, const, start, end = shared
+                add_wall(f"{left_id}__{right_id}_wall", orientation, const, start, end)
                 continue
-            orientation, const, start, end = shared
-            key = (orientation, round(const, 6), round(start, 6), round(end, 6))
-            if key in seen:
-                continue
-            seen.add(key)
-            wall_id = f"{left_id}__{right_id}_wall"
-            if orientation == "horizontal":
-                walls.append(WallSegment(id=wall_id, at=Point(start, const), direction="E", length=end - start))
-            else:
-                walls.append(WallSegment(id=wall_id, at=Point(const, start), direction="S", length=end - start))
+            contained = _contained_space_boundary_walls(left_id, left, right_id, right)
+            for wall_id, orientation, const, start, end in contained:
+                add_wall(wall_id, orientation, const, start, end)
+    return walls
+
+
+def _contained_space_boundary_walls(
+    left_id: str, left: Rect, right_id: str, right: Rect
+) -> list[tuple[str, str, float, float, float]]:
+    if _rect_contains(left, right):
+        return _inner_boundary_walls(left_id, left, right_id, right)
+    if _rect_contains(right, left):
+        return _inner_boundary_walls(right_id, right, left_id, left)
+    return []
+
+
+def _rect_contains(outer: Rect, inner: Rect) -> bool:
+    return (
+        inner.left >= outer.left - EPSILON
+        and inner.right <= outer.right + EPSILON
+        and inner.top >= outer.top - EPSILON
+        and inner.bottom <= outer.bottom + EPSILON
+        and (
+            inner.left > outer.left + EPSILON
+            or inner.right < outer.right - EPSILON
+            or inner.top > outer.top + EPSILON
+            or inner.bottom < outer.bottom - EPSILON
+        )
+    )
+
+
+def _inner_boundary_walls(
+    outer_id: str, outer: Rect, inner_id: str, inner: Rect
+) -> list[tuple[str, str, float, float, float]]:
+    walls = []
+    if inner.top > outer.top + EPSILON:
+        walls.append((f"{outer_id}__{inner_id}_north_wall", "horizontal", inner.top, inner.left, inner.right))
+    if inner.right < outer.right - EPSILON:
+        walls.append((f"{outer_id}__{inner_id}_east_wall", "vertical", inner.right, inner.top, inner.bottom))
+    if inner.bottom < outer.bottom - EPSILON:
+        walls.append((f"{outer_id}__{inner_id}_south_wall", "horizontal", inner.bottom, inner.left, inner.right))
+    if inner.left > outer.left + EPSILON:
+        walls.append((f"{outer_id}__{inner_id}_west_wall", "vertical", inner.left, inner.top, inner.bottom))
     return walls
 
 
@@ -412,8 +461,10 @@ def _compile_area_labels(spaces: dict[str, Any], rects: dict[str, Rect]) -> list
                 at=label_at,
                 label=space_data.get("label", _default_label(space_id)),
                 kind=space_data.get("label_kind", "open_area" if space_data.get("privacy") == "public" else "area"),
-                size=float(space_data.get("label_size", 16)),
+                size=float(space_data.get("label_size", 12)),
                 angle=float(space_data.get("label_angle", 0)),
+                anchor=space_data.get("label_anchor", "middle" if "label_at" in space_data else "end"),
+                vertical_anchor=space_data.get("label_vertical_anchor", "middle" if "label_at" in space_data else "top"),
             )
         )
     return areas
@@ -423,7 +474,7 @@ def _label_at(space_data: dict[str, Any], rect: Rect) -> Point:
     if "label_at" in space_data:
         at = space_data["label_at"]
         return Point(float(at[0]), float(at[1]))
-    return rect.center
+    return Point(rect.right - min(0.6, rect.w / 3), rect.top + min(0.8, rect.h / 3))
 
 
 def _compile_features(
@@ -511,10 +562,15 @@ def _compile_connections(connections: list[Any], context: IntentContext) -> list
         b = context.spaces[b_id]
         kind = data.get("kind", "door")
         width = float(data.get("width", 3))
-        wall, overlap_start, overlap_end = _shared_wall(context, a, b)
+        try:
+            wall, overlap_start, overlap_end = _shared_wall(context, a, b)
+        except ValueError as exc:
+            raise ValueError(
+                f"Connection {index} between {a_id!r} and {b_id!r} has no positive shared wall boundary"
+            ) from exc
         opening_width = (
             overlap_end - overlap_start
-            if kind == "open" or (kind == "arch" and "width" not in data)
+            if (kind == "open" and "width" not in data) or (kind == "arch" and "width" not in data)
             else min(width, overlap_end - overlap_start)
         )
         if "offset" in data:
@@ -548,6 +604,7 @@ def _compile_openings(openings: list[dict[str, Any]], context: IntentContext) ->
         if "between" in data:
             compiled.extend(_compile_connections([data], context))
             continue
+        kind = data.get("kind", "door")
         wall_id = data.get("wall")
         offset = data.get("offset")
         if "space" in data and "side" in data:
@@ -557,13 +614,19 @@ def _compile_openings(openings: list[dict[str, Any]], context: IntentContext) ->
             width = float(data["width"])
             offset = _opening_offset(wall, start, end, width, data.get("position", "center"))
             wall_id = wall.id
+        width = float(data["width"]) if "width" in data else 0
+        if kind in {"open", "arch"} and wall_id in context.walls:
+            wall = context.walls[wall_id]
+            offset = max(0, min(float(offset or 0), wall.length))
+            available = max(wall.length - offset, 0)
+            width = available if "width" not in data else min(width, available)
         compiled.append(
             WallOpening(
                 id=data.get("id", f"opening_{index}"),
                 wall=wall_id,
                 offset=float(offset),
-                width=float(data["width"]),
-                kind=data.get("kind", "door"),
+                width=width,
+                kind=kind,
                 swing=data.get("swing", "in"),
             )
         )
@@ -688,7 +751,7 @@ def _wall_for_boundary(
             matches.append((wall, overlap_start, overlap_end))
     if not matches:
         raise ValueError(f"No wall found on {orientation} boundary {const} from {start} to {end}")
-    return max(matches, key=lambda match: match[2] - match[1])
+    return max(matches, key=lambda match: (match[2] - match[1], -(match[0].length - (match[2] - match[1]))))
 
 
 def _default_daylight(space_id: str, space_data: dict[str, Any]) -> str:

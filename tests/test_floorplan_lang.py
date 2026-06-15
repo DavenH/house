@@ -64,6 +64,57 @@ def test_intent_plan_compiles_shared_masses_and_inferred_door() -> None:
     assert plan.levels["L1"].zones[0].rect == Rect(0, 0, 10, 12)
 
 
+def test_intent_plan_derives_partition_walls_for_contained_room() -> None:
+    plan = intent_plan_from_dict(
+        {
+            "type": "intent_plan",
+            "plan": "contained-room-test",
+            "levels": {
+                "L1": {
+                    "derive_partitions": True,
+                    "spaces": {
+                        "great_room": {"rect": [0, 0, 20, 17]},
+                        "pantry": {"rect": [8, 12, 4, 5]},
+                        "kitchen": {"rect": [0, 17, 20, 8]},
+                    },
+                }
+            },
+        }
+    )
+
+    wall_ids = {wall.id for wall in plan.levels["L1"].walls}
+
+    assert "great_room__pantry_north_wall" in wall_ids
+    assert "great_room__pantry_west_wall" in wall_ids
+    assert "great_room__pantry_east_wall" in wall_ids
+    assert "pantry__kitchen_wall" in wall_ids
+
+
+def test_intent_plan_prefers_specific_contained_room_wall_for_connection() -> None:
+    plan = intent_plan_from_dict(
+        {
+            "type": "intent_plan",
+            "plan": "contained-room-connection-test",
+            "levels": {
+                "L1": {
+                    "derive_partitions": True,
+                    "spaces": {
+                        "great_room": {"rect": [0, 0, 20, 17]},
+                        "pantry": {"rect": [8, 12, 4, 5]},
+                        "kitchen": {"rect": [0, 17, 20, 8]},
+                    },
+                    "connections": [{"between": ["kitchen", "pantry"], "width": 3}],
+                }
+            },
+        }
+    )
+
+    opening = plan.levels["L1"].openings[0]
+
+    assert opening.wall == "pantry__kitchen_wall"
+    assert opening.width == 3
+
+
 def test_intent_plan_places_wall_side_window_and_counter_extrusion() -> None:
     plan = intent_plan_from_dict(
         {
@@ -131,6 +182,133 @@ def test_intent_plan_validates_private_space_access() -> None:
                 },
             }
         )
+
+
+def test_intent_plan_reports_connection_without_positive_shared_wall() -> None:
+    with pytest.raises(ValueError, match="Connection 1 between 'foyer' and 'hall' has no positive shared wall boundary"):
+        intent_plan_from_dict(
+            {
+                "type": "intent_plan",
+                "plan": "intent-zero-overlap-connection-test",
+                "datums": {"x": {"w": 0, "m": 10, "e": 20}, "y": {"n": 0, "m": 10, "s": 20}},
+                "levels": {
+                    "L1": {
+                        "derive_partitions": True,
+                        "spaces": {
+                            "foyer": {"x": ["w", "m"], "y": ["n", "m"]},
+                            "hall": {"x": ["m", "e"], "y": ["m", "s"]},
+                        },
+                        "connections": [["foyer", "hall"]],
+                    }
+                },
+            }
+        )
+
+
+def test_intent_plan_clamps_explicit_open_wall_opening_to_wall_length() -> None:
+    plan = intent_plan_from_dict(
+        {
+            "type": "intent_plan",
+            "plan": "open-wall-clamp-test",
+            "levels": {
+                "L1": {
+                    "derive_partitions": True,
+                    "spaces": {
+                        "left": {"rect": [0, 0, 10, 6]},
+                        "right": {"rect": [10, 0, 8, 6]},
+                    },
+                    "openings": [
+                        {"id": "left__right_wall_open", "wall": "left__right_wall", "offset": 0, "width": 12, "kind": "open"}
+                    ],
+                }
+            },
+        }
+    )
+
+    opening = next(opening for opening in plan.levels["L1"].openings if opening.id == "left__right_wall_open")
+
+    assert opening.width == 6
+    assert not plan.validate(strict_features=False)
+
+
+def test_intent_room_labels_include_room_dimensions() -> None:
+    plan = intent_plan_from_dict(
+        {
+            "type": "intent_plan",
+            "plan": "room-dimension-label-test",
+            "levels": {
+                "L1": {
+                    "spaces": {
+                        "office": {"rect": [0, 0, 10.5, 8], "label": "OFFICE"},
+                    },
+                }
+            },
+        }
+    )
+
+    svg = render_wall_plan_svg(plan)
+
+    assert '<text class="label-dimension"' in svg
+    assert "10.5&#x27; x 8&#x27;</text>" in svg
+
+
+def test_feature_fit_can_use_open_connected_room_union() -> None:
+    plan = intent_plan_from_dict(
+        {
+            "type": "intent_plan",
+            "plan": "open-suite-feature-fit-test",
+            "levels": {
+                "L1": {
+                    "derive_partitions": True,
+                    "spaces": {
+                        "library": {"rect": [0, 0, 12, 8]},
+                        "studio": {"rect": [4, 8, 8, 4]},
+                    },
+                    "features": {
+                        "desk": {"kind": "rectangle", "within": "studio", "at": [8, 8], "size": [4, 2]},
+                    },
+                    "connections": [{"between": ["library", "studio"], "kind": "open"}],
+                }
+            },
+        }
+    )
+
+    assert not plan.validate(strict_features=True)
+
+
+def test_feature_clearance_can_extend_through_full_open_walls() -> None:
+    plan = intent_plan_from_dict(
+        {
+            "type": "intent_plan",
+            "plan": "open-dining-clearance-test",
+            "levels": {
+                "L1": {
+                    "derive_partitions": True,
+                    "spaces": {
+                        "great_room": {"rect": [0, 0, 10, 6]},
+                        "kitchen": {"rect": [0, 6, 10, 6]},
+                        "dining": {"rect": [10, 0, 8, 12]},
+                    },
+                    "features": {
+                        "table": {
+                            "kind": "rectangle",
+                            "within": "dining",
+                            "at": [12, 6],
+                            "size": [4, 3],
+                            "clearance": {"around": 2},
+                        },
+                    },
+                    "openings": [
+                        {"id": "great_room__dining_wall_open", "wall": "great_room__dining_wall", "offset": 0, "kind": "open"},
+                        {"id": "great_room__kitchen_wall_open", "wall": "great_room__kitchen_wall", "offset": 0, "kind": "open"},
+                        {"id": "kitchen__dining_wall_open", "wall": "kitchen__dining_wall", "offset": 0, "kind": "open"},
+                    ],
+                }
+            },
+        }
+    )
+
+    assert not plan.validate(strict_features=True)
 
 
 def test_intent_plan_derives_windows_from_daylight_intent() -> None:
@@ -481,7 +659,7 @@ def test_wall_plan_offsets_exterior_walls_outward() -> None:
     assert 'class="exterior-wall"' in svg
     assert 'M 0.000 0.000 L 160.000 0.000' in svg
     assert 'class="floor-mask"' not in svg
-    assert 'class="interior" x1="0.000" y1="32.000" x2="160.000" y2="32.000"' in svg
+    assert 'class="interior" x="0.000" y="29.600" width="160.000" height="4.800"' in svg
 
 
 def test_wall_plan_renders_doors_without_swing_arcs() -> None:
@@ -624,7 +802,7 @@ def test_wall_plan_renders_feature_label_above_fixture_and_around_clearance() ->
                 "L1": {
                     "features": {
                         "table": {
-                            "kind": "dining_table",
+                            "kind": "rectangle",
                             "at": [10, 10],
                             "size": [7, 3],
                             "label": "TABLE",
@@ -638,9 +816,62 @@ def test_wall_plan_renders_feature_label_above_fixture_and_around_clearance() ->
 
     svg = render_wall_plan_svg(plan)
 
-    assert 'width="192.000"' in svg
-    assert 'height="128.000"' in svg
+    assert 'id="clearance-hatch-0"' in svg
+    assert 'stroke="#a9d4dc"' in svg
+    assert '<path class="clearance" fill-rule="evenodd"' in svg
+    assert 'fill="url(#clearance-hatch-0)"' in svg
+    assert 'rx="1.920" ry="1.920"' in svg
+    assert 'M 64.000 96.000 L 256.000 96.000 L 256.000 224.000 L 64.000 224.000 Z' in svg
     assert 'y="130.400">TABLE</text>' in svg
+
+
+def test_wall_plan_dimensions_measure_outer_face_as_chained_baseline() -> None:
+    plan = wall_plan_from_dict(
+        {
+            "type": "wall_plan",
+            "plan": "dimension-test",
+            "levels": {
+                "L1": {
+                    "perimeters": {"box": {"start": [0, 0], "walk": [["E", 10], ["S", 8], ["W", 10], ["N", 8]]}},
+                }
+            },
+        }
+    )
+
+    svg = render_wall_plan_svg(plan)
+
+    assert '<line class="dimension" x1="-16.000" y1="-34.400" x2="176.000" y2="-34.400" />' in svg
+    assert '<line class="dimension" x1="-34.400" y1="-16.000" x2="-34.400" y2="144.000" />' in svg
+    assert '<line class="dimension-projection" x1="-16.000" y1="-34.400" x2="-16.000" y2="-16.000" />' in svg
+    assert '<text class="dimension-label" x="80.000" y="-41.600">12\'</text>' in svg
+    assert svg.count(">12'</text>") == 2
+    assert svg.count(">10'</text>") == 2
+
+
+def test_wall_plan_dimensions_keep_jog_ticks_on_local_side() -> None:
+    plan = wall_plan_from_dict(
+        {
+            "type": "wall_plan",
+            "plan": "dimension-local-jog-test",
+            "levels": {
+                "L1": {
+                    "perimeters": {
+                        "body": {
+                            "start": [0, 0],
+                            "walk": [["E", 10], ["S", 4], ["E", 5], ["S", 6], ["W", 15], ["N", 10]],
+                        }
+                    },
+                }
+            },
+        }
+    )
+
+    svg = render_wall_plan_svg(plan)
+
+    assert '<text class="dimension-label" x="80.000" y="-41.600">12\'</text>' in svg
+    assert '<text class="dimension-label" x="216.000" y="-41.600">5\'</text>' in svg
+    assert '<text class="dimension-label" x="120.000" y="201.600">17\'</text>' in svg
+    assert '<line class="dimension" x1="-16.000" y1="194.400" x2="256.000" y2="194.400" />' in svg
 
 
 def test_wall_plan_validates_feature_wall_clearance() -> None:
@@ -691,6 +922,30 @@ def test_wall_plan_validates_feature_fit_inside_zone() -> None:
     )
 
     assert any("does not fit within 'master'" in error for error in plan.validate())
+
+
+def test_wall_render_allows_feature_fit_advisories() -> None:
+    plan = wall_plan_from_dict(
+        {
+            "type": "wall_plan",
+            "plan": "advisory-render-test",
+            "levels": {
+                "L1": {
+                    "zones": {"left": {"rect": [0, 0, 6, 8], "label": "LEFT"}},
+                    "features": {
+                        "desk": {
+                            "within": "left",
+                            "at": [7, 4],
+                            "size": [3, 2],
+                        }
+                    },
+                }
+            },
+        }
+    )
+
+    assert any("does not fit within 'left'" in error for error in plan.validate())
+    assert "<svg" in render_wall_plan_svg(plan)
 
 
 def test_wall_plan_validates_around_clearance_inside_zone() -> None:

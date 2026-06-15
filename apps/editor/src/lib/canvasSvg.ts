@@ -1,4 +1,4 @@
-import type { AnyRecord, OpeningDrag, Selection, SharedWallDrag, SpaceRect, WallLine } from "./types";
+import type { AnyRecord, ContainedWallDrag, OpeningDrag, Selection, SharedWallDrag, SpaceRect, WallLine } from "./types";
 import { movedLine, movedPreviewRect, openingDeltaVector, wallLineFromRects } from "./geometry";
 import { normalizeSvgKind } from "./planEditing";
 
@@ -157,6 +157,31 @@ export function previewSharedWallSvg(
   updateSpaceSvg(canvasElement, secondId, secondNext, scale);
   updateWallLineSvg(canvasElement, wallDrag, firstNext, secondNext, scale);
   updateWallPreviewSvg(canvasElement, wallDrag.id, wallLineFromRects(wallDrag.orientation, firstNext, secondNext), scale);
+}
+
+export function previewContainedWallSvg(
+  canvasElement: HTMLDivElement | undefined,
+  wallDrag: ContainedWallDrag,
+  delta: number,
+  scale: number
+) {
+  if (!canvasElement) {
+    return;
+  }
+  const next = { ...wallDrag.startRect };
+  if (wallDrag.edge === "left") {
+    next.left += delta;
+  } else if (wallDrag.edge === "right") {
+    next.right += delta;
+  } else if (wallDrag.edge === "top") {
+    next.top += delta;
+  } else {
+    next.bottom += delta;
+  }
+  next.width = next.right - next.left;
+  next.height = next.bottom - next.top;
+  updateSpaceSvg(canvasElement, wallDrag.innerSpace, next, scale);
+  updateWallPreviewSvg(canvasElement, wallDrag.id, movedLine(wallDrag.line, wallDrag.orientation, delta), scale);
 }
 
 export function previewExteriorWallSvg(

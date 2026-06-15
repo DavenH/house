@@ -1,5 +1,6 @@
 import type {
   AnyRecord,
+  ContainedWallDrag,
   ExteriorWallDrag,
   MassEdgeRef,
   OpeningDrag,
@@ -73,20 +74,33 @@ export function moveSharedWall(data: AnyRecord, wallDrag: SharedWallDrag, delta:
     return;
   }
   const touchedDatums = new Set<string>();
+  const movedEdges = new Set<string>();
   if (wallDrag.orientation === "vertical") {
     if (Math.abs(first.right - second.left) < 0.01) {
-      updateSpaceEdge(data, wallDrag.level, firstId, "right", delta, touchedDatums);
-      updateSpaceEdge(data, wallDrag.level, secondId, "left", delta, touchedDatums);
+      if (moveSharedDatumBoundary(data, wallDrag.level, firstId, "right", secondId, "left", delta, touchedDatums)) {
+        return;
+      }
+      moveSpaceEdgeAndStackedMembers(data, wallDrag.level, firstId, "right", delta, touchedDatums, movedEdges);
+      moveSpaceEdgeAndStackedMembers(data, wallDrag.level, secondId, "left", delta, touchedDatums, movedEdges);
     } else {
-      updateSpaceEdge(data, wallDrag.level, firstId, "left", delta, touchedDatums);
-      updateSpaceEdge(data, wallDrag.level, secondId, "right", delta, touchedDatums);
+      if (moveSharedDatumBoundary(data, wallDrag.level, firstId, "left", secondId, "right", delta, touchedDatums)) {
+        return;
+      }
+      moveSpaceEdgeAndStackedMembers(data, wallDrag.level, firstId, "left", delta, touchedDatums, movedEdges);
+      moveSpaceEdgeAndStackedMembers(data, wallDrag.level, secondId, "right", delta, touchedDatums, movedEdges);
     }
   } else if (Math.abs(first.bottom - second.top) < 0.01) {
-    updateSpaceEdge(data, wallDrag.level, firstId, "bottom", delta, touchedDatums);
-    updateSpaceEdge(data, wallDrag.level, secondId, "top", delta, touchedDatums);
+    if (moveSharedDatumBoundary(data, wallDrag.level, firstId, "bottom", secondId, "top", delta, touchedDatums)) {
+      return;
+    }
+    moveSpaceEdgeAndStackedMembers(data, wallDrag.level, firstId, "bottom", delta, touchedDatums, movedEdges);
+    moveSpaceEdgeAndStackedMembers(data, wallDrag.level, secondId, "top", delta, touchedDatums, movedEdges);
   } else {
-    updateSpaceEdge(data, wallDrag.level, firstId, "top", delta, touchedDatums);
-    updateSpaceEdge(data, wallDrag.level, secondId, "bottom", delta, touchedDatums);
+    if (moveSharedDatumBoundary(data, wallDrag.level, firstId, "top", secondId, "bottom", delta, touchedDatums)) {
+      return;
+    }
+    moveSpaceEdgeAndStackedMembers(data, wallDrag.level, firstId, "top", delta, touchedDatums, movedEdges);
+    moveSpaceEdgeAndStackedMembers(data, wallDrag.level, secondId, "bottom", delta, touchedDatums, movedEdges);
   }
 }
 
@@ -95,10 +109,20 @@ export function moveExteriorWall(data: AnyRecord, wallDrag: ExteriorWallDrag, de
     return;
   }
   const touchedDatums = new Set<string>();
+  const movedEdges = new Set<string>();
   for (const edgeRef of wallDrag.edgeRefs) {
     updateMassEdge(data, edgeRef, delta, touchedDatums);
   }
-  updateSpacesAlongExteriorWall(data, wallDrag, delta, touchedDatums);
+  updateSpacesAlongExteriorWall(data, wallDrag, delta, touchedDatums, movedEdges);
+}
+
+export function moveContainedWall(data: AnyRecord, wallDrag: ContainedWallDrag, delta: number) {
+  if (delta === 0) {
+    return;
+  }
+  const touchedDatums = new Set<string>();
+  const movedEdges = new Set<string>();
+  moveSpaceEdgeAndStackedMembers(data, wallDrag.level, wallDrag.innerSpace, wallDrag.edge, delta, touchedDatums, movedEdges);
 }
 
 export function findMassEdgeRefs(
@@ -306,7 +330,8 @@ function updateSpacesAlongExteriorWall(
   data: AnyRecord,
   wallDrag: ExteriorWallDrag,
   delta: number,
-  touchedDatums: Set<string>
+  touchedDatums: Set<string>,
+  movedEdges: Set<string>
 ) {
   const levels = (data.levels ?? {}) as AnyRecord;
   for (const [levelId, levelData] of Object.entries(levels)) {
@@ -323,10 +348,10 @@ function updateSpacesAlongExteriorWall(
           continue;
         }
         if (Math.abs(rect.left - x) < 0.01) {
-          updateSpaceEdge(data, levelId, spaceId, "left", delta, touchedDatums);
+          moveSpaceEdgeAndStackedMembers(data, levelId, spaceId, "left", delta, touchedDatums, movedEdges);
         }
         if (Math.abs(rect.right - x) < 0.01) {
-          updateSpaceEdge(data, levelId, spaceId, "right", delta, touchedDatums);
+          moveSpaceEdgeAndStackedMembers(data, levelId, spaceId, "right", delta, touchedDatums, movedEdges);
         }
       } else {
         const y = wallDrag.line.y1;
@@ -336,33 +361,212 @@ function updateSpacesAlongExteriorWall(
           continue;
         }
         if (Math.abs(rect.top - y) < 0.01) {
-          updateSpaceEdge(data, levelId, spaceId, "top", delta, touchedDatums);
+          moveSpaceEdgeAndStackedMembers(data, levelId, spaceId, "top", delta, touchedDatums, movedEdges);
         }
         if (Math.abs(rect.bottom - y) < 0.01) {
-          updateSpaceEdge(data, levelId, spaceId, "bottom", delta, touchedDatums);
+          moveSpaceEdgeAndStackedMembers(data, levelId, spaceId, "bottom", delta, touchedDatums, movedEdges);
         }
       }
     }
   }
 }
 
+type SpaceEdge = "left" | "right" | "top" | "bottom";
+
+function moveSharedDatumBoundary(
+  data: AnyRecord,
+  levelId: string,
+  firstSpaceId: string,
+  firstEdge: SpaceEdge,
+  secondSpaceId: string,
+  secondEdge: SpaceEdge,
+  delta: number,
+  touchedDatums: Set<string>
+) {
+  const firstDatum = edgeDatumRef(data, levelId, firstSpaceId, firstEdge);
+  const secondDatum = edgeDatumRef(data, levelId, secondSpaceId, secondEdge);
+  if (!firstDatum || firstDatum !== secondDatum) {
+    return false;
+  }
+  const axis = firstEdge === "left" || firstEdge === "right" ? "x" : "y";
+  return updateDatum(data, axis, firstDatum, delta, touchedDatums);
+}
+
+function edgeDatumRef(data: AnyRecord, levelId: string, spaceId: string, edge: SpaceEdge) {
+  const space = ((data.levels as AnyRecord)?.[levelId]?.spaces ?? {})[spaceId] as AnyRecord | undefined;
+  if (!space) {
+    return null;
+  }
+  const axis = edge === "left" || edge === "right" ? "x" : "y";
+  const index = edge === "left" || edge === "top" ? 0 : 1;
+  const value = Array.isArray(space[axis]) ? space[axis][index] : null;
+  return typeof value === "string" ? value : null;
+}
+
+function moveSpaceEdgeAndStackedMembers(
+  data: AnyRecord,
+  levelId: string,
+  spaceId: string,
+  edge: SpaceEdge,
+  delta: number,
+  touchedDatums: Set<string>,
+  movedEdges: Set<string>
+) {
+  if (!moveSpaceEdge(data, levelId, spaceId, edge, delta, touchedDatums, movedEdges)) {
+    return;
+  }
+  moveConstrainedStackMembers(data, levelId, spaceId, edge, delta, touchedDatums, movedEdges);
+}
+
+function moveSpaceEdge(
+  data: AnyRecord,
+  levelId: string,
+  spaceId: string,
+  edge: SpaceEdge,
+  delta: number,
+  touchedDatums: Set<string>,
+  movedEdges: Set<string>
+) {
+  const key = `${levelId}.${spaceId}.${edge}`;
+  if (movedEdges.has(key)) {
+    return false;
+  }
+  movedEdges.add(key);
+  return updateSpaceEdge(data, levelId, spaceId, edge, delta, touchedDatums);
+}
+
+function moveConstrainedStackMembers(
+  data: AnyRecord,
+  levelId: string,
+  spaceId: string,
+  edge: SpaceEdge,
+  delta: number,
+  touchedDatums: Set<string>,
+  movedEdges: Set<string>
+) {
+  const sourceRef = `${levelId}.${spaceId}`;
+  for (const stack of (data.stacks ?? []) as AnyRecord[]) {
+    const members = Array.isArray(stack.members) ? stack.members : [];
+    if (!members.includes(sourceRef) || !stackConstrainsEdge(stack, edge)) {
+      continue;
+    }
+    for (const member of members) {
+      if (member === sourceRef || typeof member !== "string" || !member.includes(".")) {
+        continue;
+      }
+      const [targetLevel, targetSpace] = member.split(".", 2);
+      moveStackedSpaceEdgeAndNeighbors(data, targetLevel, targetSpace, edge, delta, touchedDatums, movedEdges);
+    }
+  }
+}
+
+function moveStackedSpaceEdgeAndNeighbors(
+  data: AnyRecord,
+  levelId: string,
+  spaceId: string,
+  edge: SpaceEdge,
+  delta: number,
+  touchedDatums: Set<string>,
+  movedEdges: Set<string>
+) {
+  const before = resolveSpaceRect(data, levelId, spaceId);
+  if (!before || !moveSpaceEdge(data, levelId, spaceId, edge, delta, touchedDatums, movedEdges)) {
+    return;
+  }
+  moveAdjacentEdges(data, levelId, spaceId, before, edge, delta, touchedDatums, movedEdges);
+}
+
+function moveAdjacentEdges(
+  data: AnyRecord,
+  levelId: string,
+  movedSpaceId: string,
+  before: SpaceRect,
+  movedEdge: SpaceEdge,
+  delta: number,
+  touchedDatums: Set<string>,
+  movedEdges: Set<string>
+) {
+  const spaces = (((data.levels as AnyRecord)?.[levelId] ?? {}) as AnyRecord).spaces ?? {};
+  for (const [spaceId] of Object.entries(spaces)) {
+    if (spaceId === movedSpaceId) {
+      continue;
+    }
+    const rect = resolveSpaceRect(data, levelId, spaceId);
+    if (!rect || !sharesMovedBoundary(before, rect, movedEdge)) {
+      continue;
+    }
+    moveSpaceEdgeAndStackedMembers(
+      data,
+      levelId,
+      spaceId,
+      oppositeEdge(movedEdge),
+      delta,
+      touchedDatums,
+      movedEdges
+    );
+  }
+}
+
+function sharesMovedBoundary(before: SpaceRect, rect: SpaceRect, edge: SpaceEdge) {
+  if (edge === "bottom") {
+    return Math.abs(rect.top - before.bottom) < 0.01 && intervalsOverlap(rect.left, rect.right, before.left, before.right);
+  }
+  if (edge === "top") {
+    return Math.abs(rect.bottom - before.top) < 0.01 && intervalsOverlap(rect.left, rect.right, before.left, before.right);
+  }
+  if (edge === "right") {
+    return Math.abs(rect.left - before.right) < 0.01 && intervalsOverlap(rect.top, rect.bottom, before.top, before.bottom);
+  }
+  return Math.abs(rect.right - before.left) < 0.01 && intervalsOverlap(rect.top, rect.bottom, before.top, before.bottom);
+}
+
+function oppositeEdge(edge: SpaceEdge): SpaceEdge {
+  if (edge === "bottom") {
+    return "top";
+  }
+  if (edge === "top") {
+    return "bottom";
+  }
+  if (edge === "right") {
+    return "left";
+  }
+  return "right";
+}
+
+function stackConstrainsEdge(stack: AnyRecord, edge: SpaceEdge) {
+  const same = Array.isArray(stack.same) ? stack.same : [];
+  if (same.includes("bbox")) {
+    return true;
+  }
+  if (edge === "left") {
+    return same.includes("x") || same.includes("w");
+  }
+  if (edge === "right") {
+    return same.includes("w");
+  }
+  if (edge === "top") {
+    return same.includes("y") || same.includes("h");
+  }
+  return same.includes("h");
+}
+
 function updateSpaceEdge(
   data: AnyRecord,
   levelId: string,
   spaceId: string,
-  edge: "left" | "right" | "top" | "bottom",
+  edge: SpaceEdge,
   delta: number,
   touchedDatums: Set<string>
 ) {
   const space = ((data.levels as AnyRecord)?.[levelId]?.spaces ?? {})[spaceId] as AnyRecord | undefined;
   if (!space) {
-    return;
+    return false;
   }
   const axis = edge === "left" || edge === "right" ? "x" : "y";
   const datumIndex = edge === "left" || edge === "top" ? 0 : 1;
   if (Array.isArray(space[axis])) {
     updateCellEdge(data, space, axis, datumIndex, delta, touchedDatums);
-    return;
+    return true;
   }
   if (Array.isArray(space.rect)) {
     if (edge === "left") {
@@ -376,7 +580,9 @@ function updateSpaceEdge(
     } else {
       space.rect[3] = snapToGrid(Number(space.rect[3]) + delta);
     }
+    return true;
   }
+  return false;
 }
 
 function updateCellEdge(
@@ -390,10 +596,34 @@ function updateCellEdge(
   if (!Array.isArray(owner[axis])) {
     return;
   }
-  const current = datumValue(data, axis, owner[axis][edgeIndex]);
+  const currentRef = owner[axis][edgeIndex];
+  if (typeof currentRef === "string" && updateDatum(data, axis, currentRef, delta, _touchedDatums)) {
+    return;
+  }
+  const current = datumValue(data, axis, currentRef);
   if (current !== null) {
     owner[axis][edgeIndex] = snapToGrid(current + delta);
   }
+}
+
+function updateDatum(
+  data: AnyRecord,
+  axis: "x" | "y",
+  datumId: string,
+  delta: number,
+  touchedDatums: Set<string>
+) {
+  const key = `${axis}.${datumId}`;
+  if (touchedDatums.has(key)) {
+    return true;
+  }
+  const axisDatums = ((data.datums ?? {}) as AnyRecord)[axis] ?? {};
+  if (typeof axisDatums[datumId] !== "number") {
+    return false;
+  }
+  axisDatums[datumId] = snapToGrid(Number(axisDatums[datumId]) + delta);
+  touchedDatums.add(key);
+  return true;
 }
 
 function datumValue(sourceData: AnyRecord, axis: "x" | "y", value: unknown): number | null {

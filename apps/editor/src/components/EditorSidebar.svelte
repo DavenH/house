@@ -12,6 +12,7 @@
   export let spaces: Array<[string, AnyRecord]> = [];
   export let features: Array<[string, AnyRecord]> = [];
   export let openings: AnyRecord[] = [];
+  export let connections: AnyRecord[] = [];
   export let selected: Selection = { kind: "", level: "", id: "" };
   export let selectPlan: (name: string) => void | Promise<void>;
   export let renderCurrentYaml: () => void | Promise<void>;
@@ -22,6 +23,12 @@
   function clearSelectHighlight(event: Event) {
     (event.currentTarget as HTMLSelectElement).blur();
     window.getSelection()?.removeAllRanges();
+  }
+
+  function connectionLabel(connection: unknown, index: number) {
+    const data = Array.isArray(connection) ? { between: connection } : ((connection ?? {}) as AnyRecord);
+    const between = Array.isArray(data.between) ? data.between.join(" - ") : `connection ${index + 1}`;
+    return `${index + 1}. ${between}`;
   }
 </script>
 
@@ -107,6 +114,19 @@
           on:click={() => selectObject("opening", opening.id, index)}
         >
           {opening.id}
+        </button>
+      {/each}
+    </div>
+
+    <h3>Connections</h3>
+    <div class="object-list">
+      {#each connections as connection, index}
+        <button
+          type="button"
+          class:selected={selected.kind === "connection" && selected.index === index && selected.level === activeLevel}
+          on:click={() => selectObject("connection", String(index), index)}
+        >
+          {connectionLabel(connection, index)}
         </button>
       {/each}
     </div>

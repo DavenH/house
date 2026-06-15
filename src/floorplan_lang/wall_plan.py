@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from html import escape
+from math import cos, radians, sin
 from pathlib import Path
 from typing import Any, Literal
 
@@ -15,6 +16,7 @@ Direction = Literal["N", "E", "S", "W"]
 
 EXTERIOR_WALL_THICKNESS_FT = 1.0
 INTERIOR_WALL_STROKE_FT = 0.3
+CLEARANCE_PALETTE = ("#a9d4dc", "#d2bde0", "#ddca9f", "#afd5ad", "#ddb2ae", "#b7c6e3")
 
 
 @dataclass(frozen=True)
@@ -51,6 +53,8 @@ class AreaLabel:
     kind: str = "area"
     size: float = 16
     angle: float = 0
+    anchor: str = "middle"
+    vertical_anchor: str = "middle"
 
 
 @dataclass(frozen=True)
@@ -125,17 +129,18 @@ class WallPlan:
     notes: list[str] = field(default_factory=list)
     stacks: list[dict[str, Any]] = field(default_factory=list)
     alignments: list[dict[str, Any]] = field(default_factory=list)
+    compass: dict[str, Any] = field(default_factory=dict)
 
-    def validate(self) -> list[str]:
+    def validate(self, *, strict_features: bool = True) -> list[str]:
         errors: list[str] = []
         for level in self.levels.values():
-            errors.extend(_validate_level(level))
+            errors.extend(_validate_level(level, strict_features=strict_features))
         errors.extend(_validate_named_constraints(self, self.stacks, "stack"))
         errors.extend(_validate_named_constraints(self, self.alignments, "alignment"))
         return errors
 
-    def require_valid(self) -> None:
-        errors = self.validate()
+    def require_valid(self, *, strict_features: bool = True) -> None:
+        errors = self.validate(strict_features=strict_features)
         if errors:
             raise ValueError("Invalid wall plan:\n- " + "\n- ".join(errors))
 
@@ -154,6 +159,7 @@ def wall_plan_from_dict(data: dict[str, Any]) -> WallPlan:
         notes=list(data.get("notes") or ()),
         stacks=list(data.get("stacks") or ()),
         alignments=list(data.get("alignments") or ()),
+        compass=dict(data.get("compass") or {}),
     )
     for level_id, level_data in (data.get("levels") or {}).items():
         level = WallLevel(id=level_id, title=level_data.get("title"))
@@ -256,15 +262,16 @@ def render_wall_plan_svg(
     plan: WallPlan,
     path: str | Path | None = None,
     *,
-    padding: float = 4,
+    padding: float = 3,
 ) -> str:
-    plan.require_valid()
+    plan.require_valid(strict_features=False)
     scale = plan.scale
     level_boxes = {level_id: _level_bbox(level).padded(padding) for level_id, level in plan.levels.items()}
-    max_width_ft = max(box.w for box in level_boxes.values())
-    total_height_ft = sum(box.h for box in level_boxes.values()) + max(0, len(level_boxes) - 1) * 8
-    width = int((max_width_ft + padding * 2) * scale)
-    height = int((total_height_ft + padding * 2) * scale)
+    level_gap_ft = 5
+    total_width_ft = sum(box.w for box in level_boxes.values()) + max(0, len(level_boxes) - 1) * level_gap_ft
+    max_height_ft = max(box.h for box in level_boxes.values())
+    width = int((total_width_ft + padding * 2) * scale)
+    height = int((max_height_ft + padding * 2) * scale)
     interior_stroke = INTERIOR_WALL_STROKE_FT * scale
     exterior_opening_mask_stroke = (EXTERIOR_WALL_THICKNESS_FT + 0.2) * scale
     interior_opening_mask_stroke = (INTERIOR_WALL_STROKE_FT + 0.15) * scale
@@ -272,9 +279,18 @@ def render_wall_plan_svg(
         f'<svg xmlns="http://www.w3.org/2000/svg" width="{width}" height="{height}" '
         f'viewBox="0 0 {width} {height}">',
         f'<rect x="0" y="0" width="{width}" height="{height}" fill="#fff" />',
+        _clearance_pattern_defs(),
         "<style>",
         ".exterior-wall{fill:#333;stroke:none;fill-rule:evenodd}",
-        f".interior{{stroke:#555;stroke-width:{interior_stroke:.3f};stroke-linecap:square}}",
+        ".building-fill{fill:#fff;stroke:none}",
+        ".grid-1ft{stroke:#e7e1d8;stroke-width:.55;pointer-events:none}",
+        ".grid-10ft{stroke:#d1c8bb;stroke-width:1;pointer-events:none}",
+        ".dimension{stroke:#68645f;stroke-width:.8;fill:none;pointer-events:none}",
+        ".dimension-projection{stroke:#9a948d;stroke-width:.65;fill:none;pointer-events:none}",
+        ".dimension-label{font:10px Arial,Helvetica,sans-serif;fill:#56514c;text-anchor:middle;dominant-baseline:middle;pointer-events:none;-webkit-user-select:none;-moz-user-select:none;user-select:none}",
+        ".compass-line{stroke:#333;stroke-width:1.4;fill:none;pointer-events:none}",
+        ".compass-label{font:bold 10px Arial,Helvetica,sans-serif;fill:#333;text-anchor:middle;dominant-baseline:middle;pointer-events:none;-webkit-user-select:none;-moz-user-select:none;user-select:none}",
+        ".interior{fill:#555;stroke:none}",
         ".feature{stroke:#555;stroke-width:1.4;stroke-linecap:square;fill:none}",
         ".guide{stroke:#777;stroke-width:1.2;stroke-dasharray:5 4;stroke-linecap:square}",
         ".opening-mask{stroke:#fff;stroke-linecap:butt}",
@@ -285,27 +301,33 @@ def render_wall_plan_svg(
         ".door{stroke:#666;stroke-width:1.4;stroke-dasharray:3 2;fill:none;stroke-linecap:square}",
         ".arch{stroke:#555;stroke-width:1.4;stroke-dasharray:5 3;fill:none;stroke-linecap:square}",
         ".zone{stroke:#777;stroke-width:1.2;stroke-dasharray:5 4;fill:none}",
+        ".zone-scope{stroke:#c9c1b5;stroke-width:.8;stroke-dasharray:3 3;fill:none}",
         ".space-select-target{fill:transparent;stroke:none;pointer-events:all;cursor:pointer}",
         ".fixture{stroke:#444;stroke-width:1.4;fill:#f7f7f7}",
-        ".clearance{stroke:#999;stroke-width:.8;stroke-dasharray:3 3;fill:none}",
+        ".clearance{stroke:none}",
         ".wall-select-target{stroke:transparent;stroke-width:12;fill:none;stroke-linecap:square;cursor:pointer}",
         ".wall-grip-target{stroke:transparent;stroke-width:18;fill:none;stroke-linecap:square}",
         ".wall-grip-dot{fill:#fff;stroke:#111;stroke-width:.8;pointer-events:none}",
         ".label{font:18px Arial,Helvetica,sans-serif;fill:#111;text-anchor:middle;dominant-baseline:middle;-webkit-user-select:none;-moz-user-select:none;user-select:none;pointer-events:none}",
+        ".label-dimension{font:9px Arial,Helvetica,sans-serif;fill:#5f5750;text-anchor:middle;dominant-baseline:middle;-webkit-user-select:none;-moz-user-select:none;user-select:none;pointer-events:none}",
         ".feature-label{font:10px Arial,Helvetica,sans-serif;fill:#111;text-anchor:middle;dominant-baseline:middle;-webkit-user-select:none;-moz-user-select:none;user-select:none;pointer-events:none}",
         ".title{font:bold 21px Arial,Helvetica,sans-serif;fill:#111;letter-spacing:.5px;-webkit-user-select:none;-moz-user-select:none;user-select:none;pointer-events:none}",
         "text,tspan{pointer-events:none;-webkit-user-select:none;-moz-user-select:none;user-select:none}",
         "</style>",
     ]
-    y_cursor = padding
+    parts.extend(_render_compass(plan.compass, scale))
+    x_cursor = padding
     for level_id, level in plan.levels.items():
         level_box = level_boxes[level_id]
-        x_offset = (padding - level_box.x) * scale
-        y_offset = (y_cursor - level_box.y) * scale
+        x_offset = (x_cursor - level_box.x) * scale
+        y_offset = (padding - level_box.y) * scale
         parts.append(
             f'<g id="{escape(level_id)}" data-fp-kind="level" data-fp-level="{escape(level_id)}" '
             f'data-fp-id="{escape(level_id)}" transform="translate({x_offset:.3f} {y_offset:.3f})">'
         )
+        parts.extend(_render_grid(level_box, scale))
+        parts.extend(_render_building_fills(level, scale))
+        parts.extend(_render_perimeter_dimensions(level, scale))
         for zone in level.zones:
             parts.append(_render_space_select_target(zone, level.id, scale))
         parts.extend(_render_exterior_wall_solids(level, scale))
@@ -313,35 +335,40 @@ def render_wall_plan_svg(
         for opening in level.openings:
             openings_by_wall.setdefault(opening.wall, []).append(opening)
         for wall in level.walls:
-            if wall.kind != "exterior":
+            wall_openings = openings_by_wall.get(wall.id, [])
+            if wall.kind != "exterior" and not _wall_is_fully_open(wall, wall_openings):
                 parts.append(_render_wall_svg(wall, scale))
-            parts.append(_render_wall_hit_svg(wall, level.id, scale, openings_by_wall.get(wall.id, [])))
+            parts.append(_render_wall_hit_svg(wall, level.id, scale, wall_openings))
         wall_by_id = {wall.id: wall for wall in level.walls}
         for opening in level.openings:
             wall = wall_by_id[opening.wall]
             parts.extend(_render_opening(opening, wall, level.id, scale))
         for zone in level.zones:
-            if not zone.visible:
-                continue
+            zone_rect = _inset_scope_rect(zone.rect)
             parts.append(
-                f'<rect class="zone" data-fp-kind="space" data-fp-level="{escape(level.id)}" '
-                f'data-fp-id="{escape(zone.id)}" x="{zone.rect.x * scale:.3f}" y="{zone.rect.y * scale:.3f}" '
-                f'width="{zone.rect.w * scale:.3f}" height="{zone.rect.h * scale:.3f}" />'
+                f'<rect class="{"zone" if zone.visible else "zone-scope"}" data-fp-kind="space" data-fp-level="{escape(level.id)}" '
+                f'data-fp-id="{escape(zone.id)}" x="{zone_rect.x * scale:.3f}" y="{zone_rect.y * scale:.3f}" '
+                f'width="{zone_rect.w * scale:.3f}" height="{zone_rect.h * scale:.3f}" />'
             )
-        for feature in level.features:
+        for feature_index, feature in enumerate(level.features):
             feature_box = _feature_rect(feature, wall_by_id)
             clearance = feature.clearance.get("around", feature.clearance.get("walls"))
             if clearance:
                 clear_box = feature_box.padded(clearance)
+                outer = _rect_path(clear_box, scale)
+                inner = _rect_path(feature_box, scale)
+                clearance_fill = f"url(#clearance-hatch-{feature_index % len(CLEARANCE_PALETTE)})"
                 parts.append(
-                    f'<rect class="clearance" data-fp-kind="feature-clearance" data-fp-level="{escape(level.id)}" '
-                    f'data-fp-id="{escape(feature.id)}" x="{clear_box.x * scale:.3f}" y="{clear_box.y * scale:.3f}" '
-                    f'width="{clear_box.w * scale:.3f}" height="{clear_box.h * scale:.3f}" />'
+                    f'<path class="clearance" fill-rule="evenodd" data-fp-kind="feature-clearance" '
+                    f'data-fp-level="{escape(level.id)}" data-fp-id="{escape(feature.id)}" '
+                    f'fill="{clearance_fill}" '
+                    f'd="{outer} {inner}" />'
                 )
             parts.append(
                 f'<rect class="fixture" data-fp-kind="feature" data-fp-level="{escape(level.id)}" '
                 f'data-fp-id="{escape(feature.id)}" x="{feature_box.x * scale:.3f}" y="{feature_box.y * scale:.3f}" '
-                f'width="{feature_box.w * scale:.3f}" height="{feature_box.h * scale:.3f}" />'
+                f'width="{feature_box.w * scale:.3f}" height="{feature_box.h * scale:.3f}" '
+                f'{_feature_corner_attrs(feature, scale)} />'
             )
             if feature.label:
                 label_y = (feature_box.top - 0.35) * scale
@@ -352,11 +379,15 @@ def render_wall_plan_svg(
                     f'x="{feature_box.cx * scale:.3f}" y="{label_y:.3f}">'
                     f"{escape(feature.label)}</text>"
                 )
+        zones_by_id = {zone.id: zone for zone in level.zones}
         for area in level.areas:
             lines = area.label.split("/")
             font_size = area.size
             line_height = font_size * 1.2
-            start_y = area.at.y * scale - (len(lines) - 1) * line_height / 2
+            if area.vertical_anchor == "top":
+                start_y = area.at.y * scale
+            else:
+                start_y = area.at.y * scale - (len(lines) - 1) * line_height / 2
             for index, line in enumerate(lines):
                 x = area.at.x * scale
                 y = start_y + index * line_height
@@ -365,17 +396,31 @@ def render_wall_plan_svg(
                     transform = f' transform="rotate({area.angle:.1f} {x:.3f} {y:.3f})"'
                 parts.append(
                     f'<text class="label" pointer-events="none" unselectable="on" '
-                    f'style="font-size:{font_size:.1f}px;-webkit-user-select:none;-moz-user-select:none;user-select:none" x="{x:.3f}" '
+                    f'style="font-size:{font_size:.1f}px;text-anchor:{escape(area.anchor)};'
+                    f'-webkit-user-select:none;-moz-user-select:none;user-select:none" x="{x:.3f}" '
                     f'y="{y:.3f}"{transform}>{escape(line)}</text>'
+                )
+            dimension_label = _area_dimension_label(area, zones_by_id)
+            if dimension_label:
+                x = area.at.x * scale
+                y = start_y + len(lines) * line_height + font_size * 0.1
+                transform = ""
+                if area.angle:
+                    transform = f' transform="rotate({area.angle:.1f} {x:.3f} {y:.3f})"'
+                parts.append(
+                    f'<text class="label-dimension" pointer-events="none" unselectable="on" '
+                    f'style="font-size:{max(font_size * 0.72, 8):.1f}px;text-anchor:{escape(area.anchor)};'
+                    f'-webkit-user-select:none;-moz-user-select:none;user-select:none" x="{x:.3f}" '
+                    f'y="{y:.3f}"{transform}>{escape(dimension_label)}</text>'
                 )
         parts.append(
             f'<text class="title" pointer-events="none" unselectable="on" '
             f'style="-webkit-user-select:none;-moz-user-select:none;user-select:none" '
-            f'x="{level_box.x * scale:.3f}" y="{(level_box.y + 1.5) * scale:.3f}">'
+            f'x="{level_box.cx * scale:.3f}" y="{(level_box.y + 1.5) * scale:.3f}">'
             f"{escape((level.title or level.id).upper())}</text>"
         )
         parts.append("</g>")
-        y_cursor += level_box.h + 8
+        x_cursor += level_box.w + level_gap_ft
     parts.append("</svg>")
     svg = "\n".join(parts) + "\n"
     if path is not None:
@@ -392,7 +437,21 @@ def _render_space_select_target(zone: Zone, level_id: str, scale: float) -> str:
     )
 
 
-def _validate_level(level: WallLevel) -> list[str]:
+def _area_dimension_label(area: AreaLabel, zones_by_id: dict[str, Zone]) -> str:
+    zone = zones_by_id.get(area.id)
+    if zone is None:
+        return ""
+    return f"{_format_feet(zone.rect.w)} x {_format_feet(zone.rect.h)}"
+
+
+def _inset_scope_rect(rect: Rect) -> Rect:
+    inset = min(0.35, rect.w * 0.04, rect.h * 0.04)
+    if inset <= 0:
+        return rect
+    return Rect(rect.x + inset, rect.y + inset, max(rect.w - inset * 2, 0.001), max(rect.h - inset * 2, 0.001))
+
+
+def _validate_level(level: WallLevel, *, strict_features: bool = True) -> list[str]:
     errors = []
     seen = set()
     for wall in level.walls:
@@ -420,6 +479,7 @@ def _validate_level(level: WallLevel) -> list[str]:
             opening_boxes[opening.id] = _opening_bbox(opening, wall)
     names = {area.id for area in level.areas} | {zone.id for zone in level.zones} | {feature.id for feature in level.features}
     zones = {zone.id: zone for zone in level.zones}
+    open_zone_components = _open_zone_components(level.walls, openings_by_wall)
     for zone in level.zones:
         if zone.rect.w <= 0 or zone.rect.h <= 0:
             errors.append(f"{level.id}.{zone.id} zone dimensions must be positive")
@@ -459,26 +519,19 @@ def _validate_level(level: WallLevel) -> list[str]:
                 errors.append(f"{level.id}.{feature.id} extrusion exceeds wall length")
                 continue
         box = _feature_rect(feature, walls)
-        if feature.within is not None:
-            zone = zones[feature.within].rect
+        if feature.within is not None and strict_features:
             around = feature.clearance.get("around", 0)
             left = feature.clearance.get("left", around)
             right = feature.clearance.get("right", around)
             top = feature.clearance.get("top", around)
             bottom = feature.clearance.get("bottom", feature.clearance.get("foot", around))
-            if zone.w - left - right <= 0 or zone.h - top - bottom <= 0:
-                errors.append(f"{level.id}.{feature.id} cannot fit within {feature.within!r} with requested margins")
-                continue
-            allowed = Rect(zone.x + left, zone.y + top, zone.w - left - right, zone.h - top - bottom)
-            if (
-                box.left < allowed.left - EPSILON
-                or box.right > allowed.right + EPSILON
-                or box.top < allowed.top - EPSILON
-                or box.bottom > allowed.bottom + EPSILON
-            ):
+            required = Rect(box.left - left, box.top - top, box.w + left + right, box.h + top + bottom)
+            component_ids = open_zone_components.get(feature.within, {feature.within})
+            component_rects = [zones[zone_id].rect for zone_id in component_ids if zone_id in zones]
+            if not _rect_covered_by_rects(required, component_rects):
                 errors.append(f"{level.id}.{feature.id} does not fit within {feature.within!r} with requested margins")
         clearance = feature.clearance.get("walls")
-        if clearance is not None:
+        if clearance is not None and strict_features:
             for wall in level.walls:
                 if wall.kind == "feature":
                     continue
@@ -490,7 +543,7 @@ def _validate_level(level: WallLevel) -> list[str]:
                     )
                     break
         around = feature.clearance.get("around")
-        if around is not None:
+        if around is not None and strict_features:
             for wall in level.walls:
                 if wall.kind == "feature":
                     continue
@@ -501,7 +554,7 @@ def _validate_level(level: WallLevel) -> list[str]:
                         f"requires {around:.2f}ft around clearance"
                     )
                     break
-        if feature.avoid_openings:
+        if feature.avoid_openings and strict_features:
             for opening_id, opening_box in opening_boxes.items():
                 if box.overlaps(opening_box.padded(0.25)):
                     errors.append(f"{level.id}.{feature.id} overlaps opening {opening_id}")
@@ -512,6 +565,75 @@ def _validate_level(level: WallLevel) -> list[str]:
         if target not in names:
             errors.append(f"{level.id} access references unknown node {target!r}")
     return errors
+
+
+def _open_zone_components(
+    walls: list[WallSegment], openings_by_wall: dict[str, list[WallOpening]]
+) -> dict[str, set[str]]:
+    graph: dict[str, set[str]] = {}
+    for wall in walls:
+        if not _wall_is_fully_open(wall, openings_by_wall.get(wall.id, [])):
+            continue
+        pair = _space_pair_from_shared_wall_id(wall.id)
+        if pair is None:
+            continue
+        first, second = pair
+        graph.setdefault(first, set()).add(second)
+        graph.setdefault(second, set()).add(first)
+    components: dict[str, set[str]] = {}
+    seen: set[str] = set()
+    for start in graph:
+        if start in seen:
+            continue
+        stack = [start]
+        component: set[str] = set()
+        seen.add(start)
+        while stack:
+            current = stack.pop()
+            component.add(current)
+            for neighbor in graph.get(current, set()):
+                if neighbor not in seen:
+                    seen.add(neighbor)
+                    stack.append(neighbor)
+        for zone_id in component:
+            components[zone_id] = component
+    return components
+
+
+def _space_pair_from_shared_wall_id(wall_id: str) -> tuple[str, str] | None:
+    if "__" not in wall_id or not wall_id.endswith("_wall"):
+        return None
+    first, second = wall_id.removesuffix("_wall").split("__", 1)
+    if second.endswith(("_north", "_east", "_south", "_west")):
+        return None
+    return (first, second)
+
+
+def _rect_covered_by_rects(target: Rect, rects: list[Rect]) -> bool:
+    if not rects:
+        return False
+    x_values = _unique_sorted([target.left, target.right] + [
+        value
+        for rect in rects
+        for value in (max(target.left, rect.left), min(target.right, rect.right))
+        if target.left < value < target.right
+    ])
+    y_values = _unique_sorted([target.top, target.bottom] + [
+        value
+        for rect in rects
+        for value in (max(target.top, rect.top), min(target.bottom, rect.bottom))
+        if target.top < value < target.bottom
+    ])
+    for left, right in zip(x_values, x_values[1:]):
+        if right - left <= EPSILON:
+            continue
+        for top, bottom in zip(y_values, y_values[1:]):
+            if bottom - top <= EPSILON:
+                continue
+            center = Point((left + right) / 2, (top + bottom) / 2)
+            if not any(rect.contains_point(center) for rect in rects):
+                return False
+    return True
 
 
 def _level_bbox(level: WallLevel) -> Rect:
@@ -594,11 +716,21 @@ def _render_wall_segment(wall: WallSegment) -> WallSegment:
 
 def _render_wall_svg(wall: WallSegment, scale: float) -> str:
     if wall.kind != "exterior":
-        end = wall.end
+        thickness = INTERIOR_WALL_STROKE_FT * scale
+        if wall.direction in {"E", "W"}:
+            x = min(wall.at.x, wall.end.x) * scale
+            y = wall.at.y * scale - thickness / 2
+            width = wall.length * scale
+            height = thickness
+        else:
+            x = wall.at.x * scale - thickness / 2
+            y = min(wall.at.y, wall.end.y) * scale
+            width = thickness
+            height = wall.length * scale
         return (
-            f'<line class="{escape(wall.kind)}" x1="{wall.at.x * scale:.3f}" '
-            f'y1="{wall.at.y * scale:.3f}" x2="{end.x * scale:.3f}" '
-            f'y2="{end.y * scale:.3f}" data-fp-kind="wall-select" data-fp-id="{escape(wall.id)}" />'
+            f'<rect class="{escape(wall.kind)}" x="{x:.3f}" y="{y:.3f}" '
+            f'width="{width:.3f}" height="{height:.3f}" '
+            f'data-fp-kind="wall-select" data-fp-id="{escape(wall.id)}" />'
         )
     raise ValueError("_render_wall_svg does not render exterior walls")
 
@@ -607,6 +739,7 @@ def _render_wall_hit_svg(wall: WallSegment, level_id: str, scale: float, opening
     render_wall = _render_wall_segment(wall)
     end = render_wall.end
     orientation = "horizontal" if wall.direction in {"E", "W"} else "vertical"
+    fully_open = _wall_is_fully_open(wall, openings)
     grip_span = _wall_grip_span(wall, openings)
     grip_length = grip_span[1] - grip_span[0]
     grip_start = render_wall.point_at(grip_span[0])
@@ -621,12 +754,15 @@ def _render_wall_hit_svg(wall: WallSegment, level_id: str, scale: float, opening
         f'x2="{end.x * scale:.3f}" y2="{end.y * scale:.3f}" data-fp-kind="wall-select" '
         f'data-fp-level="{escape(level_id)}" data-fp-id="{escape(wall.id)}" '
         f'data-fp-orientation="{orientation}" {model_attrs} />',
-        f'<line class="wall-grip-target" x1="{grip_start.x * scale:.3f}" y1="{grip_start.y * scale:.3f}" '
-        f'x2="{grip_end.x * scale:.3f}" y2="{grip_end.y * scale:.3f}" data-fp-kind="wall-grip" '
-        f'data-fp-level="{escape(level_id)}" data-fp-id="{escape(wall.id)}" '
-        f'data-fp-orientation="{orientation}" {model_attrs} />',
     ]
-    parts.extend(_render_wall_grip_dots(render_wall, scale, grip_span))
+    if not fully_open and grip_length > EPSILON:
+        parts.append(
+            f'<line class="wall-grip-target" x1="{grip_start.x * scale:.3f}" y1="{grip_start.y * scale:.3f}" '
+            f'x2="{grip_end.x * scale:.3f}" y2="{grip_end.y * scale:.3f}" data-fp-kind="wall-grip" '
+            f'data-fp-level="{escape(level_id)}" data-fp-id="{escape(wall.id)}" '
+            f'data-fp-orientation="{orientation}" {model_attrs} />'
+        )
+        parts.extend(_render_wall_grip_dots(render_wall, scale, grip_span))
     return "".join(parts)
 
 
@@ -696,12 +832,269 @@ def _render_exterior_wall_solids(level: WallLevel, scale: float) -> list[str]:
     return paths
 
 
+def _render_grid(box: Rect, scale: float) -> list[str]:
+    left = int(box.left // 1)
+    right = int(box.right // 1) + 1
+    top = int(box.top // 1)
+    bottom = int(box.bottom // 1) + 1
+    parts = []
+    for x in range(left, right + 1):
+        class_name = "grid-10ft" if x % 10 == 0 else "grid-1ft"
+        parts.append(
+            f'<line class="{class_name}" x1="{x * scale:.3f}" y1="{top * scale:.3f}" '
+            f'x2="{x * scale:.3f}" y2="{bottom * scale:.3f}" />'
+        )
+    for y in range(top, bottom + 1):
+        class_name = "grid-10ft" if y % 10 == 0 else "grid-1ft"
+        parts.append(
+            f'<line class="{class_name}" x1="{left * scale:.3f}" y1="{y * scale:.3f}" '
+            f'x2="{right * scale:.3f}" y2="{y * scale:.3f}" />'
+        )
+    return parts
+
+
+def _render_building_fills(level: WallLevel, scale: float) -> list[str]:
+    paths = []
+    for points in _exterior_loops(level):
+        paths.append(f'<path class="building-fill" d="{_path_command(points, scale)}" />')
+    return paths
+
+
+def _render_compass(compass: dict[str, Any], scale: float) -> list[str]:
+    if not compass:
+        return []
+    up_bearing = float(compass.get("up_bearing", 90))
+    cx = 3.3 * scale
+    cy = 3.2 * scale
+    axis = 1.8 * scale
+    label = 2.25 * scale
+
+    def point_for_bearing(bearing: float, distance: float) -> tuple[float, float]:
+        screen_degrees = (bearing - up_bearing + 270) % 360
+        angle = radians(screen_degrees)
+        return (cx + cos(angle) * distance, cy + sin(angle) * distance)
+
+    n = point_for_bearing(0, axis)
+    s = point_for_bearing(180, axis)
+    e = point_for_bearing(90, axis)
+    w = point_for_bearing(270, axis)
+    labels = {
+        "N": point_for_bearing(0, label),
+        "E": point_for_bearing(90, label),
+        "S": point_for_bearing(180, label),
+        "W": point_for_bearing(270, label),
+    }
+    parts = [
+        '<g class="compass" aria-label="Compass">',
+        f'<line class="compass-line" x1="{n[0]:.3f}" y1="{n[1]:.3f}" x2="{s[0]:.3f}" y2="{s[1]:.3f}" />',
+        f'<line class="compass-line" x1="{e[0]:.3f}" y1="{e[1]:.3f}" x2="{w[0]:.3f}" y2="{w[1]:.3f}" />',
+    ]
+    for text, (x, y) in labels.items():
+        parts.append(f'<text class="compass-label" x="{x:.3f}" y="{y:.3f}">{text}</text>')
+    parts.append("</g>")
+    return parts
+
+
+def _render_perimeter_dimensions(level: WallLevel, scale: float) -> list[str]:
+    parts = []
+    for points in _exterior_loops(level):
+        outer_points = _offset_closed_orthogonal_loop(points, EXTERIOR_WALL_THICKNESS_FT)
+        if not outer_points:
+            continue
+        clean_outer = outer_points[:-1]
+        if len(clean_outer) < 3:
+            continue
+        sides = _perimeter_dimension_sides(clean_outer)
+        offset = 1.15
+        if sides["top"]:
+            dimension_y = min(sides["top"].values()) - offset
+            parts.extend(_render_horizontal_dimension_chain(sides["top"], dimension_y, scale, label_side="N"))
+        if sides["bottom"]:
+            dimension_y = max(sides["bottom"].values()) + offset
+            parts.extend(_render_horizontal_dimension_chain(sides["bottom"], dimension_y, scale, label_side="S"))
+        if sides["left"]:
+            dimension_x = min(sides["left"].values()) - offset
+            parts.extend(_render_vertical_dimension_chain(sides["left"], dimension_x, scale, label_side="W"))
+        if sides["right"]:
+            dimension_x = max(sides["right"].values()) + offset
+            parts.extend(_render_vertical_dimension_chain(sides["right"], dimension_x, scale, label_side="E"))
+    return parts
+
+
+def _perimeter_dimension_sides(clean_outer: list[Point]) -> dict[str, dict[float, float]]:
+    clockwise = _signed_area(clean_outer) > 0
+    sides: dict[str, dict[float, float]] = {"top": {}, "bottom": {}, "left": {}, "right": {}}
+    for index, start in enumerate(clean_outer):
+        end = clean_outer[(index + 1) % len(clean_outer)]
+        if _same_point(start, end):
+            continue
+        direction = _segment_direction(start, end)
+        nx, ny = _normal(direction)
+        if clockwise:
+            nx, ny = -nx, -ny
+        if abs(ny) > 0.5:
+            target = sides["top"] if ny < 0 else sides["bottom"]
+            for point in (start, end):
+                _record_side_projection(target, point.x, point.y, prefer_min=ny < 0)
+        elif abs(nx) > 0.5:
+            target = sides["left"] if nx < 0 else sides["right"]
+            for point in (start, end):
+                _record_side_projection(target, point.y, point.x, prefer_min=nx < 0)
+    return sides
+
+
+def _record_side_projection(target: dict[float, float], key: float, value: float, *, prefer_min: bool) -> None:
+    existing_key = next((stored for stored in target if abs(stored - key) <= EPSILON), None)
+    if existing_key is None:
+        target[key] = value
+        return
+    existing_value = target[existing_key]
+    if (prefer_min and value < existing_value) or (not prefer_min and value > existing_value):
+        target[existing_key] = value
+
+
+def _render_horizontal_dimension_chain(
+    subject_y_by_x: dict[float, float], y: float, scale: float, *, label_side: Direction
+) -> list[str]:
+    x_values = _unique_sorted(subject_y_by_x)
+    if len(x_values) < 2:
+        return []
+    label_offset = -0.45 if label_side == "N" else 0.45
+    parts = [
+        f'<line class="dimension" x1="{x_values[0] * scale:.3f}" y1="{y * scale:.3f}" '
+        f'x2="{x_values[-1] * scale:.3f}" y2="{y * scale:.3f}" />'
+    ]
+    for x in x_values:
+        parts.append(_dimension_tick(Point(x, y), "E", scale))
+        subject_y = _lookup_near(subject_y_by_x, x)
+        parts.append(
+            f'<line class="dimension-projection" x1="{x * scale:.3f}" y1="{y * scale:.3f}" '
+            f'x2="{x * scale:.3f}" y2="{subject_y * scale:.3f}" />'
+        )
+    for start, end in zip(x_values, x_values[1:]):
+        length = end - start
+        if length <= EPSILON:
+            continue
+        parts.append(
+            f'<text class="dimension-label" x="{((start + end) / 2) * scale:.3f}" '
+            f'y="{(y + label_offset) * scale:.3f}">{_format_feet(length)}</text>'
+        )
+    return parts
+
+
+def _render_vertical_dimension_chain(
+    subject_x_by_y: dict[float, float], x: float, scale: float, *, label_side: Direction
+) -> list[str]:
+    y_values = _unique_sorted(subject_x_by_y)
+    if len(y_values) < 2:
+        return []
+    label_offset = -0.45 if label_side == "W" else 0.45
+    parts = [
+        f'<line class="dimension" x1="{x * scale:.3f}" y1="{y_values[0] * scale:.3f}" '
+        f'x2="{x * scale:.3f}" y2="{y_values[-1] * scale:.3f}" />'
+    ]
+    for y in y_values:
+        parts.append(_dimension_tick(Point(x, y), "S", scale))
+        subject_x = _lookup_near(subject_x_by_y, y)
+        parts.append(
+            f'<line class="dimension-projection" x1="{x * scale:.3f}" y1="{y * scale:.3f}" '
+            f'x2="{subject_x * scale:.3f}" y2="{y * scale:.3f}" />'
+        )
+    for start, end in zip(y_values, y_values[1:]):
+        length = end - start
+        if length <= EPSILON:
+            continue
+        mx = (x + label_offset) * scale
+        my = ((start + end) / 2) * scale
+        parts.append(
+            f'<text class="dimension-label" x="{mx:.3f}" y="{my:.3f}" '
+            f'transform="rotate(-90 {mx:.3f} {my:.3f})">{_format_feet(length)}</text>'
+        )
+    return parts
+
+
+def _dimension_tick(point: Point, direction: Direction, scale: float) -> str:
+    tick = 0.32
+    ux, uy = _normal(direction)
+    return (
+        f'<line class="dimension" x1="{(point.x - ux * tick) * scale:.3f}" '
+        f'y1="{(point.y - uy * tick) * scale:.3f}" '
+        f'x2="{(point.x + ux * tick) * scale:.3f}" '
+        f'y2="{(point.y + uy * tick) * scale:.3f}" />'
+    )
+
+
+def _unique_sorted(values: Any) -> list[float]:
+    result: list[float] = []
+    for value in sorted(values):
+        if not result or abs(value - result[-1]) > EPSILON:
+            result.append(value)
+    return result
+
+
+def _lookup_near(values: dict[float, float], key: float) -> float:
+    for stored_key, value in values.items():
+        if abs(stored_key - key) <= EPSILON:
+            return value
+    return values[key]
+
+
+def _format_feet(value: float) -> str:
+    rounded = round(value * 2) / 2
+    if abs(rounded - round(rounded)) <= EPSILON:
+        return f"{int(round(rounded))}'"
+    return f"{rounded:.1f}'"
+
+
+def _exterior_loops(level: WallLevel) -> list[list[Point]]:
+    return [
+        points
+        for points in _connected_wall_paths([wall for wall in level.walls if wall.kind == "exterior"])
+        if len(points) >= 4 and _same_point(points[0], points[-1])
+    ]
+
+
 def _path_command(points: list[Point], scale: float) -> str:
     command = " ".join(
         ("M" if index == 0 else "L") + f" {point.x * scale:.3f} {point.y * scale:.3f}"
         for index, point in enumerate(points)
     )
     return f"{command} Z"
+
+
+def _polyline_command(points: list[Point], scale: float) -> str:
+    return " ".join(
+        ("M" if index == 0 else "L") + f" {point.x * scale:.3f} {point.y * scale:.3f}"
+        for index, point in enumerate(points)
+    )
+
+
+def _rect_path(rect: Rect, scale: float) -> str:
+    return (
+        f"M {rect.left * scale:.3f} {rect.top * scale:.3f} "
+        f"L {rect.right * scale:.3f} {rect.top * scale:.3f} "
+        f"L {rect.right * scale:.3f} {rect.bottom * scale:.3f} "
+        f"L {rect.left * scale:.3f} {rect.bottom * scale:.3f} Z"
+    )
+
+
+def _clearance_pattern_defs() -> str:
+    patterns = []
+    for index, color in enumerate(CLEARANCE_PALETTE):
+        patterns.append(
+            f'<pattern id="clearance-hatch-{index}" patternUnits="userSpaceOnUse" width="8" height="8" '
+            f'patternTransform="rotate(45)"><rect x="0" y="0" width="8" height="8" fill="{color}" '
+            f'opacity=".2"/><line x1="0" y1="0" x2="0" y2="8" stroke="{color}" stroke-width="2.4" '
+            f'opacity=".75"/></pattern>'
+        )
+    return "<defs>" + "".join(patterns) + "</defs>"
+
+
+def _feature_corner_attrs(feature: Feature, scale: float) -> str:
+    if feature.kind != "rectangle":
+        return ""
+    radius = 0.12 * scale
+    return f'rx="{radius:.3f}" ry="{radius:.3f}"'
 
 
 def _offset_closed_orthogonal_loop(points: list[Point], distance: float) -> list[Point]:
