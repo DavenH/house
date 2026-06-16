@@ -754,7 +754,7 @@ def test_wall_plan_offsets_exterior_walls_outward() -> None:
     assert 'class="exterior-wall"' in svg
     assert 'M 0.000 0.000 L 160.000 0.000' in svg
     assert 'class="floor-mask"' not in svg
-    assert 'class="interior" x="0.000" y="29.600" width="160.000" height="4.800"' in svg
+    assert 'class="interior" x="0.000" y="32.000" width="160.000" height="4.800"' in svg
 
 
 def test_wall_plan_grid_stops_at_exterior_perimeter() -> None:
@@ -777,6 +777,155 @@ def test_wall_plan_grid_stops_at_exterior_perimeter() -> None:
     assert '<line class="grid-1ft" x1="80.000" y1="144.000" x2="80.000" y2="192.000" />' in svg
     assert '<line class="grid-1ft" x1="-48.000" y1="64.000" x2="-16.000" y2="64.000" />' in svg
     assert '<line class="grid-1ft" x1="176.000" y1="64.000" x2="224.000" y2="64.000" />' in svg
+
+
+def test_interior_wall_endpoint_extends_into_exterior_join() -> None:
+    plan = wall_plan_from_dict(
+        {
+            "type": "wall_plan",
+            "plan": "interior-endcap-test",
+            "levels": {
+                "L1": {
+                    "walls": [
+                        {"id": "n", "at": [0, 0], "dir": "E", "len": 10, "kind": "exterior"},
+                        {"id": "e", "at": [10, 0], "dir": "S", "len": 10, "kind": "exterior"},
+                        {"id": "s", "at": [10, 10], "dir": "W", "len": 10, "kind": "exterior"},
+                        {"id": "w", "at": [0, 10], "dir": "N", "len": 10, "kind": "exterior"},
+                        {"id": "partition", "at": [5, 0], "dir": "S", "len": 6, "kind": "interior"},
+                    ],
+                }
+            },
+        }
+    )
+
+    svg = render_wall_plan_svg(plan)
+
+    assert 'class="interior" x="77.600" y="0.000" width="4.800" height="96.000"' in svg
+
+
+def test_interior_wall_on_exterior_loop_biases_inward() -> None:
+    plan = wall_plan_from_dict(
+        {
+            "type": "wall_plan",
+            "plan": "interior-perimeter-bias-test",
+            "levels": {
+                "L1": {
+                    "perimeters": {"box": {"start": [0, 0], "walk": [["E", 10], ["S", 8], ["W", 10], ["N", 8]]}},
+                    "walls": [{"id": "partition", "at": [2, 0], "dir": "E", "len": 4, "kind": "interior"}],
+                }
+            },
+        }
+    )
+
+    svg = render_wall_plan_svg(plan)
+
+    assert 'class="interior" x="32.000" y="-4.800" width="64.000" height="4.800"' in svg
+    assert 'class="wall-select-target" x1="32.000" y1="-2.400" x2="96.000" y2="-2.400"' in svg
+
+
+def test_interior_wall_at_parallel_exterior_endpoint_biases_inward() -> None:
+    plan = wall_plan_from_dict(
+        {
+            "type": "wall_plan",
+            "plan": "interior-corner-bias-test",
+            "levels": {
+                "L1": {
+                    "perimeters": {"box": {"start": [0, 0], "walk": [["E", 10], ["S", 8], ["W", 10], ["N", 8]]}},
+                    "walls": [{"id": "partition", "at": [0, 2], "dir": "S", "len": 4, "kind": "interior"}],
+                }
+            },
+        }
+    )
+
+    svg = render_wall_plan_svg(plan)
+
+    assert 'class="interior" x="-4.800" y="32.000" width="4.800" height="64.000"' in svg
+    assert 'class="wall-select-target" x1="-2.400" y1="32.000" x2="-2.400" y2="96.000"' in svg
+
+
+def test_opening_on_biased_interior_wall_uses_shifted_centerline() -> None:
+    plan = wall_plan_from_dict(
+        {
+            "type": "wall_plan",
+            "plan": "biased-opening-test",
+            "levels": {
+                "L1": {
+                    "perimeters": {"box": {"start": [0, 0], "walk": [["E", 10], ["S", 8], ["W", 10], ["N", 8]]}},
+                    "walls": [{"id": "partition", "at": [0, 2], "dir": "S", "len": 4, "kind": "interior"}],
+                    "openings": [{"id": "door", "wall": "partition", "offset": 1, "width": 2, "kind": "door"}],
+                }
+            },
+        }
+    )
+
+    svg = render_wall_plan_svg(plan)
+
+    assert '<line class="opening-mask interior-opening-mask" data-fp-kind="opening" data-fp-level="L1" data-fp-id="door"' in svg
+    assert 'x1="-2.400" y1="48.000" x2="-2.400" y2="80.000"' in svg
+    assert '<line class="opening-hit-target" data-fp-kind="opening" data-fp-level="L1" data-fp-id="door"' in svg
+
+
+def test_interior_wall_perimeter_datum_shift_applies_to_connected_non_perimeter_endpoint() -> None:
+    plan = wall_plan_from_dict(
+        {
+            "type": "wall_plan",
+            "plan": "shared-datum-shift-test",
+            "levels": {
+                "L1": {
+                    "perimeters": {"box": {"start": [0, 0], "walk": [["E", 10], ["S", 8], ["W", 10], ["N", 8]]}},
+                    "walls": [
+                        {"id": "edge_partition", "at": [0, 2], "dir": "S", "len": 4, "kind": "interior"},
+                        {"id": "connected_header", "at": [0, 3], "dir": "E", "len": 4, "kind": "interior"},
+                    ],
+                }
+            },
+        }
+    )
+
+    svg = render_wall_plan_svg(plan)
+
+    assert 'data-fp-id="edge_partition" data-fp-orientation="vertical" data-fp-model-x1="0.000"' in svg
+    assert '<line class="wall-select-target" x1="0.000" y1="48.000" x2="64.000" y2="48.000" data-fp-kind="wall-select" data-fp-level="L1" data-fp-id="connected_header"' in svg
+
+
+def test_interior_wall_on_parallel_exterior_datum_inherits_offset() -> None:
+    plan = wall_plan_from_dict(
+        {
+            "type": "wall_plan",
+            "plan": "parallel-exterior-datum-offset-test",
+            "levels": {
+                "L1": {
+                    "perimeters": {
+                        "notched": {"start": [0, 0], "walk": [["E", 6], ["S", 4], ["E", 4], ["S", 6], ["W", 10], ["N", 10]]}
+                    },
+                    "walls": [{"id": "partition", "at": [6, 6], "dir": "S", "len": 2, "kind": "interior"}],
+                }
+            },
+        }
+    )
+
+    svg = render_wall_plan_svg(plan)
+
+    assert 'data-fp-id="partition" data-fp-orientation="vertical" data-fp-model-x1="96.000"' in svg
+    assert 'class="wall-select-target" x1="98.400" y1="96.000" x2="98.400" y2="128.000"' in svg
+
+
+def test_interior_wall_supports_explicit_normal_offset() -> None:
+    plan = wall_plan_from_dict(
+        {
+            "type": "wall_plan",
+            "plan": "interior-explicit-offset-test",
+            "levels": {
+                "L1": {
+                    "walls": [{"id": "partition", "at": [2, 4], "dir": "E", "len": 4, "kind": "interior", "offset": -0.15}],
+                }
+            },
+        }
+    )
+
+    svg = render_wall_plan_svg(plan)
+
+    assert 'class="interior" x="32.000" y="59.200" width="64.000" height="4.800"' in svg
 
 
 def test_wall_plan_renders_doors_without_swing_arcs() -> None:
@@ -819,6 +968,50 @@ def test_wall_plan_renders_arch_openings() -> None:
     assert "interior-opening-mask" in svg
     assert 'class="arch"' in svg
     assert "<path" in svg
+    assert '<line class="arch"' not in svg
+
+
+def test_wall_plan_skips_mask_for_fully_open_wall() -> None:
+    plan = wall_plan_from_dict(
+        {
+            "type": "wall_plan",
+            "plan": "fully-open-wall-test",
+            "levels": {
+                "L1": {
+                    "walls": [{"id": "wall", "at": [0, 0], "dir": "E", "len": 10}],
+                    "openings": [{"id": "open", "wall": "wall", "offset": 0, "width": 10, "kind": "open"}],
+                }
+            },
+        }
+    )
+
+    svg = render_wall_plan_svg(plan)
+
+    assert '<line class="opening-mask' not in svg
+    assert '<line class="opening-hit-target"' in svg
+
+
+def test_wall_plan_keeps_fully_open_wall_hit_target_on_model_span_at_exterior_corner() -> None:
+    plan = wall_plan_from_dict(
+        {
+            "type": "wall_plan",
+            "plan": "open-corner-hit-test",
+            "levels": {
+                "L1": {
+                    "walls": [
+                        {"id": "west", "at": [0, 5], "dir": "N", "len": 5, "kind": "exterior"},
+                        {"id": "south", "at": [0, 5], "dir": "E", "len": 8, "kind": "interior"},
+                    ],
+                    "openings": [{"id": "open", "wall": "south", "offset": 0, "width": 8, "kind": "open"}],
+                }
+            },
+        }
+    )
+
+    svg = render_wall_plan_svg(plan)
+
+    assert 'data-fp-id="south" data-fp-orientation="horizontal" data-fp-model-x1="0.000" data-fp-model-y1="80.000"' in svg
+    assert '<line class="wall-select-target" x1="0.000" y1="80.000" x2="128.000" y2="80.000"' in svg
 
 
 def test_wall_plan_rejects_bad_opening_reference() -> None:
@@ -940,6 +1133,68 @@ def test_wall_plan_renders_feature_label_above_fixture_and_around_clearance() ->
     assert 'rx="1.920" ry="1.920"' in svg
     assert 'M 64.000 96.000 L 256.000 96.000 L 256.000 224.000 L 64.000 224.000 Z' in svg
     assert 'y="130.400">TABLE</text>' in svg
+
+
+def test_wall_plan_renders_directional_feature_clearance() -> None:
+    plan = wall_plan_from_dict(
+        {
+            "type": "wall_plan",
+            "plan": "directional-clearance-test",
+            "levels": {
+                "L1": {
+                    "features": {
+                        "bed": {
+                            "kind": "rectangle",
+                            "at": [10, 10],
+                            "size": [6, 4],
+                            "label": "BED",
+                            "clearance": {"left": 0, "right": 1, "top": 1, "foot": 2},
+                        }
+                    }
+                }
+            },
+        }
+    )
+
+    svg = render_wall_plan_svg(plan)
+
+    assert '<path class="clearance" fill-rule="evenodd"' in svg
+    assert 'M 112.000 112.000 L 224.000 112.000 L 224.000 224.000 L 112.000 224.000 Z' in svg
+    assert 'M 112.000 128.000 L 208.000 128.000 L 208.000 192.000 L 112.000 192.000 Z' in svg
+
+
+def test_wall_plan_renders_piano_silhouette_and_clearance_shape() -> None:
+    plan = wall_plan_from_dict(
+        {
+            "type": "wall_plan",
+            "plan": "piano-feature-test",
+            "levels": {
+                "L1": {
+                    "features": {
+                        "piano": {
+                            "kind": "piano",
+                            "at": [10, 10],
+                            "size": [8, 5],
+                            "label": "PIANO",
+                            "clearance": {"around": 1},
+                        }
+                    }
+                }
+            },
+        }
+    )
+
+    svg = render_wall_plan_svg(plan)
+
+    assert 'class="piano-fixture"' in svg
+    assert ".piano-fixture{stroke:#333;stroke-width:1.4;fill:#f7f7f7;" in svg
+    assert "pointer-events:all" in svg
+    assert 'class="clearance piano-clearance"' in svg
+    assert "--piano-clearance-width:32.000px" in svg
+    assert 'class="piano-keybed"' not in svg
+    assert 'class="piano-key"' not in svg
+    assert 'C ' in svg
+    assert 'PIANO</text>' in svg
 
 
 def test_wall_plan_dimensions_measure_outer_face_as_chained_baseline() -> None:

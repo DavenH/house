@@ -2,6 +2,16 @@ import type { AnyRecord, ContainedWallDrag, OpeningDrag, Selection, SharedWallDr
 import { movedLine, movedPreviewRect, openingDeltaVector, wallLineFromRects } from "./geometry";
 import { normalizeSvgKind } from "./planEditing";
 
+const EXPORT_REMOVED_SELECTORS = [
+  ".wall-grip-dot",
+  ".wall-grip-target",
+  ".wall-select-target",
+  ".opening-hit-target",
+  ".space-select-target",
+  ".stair-select-target",
+  ".wall-drag-preview"
+];
+
 export function svgPoint(canvasElement: HTMLDivElement | undefined, event: PointerEvent | MouseEvent) {
   const svgElement = canvasElement?.querySelector("svg");
   if (!svgElement) {
@@ -16,6 +26,27 @@ export function svgPoint(canvasElement: HTMLDivElement | undefined, event: Point
   }
   const transformed = point.matrixTransform(matrix.inverse());
   return { x: transformed.x, y: transformed.y };
+}
+
+export function serializeCanvasSvgForExport(canvasElement: HTMLDivElement | undefined, fallbackSvg: string) {
+  const sourceSvg = canvasElement?.querySelector("svg");
+  if (!sourceSvg) {
+    return fallbackSvg;
+  }
+  const clone = sourceSvg.cloneNode(true) as SVGSVGElement;
+  clone.classList.remove("selected-object");
+  clone.removeAttribute("style");
+  clone.removeAttribute("unselectable");
+  clone.removeAttribute("draggable");
+  clone.querySelectorAll(EXPORT_REMOVED_SELECTORS.join(",")).forEach((element) => element.remove());
+  clone.querySelectorAll(".selected-object").forEach((element) => {
+    element.classList.remove("selected-object");
+  });
+  clone.querySelectorAll("[unselectable],[draggable]").forEach((element) => {
+    element.removeAttribute("unselectable");
+    element.removeAttribute("draggable");
+  });
+  return new XMLSerializer().serializeToString(clone) + "\n";
 }
 
 export function markSelectedInSvg(canvasElement: HTMLDivElement | undefined, selected: Selection) {
@@ -114,9 +145,15 @@ export function moveFeatureSvg(
   const [width, height] = featureSize(data, feature);
   const x = (at[0] - width / 2) * scale;
   const y = (at[1] - height / 2) * scale;
+  if (feature.kind === "piano") {
+    movePianoFeatureSvg(canvasElement, id, at, scale);
+  }
   canvasElement
     .querySelectorAll(`[data-fp-kind="feature"][data-fp-id="${cssEscape(id)}"]`)
     .forEach((element) => {
+      if (feature.kind === "piano" && !(element instanceof SVGTextElement)) {
+        return;
+      }
       if (element instanceof SVGRectElement) {
         element.setAttribute("x", x.toFixed(3));
         element.setAttribute("y", y.toFixed(3));
@@ -130,6 +167,10 @@ export function moveFeatureSvg(
     canvasElement
       .querySelectorAll(`[data-fp-kind="feature-clearance"][data-fp-id="${cssEscape(id)}"]`)
       .forEach((element) => {
+        if (element instanceof SVGGraphicsElement && element.hasAttribute("data-fp-model-cx")) {
+          moveByModelCenter(element, at, scale);
+          return;
+        }
         if (element instanceof SVGRectElement) {
           element.setAttribute("x", (x - clearance * scale).toFixed(3));
           element.setAttribute("y", (y - clearance * scale).toFixed(3));
@@ -138,6 +179,24 @@ export function moveFeatureSvg(
         }
       });
   }
+}
+
+function movePianoFeatureSvg(canvasElement: HTMLDivElement, id: string, at: [number, number], scale: number) {
+  canvasElement
+    .querySelectorAll(`[data-fp-kind="feature"][data-fp-id="${cssEscape(id)}"]`)
+    .forEach((element) => {
+      if (element instanceof SVGGraphicsElement && !(element instanceof SVGTextElement)) {
+        moveByModelCenter(element, at, scale);
+      }
+    });
+}
+
+function moveByModelCenter(element: SVGGraphicsElement, at: [number, number], scale: number) {
+  const modelCx = Number(element.getAttribute("data-fp-model-cx") ?? at[0] * scale);
+  const modelCy = Number(element.getAttribute("data-fp-model-cy") ?? at[1] * scale);
+  const dx = at[0] * scale - modelCx;
+  const dy = at[1] * scale - modelCy;
+  element.setAttribute("transform", `translate(${dx.toFixed(3)} ${dy.toFixed(3)})`);
 }
 
 export function previewSharedWallSvg(
@@ -304,11 +363,20 @@ function featureSize(data: AnyRecord, feature: AnyRecord): [number, number] {
 
 function featureClearance(data: AnyRecord, feature: AnyRecord): number {
   const catalogFeature = ((data.catalog ?? {}) as AnyRecord)[feature.kind ?? ""];
-  return Number(
-    feature.clearance?.around ??
-      feature.clearance?.walls ??
-      catalogFeature?.clearance?.around ??
-      catalogFeature?.clearance?.walls ??
-      0
+  return Math.max(clearanceValue(feature.clearance), clearanceValue(catalogFeature?.clearance));
+}
+
+function clearanceValue(clearance: AnyRecord | undefined): number {
+  if (!clearance) {
+    return 0;
+  }
+  return Math.max(
+    Number(clearance.around ?? 0),
+    Number(clearance.walls ?? 0),
+    Number(clearance.left ?? 0),
+    Number(clearance.right ?? 0),
+    Number(clearance.top ?? 0),
+    Number(clearance.bottom ?? 0),
+    Number(clearance.foot ?? 0)
   );
 }

@@ -113,8 +113,9 @@
   }
   $: featureKindOptions = [
     { value: "rectangle", label: "Rectangle" },
+    { value: "piano", label: "Piano" },
     ...Object.keys(catalog).map((kind) => ({ value: kind, label: kind }))
-  ];
+  ].filter((option, index, options) => options.findIndex((item) => item.value === option.value) === index);
   $: selectedStair =
     selected.kind === "stair"
       ? (((planData.stairs as AnyRecord | undefined) ?? {})[selected.id] ?? selectedObject ?? {})

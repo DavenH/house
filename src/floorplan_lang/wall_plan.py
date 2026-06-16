@@ -26,6 +26,7 @@ class WallSegment:
     direction: Direction
     length: float
     kind: str = "interior"
+    offset: float | None = None
 
     @property
     def end(self) -> Point:
@@ -201,6 +202,7 @@ def wall_plan_from_dict(data: dict[str, Any]) -> WallPlan:
                     direction=direction,
                     length=float(length),
                     kind="exterior",
+                    offset=None,
                 )
                 level.walls.append(segment)
                 current = segment.end
@@ -212,6 +214,7 @@ def wall_plan_from_dict(data: dict[str, Any]) -> WallPlan:
                         direction=_closing_direction(current, start),
                         length=current.distance_to(start),
                         kind="exterior",
+                        offset=None,
                     )
                 )
         for wall_data in level_data.get("walls") or []:
@@ -225,6 +228,7 @@ def wall_plan_from_dict(data: dict[str, Any]) -> WallPlan:
                     direction=wall_data["dir"],
                     length=float(wall_data["len"]),
                     kind=wall_data.get("kind", "interior"),
+                    offset=float(wall_data["offset"]) if "offset" in wall_data else None,
                 )
             )
         for area_id, area_data in (level_data.get("areas") or {}).items():
@@ -368,7 +372,9 @@ def render_wall_plan_svg(
         ".opening-mask{stroke:#fff;stroke-linecap:butt}",
         f".exterior-opening-mask{{stroke-width:{exterior_opening_mask_stroke:.3f}}}",
         f".interior-opening-mask{{stroke-width:{interior_opening_mask_stroke:.3f}}}",
+        f".interior-open-mask{{stroke-width:{INTERIOR_WALL_STROKE_FT * scale + 0.02:.3f}}}",
         ".opening-hit-target{stroke:transparent;stroke-width:18;fill:none;stroke-linecap:square}",
+        ".window-fill{fill:#d8eef7;stroke:none;pointer-events:none}",
         ".window{stroke:#45718a;stroke-width:1.4;stroke-linecap:square}",
         ".door{stroke:#666;stroke-width:1.4;stroke-dasharray:3 2;fill:none;stroke-linecap:square}",
         ".arch{stroke:#555;stroke-width:1.4;stroke-dasharray:5 3;fill:none;stroke-linecap:square}",
@@ -376,6 +382,8 @@ def render_wall_plan_svg(
         ".zone-scope{stroke:#c9c1b5;stroke-width:.8;stroke-dasharray:3 3;fill:none}",
         ".space-select-target{fill:transparent;stroke:none;pointer-events:all;cursor:pointer}",
         ".fixture{stroke:#444;stroke-width:1.4;fill:#f7f7f7}",
+        ".piano-fixture{stroke:#333;stroke-width:1.4;fill:#f7f7f7;stroke-linejoin:round;pointer-events:all}",
+        ".piano-clearance{fill:none;stroke-linejoin:round;stroke-linecap:round;pointer-events:stroke}",
         ".clearance{stroke:none}",
         ".wall-select-target{stroke:transparent;stroke-width:12;fill:none;stroke-linecap:square;cursor:pointer}",
         ".wall-grip-target{stroke:transparent;stroke-width:18;fill:none;stroke-linecap:square}",
@@ -402,6 +410,7 @@ def render_wall_plan_svg(
         parts.extend(_render_perimeter_dimensions(level, scale))
         for zone in level.zones:
             parts.append(_render_space_select_target(zone, level.id, scale))
+        parts.extend(_render_stairs(plan.stairs, level.id, scale))
         parts.extend(_render_exterior_wall_solids(level, scale))
         openings_by_wall: dict[str, list[WallOpening]] = {}
         for opening in level.openings:
@@ -410,13 +419,12 @@ def render_wall_plan_svg(
         for wall in level.walls:
             wall_openings = openings_by_wall.get(wall.id, [])
             if wall.kind != "exterior" and not _wall_is_fully_open(wall, wall_openings):
-                parts.append(_render_wall_svg(wall, scale))
-            parts.append(_render_wall_hit_svg(wall, level.id, scale, wall_openings))
+                parts.append(_render_wall_svg(wall, scale, level))
+            parts.append(_render_wall_hit_svg(wall, level, scale, wall_openings))
         wall_by_id = {wall.id: wall for wall in level.walls}
         for opening in level.openings:
             wall = wall_by_id[opening.wall]
-            parts.extend(_render_opening(opening, wall, level.id, scale, editable=opening.id not in stair_opening_ids))
-        parts.extend(_render_stairs(plan.stairs, level.id, scale))
+            parts.extend(_render_opening(opening, wall, level, scale, editable=opening.id not in stair_opening_ids))
         for zone in level.zones:
             zone_rect = _inset_scope_rect(zone.rect)
             parts.append(
@@ -426,24 +434,30 @@ def render_wall_plan_svg(
             )
         for feature_index, feature in enumerate(level.features):
             feature_box = _feature_rect(feature, wall_by_id)
-            clearance = feature.clearance.get("around", feature.clearance.get("walls"))
-            if clearance:
-                clear_box = feature_box.padded(clearance)
-                outer = _rect_path(clear_box, scale)
-                inner = _rect_path(feature_box, scale)
+            clearance_box = _feature_clearance_box(feature, feature_box)
+            if clearance_box is not None:
                 clearance_fill = f"url(#clearance-hatch-{feature_index % len(CLEARANCE_PALETTE)})"
-                parts.append(
-                    f'<path class="clearance" fill-rule="evenodd" data-fp-kind="feature-clearance" '
-                    f'data-fp-level="{escape(level.id)}" data-fp-id="{escape(feature.id)}" '
-                    f'fill="{clearance_fill}" '
-                    f'd="{outer} {inner}" />'
-                )
-            parts.append(
-                f'<rect class="fixture" data-fp-kind="feature" data-fp-level="{escape(level.id)}" '
-                f'data-fp-id="{escape(feature.id)}" x="{feature_box.x * scale:.3f}" y="{feature_box.y * scale:.3f}" '
-                f'width="{feature_box.w * scale:.3f}" height="{feature_box.h * scale:.3f}" '
-                f'{_feature_corner_attrs(feature, scale)} />'
-            )
+                if feature.kind == "piano" and _feature_equal_clearance(feature) is not None:
+                    clearance = _feature_equal_clearance(feature) or 0
+                    body = _piano_path(feature_box, scale)
+                    parts.append(
+                        f'<path class="clearance piano-clearance" data-fp-kind="feature-clearance" '
+                        f'data-fp-level="{escape(level.id)}" data-fp-id="{escape(feature.id)}" '
+                        f'data-fp-model-cx="{feature_box.cx * scale:.3f}" data-fp-model-cy="{feature_box.cy * scale:.3f}" '
+                        f'style="--piano-clearance-stroke:{clearance_fill};--piano-clearance-width:{clearance * 2 * scale:.3f}px;stroke:var(--piano-clearance-stroke);stroke-width:var(--piano-clearance-width)" '
+                        f'd="{body}" />'
+                    )
+                else:
+                    outer = _feature_clearance_outer_path(feature, clearance_box, scale)
+                    inner = _feature_shape_path(feature, feature_box, scale)
+                    parts.append(
+                        f'<path class="clearance" fill-rule="evenodd" data-fp-kind="feature-clearance" '
+                        f'data-fp-level="{escape(level.id)}" data-fp-id="{escape(feature.id)}" '
+                        f'data-fp-model-cx="{feature_box.cx * scale:.3f}" data-fp-model-cy="{feature_box.cy * scale:.3f}" '
+                        f'fill="{clearance_fill}" '
+                        f'd="{outer} {inner}" />'
+                    )
+            parts.extend(_render_feature_fixture(feature, feature_box, level.id, scale))
             if feature.label:
                 label_y = (feature_box.top - 0.35) * scale
                 parts.append(
@@ -650,9 +664,10 @@ def _stair_arrow_head(point: Point, previous: Point, scale: float) -> str:
 
 
 def _render_stair_annotation(stair: Stair, bbox: Rect, scale: float) -> list[str]:
-    start = Point(bbox.right - min(1.2, bbox.w * 0.2), bbox.top + min(2.2, bbox.h * 0.28))
-    elbow = Point(bbox.right + 0.8, start.y - (bbox.right + 0.8 - start.x))
-    label_at = Point(elbow.x + 1.1, elbow.y)
+    start = Point(bbox.left + bbox.w * 0.28, bbox.top + bbox.h * 0.28)
+    leader = 5.15
+    elbow = Point(start.x + leader, start.y - leader)
+    label_at = Point(elbow.x + 1.82, elbow.y)
     label = f'{stair.risers}R  {stair.rise * 12:.1f}" rise / {stair.tread_depth * 12:.1f}" tread'
     return [
         f'<circle class="stair-note-dot" cx="{start.x * scale:.3f}" cy="{start.y * scale:.3f}" r="{0.12 * scale:.3f}" />',
@@ -688,6 +703,75 @@ def _area_dimension_label(area: AreaLabel, zones_by_id: dict[str, Zone]) -> str:
     if zone is None:
         return ""
     return f"{_format_feet(zone.rect.w)} x {_format_feet(zone.rect.h)}"
+
+
+def _render_feature_fixture(feature: Feature, box: Rect, level_id: str, scale: float) -> list[str]:
+    attrs = (
+        f'data-fp-kind="feature" data-fp-level="{escape(level_id)}" data-fp-id="{escape(feature.id)}" '
+        f'data-fp-model-cx="{box.cx * scale:.3f}" data-fp-model-cy="{box.cy * scale:.3f}"'
+    )
+    if feature.kind == "piano":
+        body = _piano_path(box, scale)
+        return [f'<path class="piano-fixture" {attrs} d="{body}" />']
+    return [
+        f'<rect class="fixture" {attrs} x="{box.x * scale:.3f}" y="{box.y * scale:.3f}" '
+        f'width="{box.w * scale:.3f}" height="{box.h * scale:.3f}" '
+        f'{_feature_corner_attrs(feature, scale)} />'
+    ]
+
+
+def _feature_shape_path(feature: Feature, box: Rect, scale: float) -> str:
+    if feature.kind == "piano":
+        return _piano_path(box, scale)
+    return _rect_path(box, scale)
+
+
+def _feature_clearance_outer_path(feature: Feature, clear_box: Rect, scale: float) -> str:
+    return _feature_shape_path(feature, clear_box, scale)
+
+
+def _feature_clearance_box(feature: Feature, box: Rect) -> Rect | None:
+    if not feature.clearance:
+        return None
+    equal = _feature_equal_clearance(feature)
+    around = feature.clearance.get("around", equal or 0)
+    left = feature.clearance.get("left", around)
+    right = feature.clearance.get("right", around)
+    top = feature.clearance.get("top", around)
+    bottom = feature.clearance.get("bottom", feature.clearance.get("foot", around))
+    if max(left, right, top, bottom) <= 0:
+        return None
+    return Rect(box.left - left, box.top - top, box.w + left + right, box.h + top + bottom)
+
+
+def _feature_equal_clearance(feature: Feature) -> float | None:
+    if "around" in feature.clearance:
+        return feature.clearance["around"]
+    if "walls" in feature.clearance:
+        return feature.clearance["walls"]
+    return None
+
+
+def _piano_path(box: Rect, scale: float) -> str:
+    left = box.left
+    top = box.top
+    right = box.right
+    bottom = box.bottom
+    w = box.w
+    h = box.h
+    return (
+        f"M {(left + w * 0.07) * scale:.3f} {(top + h * 0.16) * scale:.3f} "
+        f"L {(right - w * 0.20) * scale:.3f} {(top + h * 0.16) * scale:.3f} "
+        f"C {(right - w * 0.10) * scale:.3f} {(top + h * 0.16) * scale:.3f} {(right - w * 0.04) * scale:.3f} {(top + h * 0.23) * scale:.3f} {(right - w * 0.04) * scale:.3f} {(top + h * 0.34) * scale:.3f} "
+        f"L {(right - w * 0.04) * scale:.3f} {(top + h * 0.50) * scale:.3f} "
+        f"C {(right - w * 0.04) * scale:.3f} {(top + h * 0.58) * scale:.3f} {(right - w * 0.11) * scale:.3f} {(top + h * 0.62) * scale:.3f} {(right - w * 0.20) * scale:.3f} {(top + h * 0.62) * scale:.3f} "
+        f"L {(left + w * 0.58) * scale:.3f} {(top + h * 0.62) * scale:.3f} "
+        f"L {(left + w * 0.46) * scale:.3f} {(top + h * 0.70) * scale:.3f} "
+        f"C {(left + w * 0.36) * scale:.3f} {(top + h * 0.86) * scale:.3f} {(left + w * 0.28) * scale:.3f} {(bottom - h * 0.10) * scale:.3f} {(left + w * 0.17) * scale:.3f} {(bottom - h * 0.10) * scale:.3f} "
+        f"L {(left + w * 0.07) * scale:.3f} {(bottom - h * 0.10) * scale:.3f} "
+        f"L {(left + w * 0.07) * scale:.3f} {(top + h * 0.16) * scale:.3f} "
+        f"Z"
+    )
 
 
 def _inset_scope_rect(rect: Rect) -> Rect:
@@ -936,13 +1020,17 @@ def _stair_opening_ids(stairs: list[Stair]) -> set[str]:
     return {opening_id for stair in stairs for opening_id in (f"{stair.id}_lower_entry", f"{stair.id}_upper_exit")}
 
 
-def _render_opening(opening: WallOpening, wall: WallSegment, level_id: str, scale: float, *, editable: bool = True) -> list[str]:
-    mark_wall = _exterior_opening_mark_segment(wall) if wall.kind == "exterior" else wall
-    mask_wall = mark_wall if wall.kind == "exterior" else wall
-    start = mask_wall.point_at(opening.offset)
-    end = mask_wall.point_at(opening.offset + opening.width)
-    mask_class = "exterior-opening-mask" if wall.kind == "exterior" else "interior-opening-mask"
+def _render_opening(opening: WallOpening, wall: WallSegment, level: WallLevel, scale: float, *, editable: bool = True) -> list[str]:
+    level_id = level.id
+    render_wall = _opening_render_wall(opening, wall, level)
+    mark_wall = _exterior_opening_mark_segment(wall) if wall.kind == "exterior" else render_wall
+    mask_wall = mark_wall
+    inset = _opening_mask_inset(opening, wall)
+    start = mask_wall.point_at(opening.offset + inset)
+    end = mask_wall.point_at(opening.offset + opening.width - inset)
+    mask_class = _opening_mask_class(opening, wall)
     orientation = "horizontal" if wall.direction in {"E", "W"} else "vertical"
+    full_width_opening = _opening_is_full_width(opening, wall)
     editor_attrs = ""
     if editable:
         editor_attrs = (
@@ -951,13 +1039,25 @@ def _render_opening(opening: WallOpening, wall: WallSegment, level_id: str, scal
             f'data-fp-orientation="{orientation}" data-fp-offset="{opening.offset:.3f}" '
             f'data-fp-width="{opening.width:.3f}" data-fp-wall-length="{wall.length:.3f}"'
         )
+    if full_width_opening:
+        mark_start = mark_wall.at
+        mark_end = mark_wall.end
+    else:
+        mark_start = mark_wall.point_at(opening.offset)
+        mark_end = mark_wall.point_at(opening.offset + opening.width)
+    if opening.kind == "open" and full_width_opening:
+        if editable:
+            return [
+                f'<line class="opening-hit-target" {editor_attrs} '
+                f'x1="{mark_start.x * scale:.3f}" y1="{mark_start.y * scale:.3f}" '
+                f'x2="{mark_end.x * scale:.3f}" y2="{mark_end.y * scale:.3f}" />'
+            ]
+        return []
     parts = [
         f'<line class="opening-mask {mask_class}" {editor_attrs} '
         f'x1="{start.x * scale:.3f}" y1="{start.y * scale:.3f}" '
         f'x2="{end.x * scale:.3f}" y2="{end.y * scale:.3f}" />'
     ]
-    mark_start = mark_wall.point_at(opening.offset)
-    mark_end = mark_wall.point_at(opening.offset + opening.width)
     if opening.kind == "open":
         return parts
     if opening.kind == "arch":
@@ -974,6 +1074,32 @@ def _render_opening(opening: WallOpening, wall: WallSegment, level_id: str, scal
             f'x2="{mark_end.x * scale:.3f}" y2="{mark_end.y * scale:.3f}" />'
         )
     return parts
+
+
+def _opening_render_wall(opening: WallOpening, wall: WallSegment, level: WallLevel) -> WallSegment:
+    if wall.kind == "exterior":
+        return wall
+    start, end = _interior_wall_render_endpoints(wall, level)
+    start, end = _interior_wall_render_points(wall, start, end, level)
+    return WallSegment(id=wall.id, at=start, direction=wall.direction, length=start.distance_to(end), kind=wall.kind, offset=wall.offset)
+
+
+def _opening_is_full_width(opening: WallOpening, wall: WallSegment) -> bool:
+    return opening.offset <= EPSILON and opening.offset + opening.width >= wall.length - EPSILON
+
+
+def _opening_mask_class(opening: WallOpening, wall: WallSegment) -> str:
+    if wall.kind == "exterior":
+        return "exterior-opening-mask"
+    if opening.kind == "open":
+        return "interior-open-mask"
+    return "interior-opening-mask"
+
+
+def _opening_mask_inset(opening: WallOpening, wall: WallSegment) -> float:
+    if wall.kind == "exterior" or opening.kind != "open":
+        return 0
+    return min(INTERIOR_WALL_STROKE_FT * 0.55, max(0, opening.width / 2 - EPSILON))
 
 
 def _exterior_opening_mark_segment(wall: WallSegment) -> WallSegment:
@@ -1002,22 +1128,25 @@ def _render_wall_segment(wall: WallSegment) -> WallSegment:
         direction=wall.direction,
         length=wall.length,
         kind=wall.kind,
+        offset=wall.offset,
     )
 
 
-def _render_wall_svg(wall: WallSegment, scale: float) -> str:
+def _render_wall_svg(wall: WallSegment, scale: float, level: WallLevel | None = None) -> str:
     if wall.kind != "exterior":
         thickness = INTERIOR_WALL_STROKE_FT * scale
+        render_start, render_end = _interior_wall_render_endpoints(wall, level)
+        render_start, render_end = _interior_wall_render_points(wall, render_start, render_end, level)
         if wall.direction in {"E", "W"}:
-            x = min(wall.at.x, wall.end.x) * scale
-            y = wall.at.y * scale - thickness / 2
-            width = wall.length * scale
+            x = min(render_start.x, render_end.x) * scale
+            y = render_start.y * scale - thickness / 2
+            width = abs(render_end.x - render_start.x) * scale
             height = thickness
         else:
-            x = wall.at.x * scale - thickness / 2
-            y = min(wall.at.y, wall.end.y) * scale
+            x = render_start.x * scale - thickness / 2
+            y = min(render_start.y, render_end.y) * scale
             width = thickness
-            height = wall.length * scale
+            height = abs(render_end.y - render_start.y) * scale
         return (
             f'<rect class="{escape(wall.kind)}" x="{x:.3f}" y="{y:.3f}" '
             f'width="{width:.3f}" height="{height:.3f}" '
@@ -1026,11 +1155,208 @@ def _render_wall_svg(wall: WallSegment, scale: float) -> str:
     raise ValueError("_render_wall_svg does not render exterior walls")
 
 
-def _render_wall_hit_svg(wall: WallSegment, level_id: str, scale: float, openings: list[WallOpening]) -> str:
-    render_wall = _render_wall_segment(wall)
-    end = render_wall.end
+def _interior_wall_render_endpoints(wall: WallSegment, level: WallLevel | None) -> tuple[Point, Point]:
+    start = wall.at
+    end = wall.end
+    return (start, end)
+
+
+def _interior_wall_render_points(
+    wall: WallSegment, start: Point, end: Point, level: WallLevel | None
+) -> tuple[Point, Point]:
+    if level is None:
+        return (start, end)
+    if wall.offset is not None:
+        return _offset_wall_points(start, end, wall.direction, wall.offset)
+    offset = _interior_wall_normal_offset(wall, level)
+    if abs(offset) > EPSILON:
+        return _offset_wall_points(start, end, wall.direction, offset)
+    return (start, end)
+
+
+def _interior_wall_normal_offset(wall: WallSegment, level: WallLevel | None) -> float:
+    if wall.offset is not None:
+        return wall.offset
+    if level is None:
+        return 0
+    inward = _inward_normal_sign_for_exterior_wall(wall, level) if _wall_lies_on_exterior_loop(wall, level) else 0
+    if inward == 0:
+        inward = _inward_normal_sign_for_exterior_endpoint_join(wall, level)
+    if inward == 0:
+        inward = _inward_normal_sign_for_perpendicular_exterior_endpoint_join(wall, level)
+    if inward == 0:
+        inward = _inward_normal_sign_for_parallel_exterior_datum(wall, level)
+    return -inward * INTERIOR_WALL_STROKE_FT / 2
+
+
+def _offset_wall_points(start: Point, end: Point, direction: Direction, offset: float) -> tuple[Point, Point]:
+    if abs(offset) <= EPSILON:
+        return (start, end)
+    nx, ny = _normal(direction)
+    return (
+        Point(start.x + nx * offset, start.y + ny * offset),
+        Point(end.x + nx * offset, end.y + ny * offset),
+    )
+
+
+def _inward_normal_sign_for_exterior_wall(wall: WallSegment, level: WallLevel) -> float:
+    midpoint = Point((wall.at.x + wall.end.x) / 2, (wall.at.y + wall.end.y) / 2)
+    nx, ny = _normal(wall.direction)
+    for loop in _exterior_loops(level):
+        clean_loop = loop[:-1] if loop and _same_point(loop[0], loop[-1]) else loop
+        if len(clean_loop) < 3:
+            continue
+        poly = Poly(clean_loop)
+        positive = Point(midpoint.x + nx * 0.05, midpoint.y + ny * 0.05)
+        negative = Point(midpoint.x - nx * 0.05, midpoint.y - ny * 0.05)
+        if poly.contains_point(positive) and not poly.contains_point(negative):
+            return 1
+        if poly.contains_point(negative) and not poly.contains_point(positive):
+            return -1
+    return 0
+
+
+def _inward_normal_sign_for_exterior_endpoint_join(wall: WallSegment, level: WallLevel) -> float:
+    nx, ny = _normal(wall.direction)
+    for point in (wall.at, wall.end):
+        if not _point_on_parallel_exterior_segment(point, wall.direction, level):
+            continue
+        probe = _endpoint_join_probe(wall, point)
+        for loop in _exterior_loops(level):
+            clean_loop = loop[:-1] if loop and _same_point(loop[0], loop[-1]) else loop
+            if len(clean_loop) < 3:
+                continue
+            poly = Poly(clean_loop)
+            positive = Point(probe.x + nx * 0.05, probe.y + ny * 0.05)
+            negative = Point(probe.x - nx * 0.05, probe.y - ny * 0.05)
+            if poly.contains_point(positive) and not poly.contains_point(negative):
+                return 1
+            if poly.contains_point(negative) and not poly.contains_point(positive):
+                return -1
+    return 0
+
+
+def _inward_normal_sign_for_perpendicular_exterior_endpoint_join(wall: WallSegment, level: WallLevel) -> float:
+    nx, ny = _normal(wall.direction)
+    wall_axis = "horizontal" if wall.direction in {"E", "W"} else "vertical"
+    for point in (wall.at, wall.end):
+        probe = _endpoint_join_probe(wall, point)
+        if not _point_in_or_on_any_loop(probe, _exterior_loops(level)):
+            continue
+        for first, second in _exterior_segments_at_point(point, level):
+            segment_axis = "horizontal" if abs(first.y - second.y) <= 0.01 else "vertical"
+            if segment_axis == wall_axis:
+                continue
+            other = second if _same_point(first, point) else first
+            vx = other.x - point.x
+            vy = other.y - point.y
+            dot = vx * nx + vy * ny
+            if abs(dot) > EPSILON:
+                return -1 if dot > 0 else 1
+    return 0
+
+
+def _inward_normal_sign_for_parallel_exterior_datum(wall: WallSegment, level: WallLevel) -> float:
+    if wall.direction in {"E", "W"}:
+        return _inward_normal_sign_for_horizontal_exterior_datum(wall.at.y, wall.direction, level)
+    return _inward_normal_sign_for_vertical_exterior_datum(wall.at.x, wall.direction, level)
+
+
+def _inward_normal_sign_for_vertical_exterior_datum(x: float, direction: Direction, level: WallLevel) -> float:
+    nx, ny = _normal(direction)
+    del ny
+    for loop in _exterior_loops(level):
+        clean_loop = loop[:-1] if loop and _same_point(loop[0], loop[-1]) else loop
+        if len(clean_loop) < 3:
+            continue
+        poly = Poly(clean_loop)
+        for first, second in zip(loop, loop[1:]):
+            if abs(first.x - second.x) > 0.01 or abs(first.x - x) > 0.01:
+                continue
+            midpoint = Point(first.x, (first.y + second.y) / 2)
+            positive = poly.contains_point(Point(midpoint.x + nx * 0.05, midpoint.y))
+            negative = poly.contains_point(Point(midpoint.x - nx * 0.05, midpoint.y))
+            if positive != negative:
+                return 1 if positive else -1
+    return 0
+
+
+def _inward_normal_sign_for_horizontal_exterior_datum(y: float, direction: Direction, level: WallLevel) -> float:
+    nx, ny = _normal(direction)
+    del nx
+    for loop in _exterior_loops(level):
+        clean_loop = loop[:-1] if loop and _same_point(loop[0], loop[-1]) else loop
+        if len(clean_loop) < 3:
+            continue
+        poly = Poly(clean_loop)
+        for first, second in zip(loop, loop[1:]):
+            if abs(first.y - second.y) > 0.01 or abs(first.y - y) > 0.01:
+                continue
+            midpoint = Point((first.x + second.x) / 2, first.y)
+            positive = poly.contains_point(Point(midpoint.x, midpoint.y + ny * 0.05))
+            negative = poly.contains_point(Point(midpoint.x, midpoint.y - ny * 0.05))
+            if positive != negative:
+                return 1 if positive else -1
+    return 0
+
+
+def _exterior_segments_at_point(point: Point, level: WallLevel) -> list[tuple[Point, Point]]:
+    segments = []
+    for loop in _exterior_loops(level):
+        for first, second in zip(loop, loop[1:]):
+            if _same_point(first, point) or _same_point(second, point):
+                segments.append((first, second))
+    return segments
+
+
+def _endpoint_join_probe(wall: WallSegment, point: Point) -> Point:
+    dx, dy = _unit(wall.direction)
+    if _same_point(point, wall.at):
+        return Point(point.x + dx * 0.05, point.y + dy * 0.05)
+    return Point(point.x - dx * 0.05, point.y - dy * 0.05)
+
+
+def _point_on_parallel_exterior_segment(point: Point, direction: Direction, level: WallLevel) -> bool:
+    wall_axis = "horizontal" if direction in {"E", "W"} else "vertical"
+    for loop in _exterior_loops(level):
+        for first, second in zip(loop, loop[1:]):
+            segment_axis = "horizontal" if abs(first.y - second.y) <= 0.01 else "vertical"
+            if segment_axis != wall_axis:
+                continue
+            if _point_on_segment_local(point, first, second, 0.01):
+                return True
+    return False
+
+
+def _point_on_exterior_loop(point: Point, level: WallLevel) -> bool:
+    for loop in _exterior_loops(level):
+        for first, second in zip(loop, loop[1:]):
+            if _point_on_segment_local(point, first, second, 0.01):
+                return True
+    return False
+
+
+def _wall_lies_on_exterior_loop(wall: WallSegment, level: WallLevel) -> bool:
+    midpoint = Point((wall.at.x + wall.end.x) / 2, (wall.at.y + wall.end.y) / 2)
+    return _point_on_exterior_loop(midpoint, level)
+
+
+def _point_on_segment_local(point: Point, first: Point, second: Point, tolerance: float) -> bool:
+    cross = (point.y - first.y) * (second.x - first.x) - (point.x - first.x) * (second.y - first.y)
+    if abs(cross) > tolerance:
+        return False
+    dot = (point.x - first.x) * (second.x - first.x) + (point.y - first.y) * (second.y - first.y)
+    if dot < -tolerance:
+        return False
+    length_sq = (second.x - first.x) ** 2 + (second.y - first.y) ** 2
+    return dot <= length_sq + tolerance
+
+
+def _render_wall_hit_svg(wall: WallSegment, level: WallLevel, scale: float, openings: list[WallOpening]) -> str:
     orientation = "horizontal" if wall.direction in {"E", "W"} else "vertical"
     fully_open = _wall_is_fully_open(wall, openings)
+    render_wall = _render_wall_hit_segment(wall, level)
+    end = render_wall.end
     grip_span = _wall_grip_span(wall, openings)
     grip_length = grip_span[1] - grip_span[0]
     grip_start = render_wall.point_at(grip_span[0])
@@ -1043,18 +1369,33 @@ def _render_wall_hit_svg(wall: WallSegment, level_id: str, scale: float, opening
     parts = [
         f'<line class="wall-select-target" x1="{render_wall.at.x * scale:.3f}" y1="{render_wall.at.y * scale:.3f}" '
         f'x2="{end.x * scale:.3f}" y2="{end.y * scale:.3f}" data-fp-kind="wall-select" '
-        f'data-fp-level="{escape(level_id)}" data-fp-id="{escape(wall.id)}" '
+        f'data-fp-level="{escape(level.id)}" data-fp-id="{escape(wall.id)}" '
         f'data-fp-orientation="{orientation}" {model_attrs} />',
     ]
     if not fully_open and grip_length > EPSILON:
         parts.append(
             f'<line class="wall-grip-target" x1="{grip_start.x * scale:.3f}" y1="{grip_start.y * scale:.3f}" '
             f'x2="{grip_end.x * scale:.3f}" y2="{grip_end.y * scale:.3f}" data-fp-kind="wall-grip" '
-            f'data-fp-level="{escape(level_id)}" data-fp-id="{escape(wall.id)}" '
+            f'data-fp-level="{escape(level.id)}" data-fp-id="{escape(wall.id)}" '
             f'data-fp-orientation="{orientation}" {model_attrs} />'
         )
         parts.extend(_render_wall_grip_dots(render_wall, scale, grip_span))
     return "".join(parts)
+
+
+def _render_wall_hit_segment(wall: WallSegment, level: WallLevel) -> WallSegment:
+    if wall.kind == "exterior":
+        return _render_wall_segment(wall)
+    start, end = _interior_wall_render_endpoints(wall, level)
+    start, end = _interior_wall_render_points(wall, start, end, level)
+    return WallSegment(
+        id=wall.id,
+        at=start,
+        direction=wall.direction,
+        length=start.distance_to(end),
+        kind=wall.kind,
+        offset=wall.offset,
+    )
 
 
 def _wall_grip_span(wall: WallSegment, openings: list[WallOpening]) -> tuple[float, float]:
@@ -1834,7 +2175,19 @@ def _render_window(
 ) -> list[str]:
     nx, ny = _normal(direction)
     inset = 0.16
-    parts = []
+    fill_points = [
+        Point(start.x - nx * inset, start.y - ny * inset),
+        Point(end.x - nx * inset, end.y - ny * inset),
+        Point(end.x + nx * inset, end.y + ny * inset),
+        Point(start.x + nx * inset, start.y + ny * inset),
+    ]
+    parts = [
+        '<polygon class="window-fill" '
+        + " ".join(f'{name}="{value}"' for name, value in _editor_attr_pairs(editor_attrs))
+        + ' points="'
+        + " ".join(f"{point.x * scale:.3f},{point.y * scale:.3f}" for point in fill_points)
+        + '" />'
+    ]
     for side in (-inset, inset):
         parts.append(
             f'<line class="window" {editor_attrs} x1="{(start.x + nx * side) * scale:.3f}" '
@@ -1844,30 +2197,27 @@ def _render_window(
     return parts
 
 
+def _editor_attr_pairs(attrs: str) -> list[tuple[str, str]]:
+    pairs = []
+    for chunk in attrs.split('" '):
+        if '="' not in chunk:
+            continue
+        name, value = chunk.split('="', 1)
+        pairs.append((name.strip(), value.rstrip('"')))
+    return pairs
+
+
 def _render_arch(start: Point, end: Point, direction: Direction, scale: float, editor_attrs: str = "") -> list[str]:
     normal_x, normal_y = _normal(direction)
-    tick = 0.32
     depth = 0.55
-    dx = end.x - start.x
-    dy = end.y - start.y
-    spring_start = Point(start.x + dx * 0.2, start.y + dy * 0.2)
-    spring_end = Point(start.x + dx * 0.8, start.y + dy * 0.8)
     mid_x = (start.x + end.x) / 2
     mid_y = (start.y + end.y) / 2
     control_x = mid_x + normal_x * depth
     control_y = mid_y + normal_y * depth
     return [
-        f'<line class="arch" {editor_attrs} x1="{(start.x - normal_x * tick) * scale:.3f}" '
-        f'y1="{(start.y - normal_y * tick) * scale:.3f}" '
-        f'x2="{(start.x + normal_x * tick) * scale:.3f}" y2="{(start.y + normal_y * tick) * scale:.3f}" />',
-        f'<line class="arch" {editor_attrs} x1="{(end.x - normal_x * tick) * scale:.3f}" '
-        f'y1="{(end.y - normal_y * tick) * scale:.3f}" '
-        f'x2="{(end.x + normal_x * tick) * scale:.3f}" y2="{(end.y + normal_y * tick) * scale:.3f}" />',
         f'<path class="arch" {editor_attrs} d="M {start.x * scale:.3f} {start.y * scale:.3f} '
-        f'L {spring_start.x * scale:.3f} {spring_start.y * scale:.3f} '
         f'Q {control_x * scale:.3f} {control_y * scale:.3f} '
-        f'{spring_end.x * scale:.3f} {spring_end.y * scale:.3f} '
-        f'L {end.x * scale:.3f} {end.y * scale:.3f}" />',
+        f'{end.x * scale:.3f} {end.y * scale:.3f}" />',
     ]
 
 

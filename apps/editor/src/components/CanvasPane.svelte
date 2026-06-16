@@ -1,6 +1,7 @@
 <script lang="ts">
   import { tick } from "svelte";
   import type { PlanDocument, PlanSummary } from "../lib/api";
+  import { serializeCanvasSvgForExport } from "../lib/canvasSvg";
 
   export let document: PlanDocument | null = null;
   export let plans: PlanSummary[] = [];
@@ -36,7 +37,8 @@
     if (!svg) {
       return;
     }
-    const blob = new Blob([svg], { type: "image/svg+xml;charset=utf-8" });
+    const exportedSvg = serializeCanvasSvgForExport(canvasElement, svg);
+    const blob = new Blob([exportedSvg], { type: "image/svg+xml;charset=utf-8" });
     const url = URL.createObjectURL(blob);
     const link = globalThis.document.createElement("a");
     link.href = url;
