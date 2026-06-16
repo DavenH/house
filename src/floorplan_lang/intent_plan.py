@@ -508,6 +508,7 @@ def _compile_features(
                 within=data.get("within"),
                 clearance={str(key): float(value) for key, value in (data.get("clearance") or {}).items()},
                 avoid_openings=bool(data.get("avoid_openings", False)),
+                rotation=float(data.get("rotation", 0)),
             )
         )
     return compiled

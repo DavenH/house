@@ -15,8 +15,8 @@ notes:
   - 'Pattern basis: Library, Music Practice Rooms, Alcoves, Half-Open Wall, Intimacy Gradient, and Light on Two Sides of Every Room.'
   - 'Upper-floor improvement: master bedroom claims the west upper bay for a real exterior window; hall becomes a windowed laundry/linen room close to the master suite.'
 datums:
-  x: {west: 1, storage_e: 8, left_w: 8, closet_w: 14.5, left_e: 21, stair_e: 31, piano_w: 29.5, tower_e: 38, right_w: 38, pantry_w: 43.5, room_split: 42, pantry_e: 49.5, dining_w: 54, right_e: 54, dining_e: 63}
-  y: {gable_n: 2, main_n: 8, ensuite_s: 10, bath_s: 13, stair_s: 18, dining_n: 17.5, closet_s: 18.5, public_split: 23, lower_storage_n: 23.5, entry_s: 28, dining_s: 28, tower_s: 30, gable_s: 32, main_s: 37}
+  x: {west: 1, storage_e: 8, left_w: 8, closet_w: 15, left_e: 21, stair_e: 31, piano_w: 29.5, tower_e: 38, right_w: 38, pantry_w: 43.5, room_split: 42, pantry_e: 49.5, dining_w: 54, right_e: 54, dining_e: 63}
+  y: {gable_n: 2, main_n: 8, ensuite_s: 10, bath_s: 13, stair_s: 18, dining_n: 17.5, closet_s: 18.5, public_split: 23, lower_storage_n: 24, entry_s: 28, dining_s: 28, tower_s: 30, gable_s: 32, main_s: 37}
 catalog:
   counter: {label: COUNTER}
 masses:
@@ -51,14 +51,16 @@ levels:
       pantry: {x: [pantry_w, pantry_e], y: [19, 23], privacy: service}
       dining: {x: [dining_w, dining_e], y: [dining_n, dining_s], label: 'DINING AREA', privacy: public}
     features:
-      piano: {kind: piano, within: library, at: [7, 17.5], size: [7, 5], label: PIANO, avoid_openings: true, clearance: {around: 1}}
+      piano: {kind: piano, within: library, at: [7.5, 19], size: [7, 5], label: PIANO, avoid_openings: true, clearance: {around: 1}, rotation: 225}
+      piano_bench: {kind: rectangle, within: library, at: [10.5, 22], size: [1, 2], label: '', rotation: 45}
       hearth_fireplace: {kind: rectangle, at: [46.5, 18], size: [6, 2], label: HEARTH}
       great_room_couch: {kind: rectangle, within: great_room, at: [46.5, 10], size: [6, 3], label: COUCH}
       great_room_chair_w: {kind: rectangle, within: great_room, at: [41.5, 13.5], size: [3, 3], label: CHAIR}
       great_room_chair_e: {kind: rectangle, within: great_room, at: [51.5, 13.5], size: [3, 3], label: CHAIR}
+      great_room_coffee_table: {kind: rectangle, within: great_room, at: [46.5, 13.5], size: [4, 2], label: ''}
       kitchen_south_counter: {kind: counter, along: {space: kitchen, side: south}, depth: 2}
-      kitchen_east_counter: {kind: counter, along: {space: kitchen, side: east}, depth: 2, at: [56.5, 30]}
-      kitchen_west_counter: {kind: rectangle, within: kitchen, at: [39, 33.5], size: [2, 7], label: COUNTER}
+      kitchen_east_counter: {kind: counter, along: {space: kitchen, side: east}, depth: 2, at: [56.5, 30], label: ''}
+      kitchen_west_counter: {kind: rectangle, within: kitchen, at: [39, 33.5], size: [2, 7], label: ''}
       kitchen_island: {kind: rectangle, size: [5, 3], at: [46, 30.5], label: ISLAND, clearance: {walls: 4, around: 3}}
       refrigerator: {kind: rectangle, within: kitchen, at: [39.25, 28.5], size: [2.5, 3], label: FRIDGE}
       mechanicals: {kind: rectangle, within: laundry, at: [2.5, 11.5], size: [2, 2], label: MECH}
@@ -121,7 +123,7 @@ levels:
       lounge: {x: [right_w, right_e], y: [stair_s, main_s], privacy: public}
     features:
       chimney: {kind: rectangle, at: [46.5, 18], size: [6, 2], label: CHIMNEY, avoid_openings: true}
-      queen_bed: {kind: rectangle, within: master_bedroom, at: [6, 17], size: [6.67, 5], label: BED, clearance: {left: 0, right: 2, top: 2, foot: 2}, avoid_openings: true}
+      queen_bed: {kind: rectangle, within: master_bedroom, at: [5, 17], size: [6.67, 5], label: BED, clearance: {left: 0, right: 2, top: 2, foot: 2}, avoid_openings: true}
       hall_laundry_pair: {kind: rectangle, within: upper_hall, at: [23, 26.5], size: [3, 2.5], label: W/D}
       hall_linen: {kind: rectangle, within: upper_hall, at: [28.5, 27], size: [4, 1.5], label: LINEN}
       pool_table: {kind: rectangle, at: [46, 28], size: [4, 8], label: 'POOL TABLE', clearance: {walls: 5}}

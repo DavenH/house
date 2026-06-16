@@ -97,6 +97,7 @@ class Feature:
     within: str | None = None
     clearance: dict[str, float] = field(default_factory=dict)
     avoid_openings: bool = False
+    rotation: float = 0
 
 
 @dataclass(frozen=True)
@@ -266,6 +267,7 @@ def wall_plan_from_dict(data: dict[str, Any]) -> WallPlan:
                     within=feature_data.get("within"),
                     clearance={str(key): float(value) for key, value in (feature_data.get("clearance") or {}).items()},
                     avoid_openings=bool(feature_data.get("avoid_openings", False)),
+                    rotation=float(feature_data.get("rotation", 0)),
                 )
             )
         for opening_id, opening_data in enumerate(level_data.get("openings") or (), start=1):
@@ -444,6 +446,7 @@ def render_wall_plan_svg(
                         f'<path class="clearance piano-clearance" data-fp-kind="feature-clearance" '
                         f'data-fp-level="{escape(level.id)}" data-fp-id="{escape(feature.id)}" '
                         f'data-fp-model-cx="{feature_box.cx * scale:.3f}" data-fp-model-cy="{feature_box.cy * scale:.3f}" '
+                        f'data-fp-rotation="{feature.rotation:.3f}" {_feature_rotation_attr(feature, feature_box, scale)}'
                         f'style="--piano-clearance-stroke:{clearance_fill};--piano-clearance-width:{clearance * 2 * scale:.3f}px;stroke:var(--piano-clearance-stroke);stroke-width:var(--piano-clearance-width)" '
                         f'd="{body}" />'
                     )
@@ -454,6 +457,7 @@ def render_wall_plan_svg(
                         f'<path class="clearance" fill-rule="evenodd" data-fp-kind="feature-clearance" '
                         f'data-fp-level="{escape(level.id)}" data-fp-id="{escape(feature.id)}" '
                         f'data-fp-model-cx="{feature_box.cx * scale:.3f}" data-fp-model-cy="{feature_box.cy * scale:.3f}" '
+                        f'data-fp-rotation="{feature.rotation:.3f}" {_feature_rotation_attr(feature, feature_box, scale)}'
                         f'fill="{clearance_fill}" '
                         f'd="{outer} {inner}" />'
                     )
@@ -708,15 +712,16 @@ def _area_dimension_label(area: AreaLabel, zones_by_id: dict[str, Zone]) -> str:
 def _render_feature_fixture(feature: Feature, box: Rect, level_id: str, scale: float) -> list[str]:
     attrs = (
         f'data-fp-kind="feature" data-fp-level="{escape(level_id)}" data-fp-id="{escape(feature.id)}" '
-        f'data-fp-model-cx="{box.cx * scale:.3f}" data-fp-model-cy="{box.cy * scale:.3f}"'
+        f'data-fp-model-cx="{box.cx * scale:.3f}" data-fp-model-cy="{box.cy * scale:.3f}" '
+        f'data-fp-rotation="{feature.rotation:.3f}"'
     )
     if feature.kind == "piano":
         body = _piano_path(box, scale)
-        return [f'<path class="piano-fixture" {attrs} d="{body}" />']
+        return [f'<path class="piano-fixture" {attrs} {_feature_rotation_attr(feature, box, scale)}d="{body}" />']
     return [
         f'<rect class="fixture" {attrs} x="{box.x * scale:.3f}" y="{box.y * scale:.3f}" '
         f'width="{box.w * scale:.3f}" height="{box.h * scale:.3f}" '
-        f'{_feature_corner_attrs(feature, scale)} />'
+        f'{_feature_rotation_attr(feature, box, scale)}{_feature_corner_attrs(feature, scale)} />'
     ]
 
 
@@ -724,6 +729,12 @@ def _feature_shape_path(feature: Feature, box: Rect, scale: float) -> str:
     if feature.kind == "piano":
         return _piano_path(box, scale)
     return _rect_path(box, scale)
+
+
+def _feature_rotation_attr(feature: Feature, box: Rect, scale: float) -> str:
+    if not feature.rotation:
+        return ""
+    return f'transform="rotate({feature.rotation:.3f} {box.cx * scale:.3f} {box.cy * scale:.3f})" '
 
 
 def _feature_clearance_outer_path(feature: Feature, clear_box: Rect, scale: float) -> str:
@@ -1679,16 +1690,16 @@ def _render_perimeter_dimensions(level: WallLevel, scale: float) -> list[str]:
         offset = 1.15
         if sides["top"]:
             dimension_y = min(sides["top"].values()) - offset
-            parts.extend(_render_horizontal_dimension_chain(sides["top"], dimension_y, scale, label_side="N"))
+            parts.extend(_render_horizontal_dimension_chain(sides["top"], dimension_y, scale, label_side="N", loop=clean_outer))
         if sides["bottom"]:
             dimension_y = max(sides["bottom"].values()) + offset
-            parts.extend(_render_horizontal_dimension_chain(sides["bottom"], dimension_y, scale, label_side="S"))
+            parts.extend(_render_horizontal_dimension_chain(sides["bottom"], dimension_y, scale, label_side="S", loop=clean_outer))
         if sides["left"]:
             dimension_x = min(sides["left"].values()) - offset
-            parts.extend(_render_vertical_dimension_chain(sides["left"], dimension_x, scale, label_side="W"))
+            parts.extend(_render_vertical_dimension_chain(sides["left"], dimension_x, scale, label_side="W", loop=clean_outer))
         if sides["right"]:
             dimension_x = max(sides["right"].values()) + offset
-            parts.extend(_render_vertical_dimension_chain(sides["right"], dimension_x, scale, label_side="E"))
+            parts.extend(_render_vertical_dimension_chain(sides["right"], dimension_x, scale, label_side="E", loop=clean_outer))
     return parts
 
 
@@ -1725,7 +1736,7 @@ def _record_side_projection(target: dict[float, float], key: float, value: float
 
 
 def _render_horizontal_dimension_chain(
-    subject_y_by_x: dict[float, float], y: float, scale: float, *, label_side: Direction
+    subject_y_by_x: dict[float, float], y: float, scale: float, *, label_side: Direction, loop: list[Point]
 ) -> list[str]:
     x_values = _unique_sorted(subject_y_by_x)
     if len(x_values) < 2:
@@ -1737,7 +1748,9 @@ def _render_horizontal_dimension_chain(
     ]
     for x in x_values:
         parts.append(_dimension_tick(Point(x, y), "E", scale))
-        subject_y = _lookup_near(subject_y_by_x, x)
+        subject_y = _nearest_dimension_projection_endpoint("vertical", x, y, 1 if label_side == "N" else -1, loop)
+        if subject_y is None:
+            subject_y = _lookup_near(subject_y_by_x, x)
         parts.append(
             f'<line class="dimension-projection" x1="{x * scale:.3f}" y1="{y * scale:.3f}" '
             f'x2="{x * scale:.3f}" y2="{subject_y * scale:.3f}" />'
@@ -1754,7 +1767,7 @@ def _render_horizontal_dimension_chain(
 
 
 def _render_vertical_dimension_chain(
-    subject_x_by_y: dict[float, float], x: float, scale: float, *, label_side: Direction
+    subject_x_by_y: dict[float, float], x: float, scale: float, *, label_side: Direction, loop: list[Point]
 ) -> list[str]:
     y_values = _unique_sorted(subject_x_by_y)
     if len(y_values) < 2:
@@ -1766,7 +1779,9 @@ def _render_vertical_dimension_chain(
     ]
     for y in y_values:
         parts.append(_dimension_tick(Point(x, y), "S", scale))
-        subject_x = _lookup_near(subject_x_by_y, y)
+        subject_x = _nearest_dimension_projection_endpoint("horizontal", y, x, 1 if label_side == "W" else -1, loop)
+        if subject_x is None:
+            subject_x = _lookup_near(subject_x_by_y, y)
         parts.append(
             f'<line class="dimension-projection" x1="{x * scale:.3f}" y1="{y * scale:.3f}" '
             f'x2="{subject_x * scale:.3f}" y2="{y * scale:.3f}" />'
@@ -1782,6 +1797,62 @@ def _render_vertical_dimension_chain(
             f'transform="rotate(-90 {mx:.3f} {my:.3f})">{_format_feet(length)}</text>'
         )
     return parts
+
+
+def _nearest_dimension_projection_endpoint(
+    axis: Literal["horizontal", "vertical"],
+    fixed: float,
+    origin: float,
+    direction: int,
+    loop: list[Point],
+) -> float | None:
+    candidates = []
+    closed_loop = loop + [loop[0]] if loop and not _same_point(loop[0], loop[-1]) else loop
+    for first, second in zip(closed_loop, closed_loop[1:]):
+        if axis == "vertical":
+            candidate = _vertical_ray_loop_intersection(fixed, origin, direction, first, second)
+        else:
+            candidate = _horizontal_ray_loop_intersection(fixed, origin, direction, first, second)
+        if candidate is None:
+            continue
+        distance = (candidate - origin) * direction
+        if distance >= -EPSILON:
+            candidates.append((max(distance, 0), candidate))
+    if not candidates:
+        return None
+    return min(candidates, key=lambda item: item[0])[1]
+
+
+def _vertical_ray_loop_intersection(
+    x: float, origin_y: float, direction: int, first: Point, second: Point
+) -> float | None:
+    if abs(first.y - second.y) <= EPSILON:
+        return first.y if _between(x, first.x, second.x) else None
+    if abs(first.x - second.x) <= EPSILON and abs(x - first.x) <= EPSILON:
+        return _nearest_interval_point(origin_y, direction, first.y, second.y)
+    return None
+
+
+def _horizontal_ray_loop_intersection(
+    y: float, origin_x: float, direction: int, first: Point, second: Point
+) -> float | None:
+    if abs(first.x - second.x) <= EPSILON:
+        return first.x if _between(y, first.y, second.y) else None
+    if abs(first.y - second.y) <= EPSILON and abs(y - first.y) <= EPSILON:
+        return _nearest_interval_point(origin_x, direction, first.x, second.x)
+    return None
+
+
+def _nearest_interval_point(origin: float, direction: int, first: float, second: float) -> float | None:
+    start = min(first, second)
+    end = max(first, second)
+    if direction > 0:
+        if end < origin - EPSILON:
+            return None
+        return max(start, origin)
+    if start > origin + EPSILON:
+        return None
+    return min(end, origin)
 
 
 def _dimension_tick(point: Point, direction: Direction, scale: float) -> str:

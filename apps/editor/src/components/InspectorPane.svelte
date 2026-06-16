@@ -100,9 +100,10 @@
   $: featureHeight = Number(featureSizeSource?.[1] ?? 4);
   $: featureLabel = effectiveSelectedFeature.label ?? catalogFeature.label ?? "";
   $: featureMargin = effectiveSelectedFeature.clearance?.around ?? catalogFeature.clearance?.around ?? "";
+  $: featureRotation = effectiveSelectedFeature.rotation ?? catalogFeature.rotation ?? 0;
   $: selectedFeatureKey =
     selected.kind === "feature"
-      ? `${selected.level}:${selected.id}:${effectiveSelectedFeature.kind ?? ""}:${JSON.stringify(effectiveSelectedFeature.size ?? catalogFeature.size ?? [])}`
+      ? `${selected.level}:${selected.id}:${effectiveSelectedFeature.kind ?? ""}:${JSON.stringify(effectiveSelectedFeature.size ?? catalogFeature.size ?? [])}:${featureRotation}`
       : "";
   $: if (selectedFeatureKey !== featureFormKey) {
     featureFormKey = selectedFeatureKey;
@@ -839,6 +840,14 @@
             <label>w<input type="number" step="0.5" bind:value={featureWidthValue} on:input={(event) => updateFeatureNumber("w", event.currentTarget.value)} /></label>
             <label>h<input type="number" step="0.5" bind:value={featureHeightValue} on:input={(event) => updateFeatureNumber("h", event.currentTarget.value)} /></label>
           </div>
+          <div class="field-label">Rotation</div>
+          <input
+            type="number"
+            step="1"
+            value={featureRotation}
+            on:input={(event) =>
+              updateNumber(["levels", selected.level, "features", selected.id, "rotation"], event.currentTarget.value)}
+          />
           <div class="field-label">Margin</div>
           <input type="number" step="0.5" value={featureMargin} on:input={(event) => updateFeatureMargin(event.currentTarget.value)} />
         {/key}

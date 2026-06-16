@@ -157,6 +157,7 @@ export function moveFeatureSvg(
       if (element instanceof SVGRectElement) {
         element.setAttribute("x", x.toFixed(3));
         element.setAttribute("y", y.toFixed(3));
+        rotateAroundCurrentCenter(element, at, scale);
       } else if (element instanceof SVGTextElement) {
         element.setAttribute("x", (at[0] * scale).toFixed(3));
         element.setAttribute("y", ((at[1] - height / 2 - 0.35) * scale).toFixed(3));
@@ -196,7 +197,20 @@ function moveByModelCenter(element: SVGGraphicsElement, at: [number, number], sc
   const modelCy = Number(element.getAttribute("data-fp-model-cy") ?? at[1] * scale);
   const dx = at[0] * scale - modelCx;
   const dy = at[1] * scale - modelCy;
-  element.setAttribute("transform", `translate(${dx.toFixed(3)} ${dy.toFixed(3)})`);
+  const rotation = Number(element.getAttribute("data-fp-rotation") ?? 0);
+  const rotate = rotation ? ` rotate(${rotation.toFixed(3)} ${modelCx.toFixed(3)} ${modelCy.toFixed(3)})` : "";
+  element.setAttribute("transform", `translate(${dx.toFixed(3)} ${dy.toFixed(3)})${rotate}`);
+}
+
+function rotateAroundCurrentCenter(element: SVGGraphicsElement, at: [number, number], scale: number) {
+  const rotation = Number(element.getAttribute("data-fp-rotation") ?? 0);
+  if (!rotation) {
+    element.removeAttribute("transform");
+    return;
+  }
+  const cx = at[0] * scale;
+  const cy = at[1] * scale;
+  element.setAttribute("transform", `rotate(${rotation.toFixed(3)} ${cx.toFixed(3)} ${cy.toFixed(3)})`);
 }
 
 export function previewSharedWallSvg(

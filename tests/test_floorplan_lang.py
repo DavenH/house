@@ -1163,6 +1163,35 @@ def test_wall_plan_renders_directional_feature_clearance() -> None:
     assert 'M 112.000 128.000 L 208.000 128.000 L 208.000 192.000 L 112.000 192.000 Z' in svg
 
 
+def test_wall_plan_renders_rotated_rectangular_feature_and_clearance() -> None:
+    plan = wall_plan_from_dict(
+        {
+            "type": "wall_plan",
+            "plan": "rotated-rectangular-feature-test",
+            "levels": {
+                "L1": {
+                    "features": {
+                        "table": {
+                            "kind": "rectangle",
+                            "at": [10, 10],
+                            "size": [6, 4],
+                            "rotation": 30,
+                            "clearance": {"around": 1},
+                        }
+                    }
+                }
+            },
+        }
+    )
+
+    svg = render_wall_plan_svg(plan)
+
+    assert 'class="fixture"' in svg
+    assert 'data-fp-rotation="30.000"' in svg
+    assert svg.count('transform="rotate(30.000 160.000 160.000)"') == 2
+    assert '<path class="clearance" fill-rule="evenodd"' in svg
+
+
 def test_wall_plan_renders_piano_silhouette_and_clearance_shape() -> None:
     plan = wall_plan_from_dict(
         {
@@ -1195,6 +1224,57 @@ def test_wall_plan_renders_piano_silhouette_and_clearance_shape() -> None:
     assert 'class="piano-key"' not in svg
     assert 'C ' in svg
     assert 'PIANO</text>' in svg
+
+
+def test_wall_plan_renders_rotated_piano() -> None:
+    plan = wall_plan_from_dict(
+        {
+            "type": "wall_plan",
+            "plan": "rotated-piano-feature-test",
+            "levels": {
+                "L1": {
+                    "features": {
+                        "piano": {
+                            "kind": "piano",
+                            "at": [10, 10],
+                            "size": [8, 5],
+                            "rotation": 25,
+                            "clearance": {"around": 1},
+                        }
+                    }
+                }
+            },
+        }
+    )
+
+    svg = render_wall_plan_svg(plan)
+
+    assert 'data-fp-rotation="25.000"' in svg
+    assert 'transform="rotate(25.000 160.000 160.000)"' in svg
+    assert 'class="clearance piano-clearance"' in svg
+
+
+def test_intent_plan_compiles_feature_rotation_from_catalog_and_instance_override() -> None:
+    plan = intent_plan_from_dict(
+        {
+            "type": "intent_plan",
+            "plan": "intent-feature-rotation-test",
+            "catalog": {"piano": {"size": [8, 5], "rotation": 15}},
+            "levels": {
+                "L1": {
+                    "spaces": {"room": {"rect": [0, 0, 20, 20]}},
+                    "features": {
+                        "default_piano": {"kind": "piano", "within": "room", "at": [8, 8]},
+                        "override_piano": {"kind": "piano", "within": "room", "at": [12, 12], "rotation": -10},
+                    },
+                }
+            },
+        }
+    )
+
+    rotations = {feature.id: feature.rotation for feature in plan.levels["L1"].features}
+
+    assert rotations == {"default_piano": 15, "override_piano": -10}
 
 
 def test_wall_plan_dimensions_measure_outer_face_as_chained_baseline() -> None:
@@ -1244,6 +1324,41 @@ def test_wall_plan_dimensions_keep_jog_ticks_on_local_side() -> None:
     assert '<text class="dimension-label" x="216.000" y="-41.600">5\'</text>' in svg
     assert '<text class="dimension-label" x="120.000" y="201.600">17\'</text>' in svg
     assert '<line class="dimension" x1="-16.000" y1="194.400" x2="256.000" y2="194.400" />' in svg
+
+
+def test_wall_plan_dimension_projection_ticks_stop_at_nearest_perimeter_wall() -> None:
+    plan = wall_plan_from_dict(
+        {
+            "type": "wall_plan",
+            "plan": "dimension-nearest-wall-test",
+            "levels": {
+                "L1": {
+                    "perimeters": {
+                        "body": {
+                            "start": [0, 0],
+                            "walk": [
+                                ["E", 20],
+                                ["S", 20],
+                                ["W", 12],
+                                ["N", 10],
+                                ["W", 4],
+                                ["S", 10],
+                                ["W", 4],
+                                ["N", 20],
+                            ],
+                        }
+                    },
+                }
+            },
+        }
+    )
+
+    svg = render_wall_plan_svg(plan)
+
+    assert '<line class="dimension-projection" x1="-34.400" y1="176.000" x2="-16.000" y2="176.000" />' in svg
+    assert '<line class="dimension-projection" x1="354.400" y1="176.000" x2="336.000" y2="176.000" />' in svg
+    assert '<line class="dimension-projection" x1="-34.400" y1="176.000" x2="112.000" y2="176.000" />' not in svg
+    assert '<line class="dimension-projection" x1="354.400" y1="176.000" x2="80.000" y2="176.000" />' not in svg
 
 
 def test_wall_plan_renders_compass_with_sun_arcs() -> None:
