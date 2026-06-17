@@ -348,6 +348,29 @@ def test_intent_room_labels_include_room_dimensions() -> None:
     assert "10.5&#x27; x 8&#x27;</text>" in svg
 
 
+def test_intent_space_side_opening_respects_explicit_offset() -> None:
+    plan = intent_plan_from_dict(
+        {
+            "type": "intent_plan",
+            "plan": "space-side-offset-test",
+            "masses": {"body": {"rect": [0, 0, 20, 10]}},
+            "levels": {
+                "L1": {
+                    "spaces": {"room": {"rect": [0, 0, 20, 10]}},
+                    "openings": [
+                        {"id": "north_window", "space": "room", "side": "north", "width": 4, "offset": 7, "kind": "window"}
+                    ],
+                }
+            },
+        }
+    )
+
+    opening = plan.levels["L1"].openings[0]
+
+    assert opening.wall == "exterior_1"
+    assert opening.offset == pytest.approx(7)
+
+
 def test_feature_fit_can_use_open_connected_room_union() -> None:
     plan = intent_plan_from_dict(
         {

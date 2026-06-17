@@ -29,6 +29,7 @@
   export let catalog: AnyRecord = {};
   export let constraintRefs: Array<{ value: string; label: string }> = [];
   export let deleteSelected: () => void;
+  export let addWindowToSelectedWall: () => void = () => {};
   export let selectObject: (kind: SelectionKind, id: string, index?: number) => void;
   export let updateField: (path: Array<string | number>, value: unknown) => void;
   export let updateNumber: (path: Array<string | number>, value: string) => void;
@@ -979,6 +980,7 @@
         </dl>
         <div class="field-label">Action</div>
         <div class="button-row">
+          <button type="button" on:click={addWindowToSelectedWall}>Add window</button>
           <button type="button" disabled={!canAddConnection()} on:click={() => addConnection("door", 3)}>Add door</button>
           <button type="button" class="danger" disabled={!selectedWallCanBeRemoved()} on:click={removeSelectedWall}>Remove wall</button>
         </div>

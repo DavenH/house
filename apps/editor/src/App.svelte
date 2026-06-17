@@ -17,6 +17,7 @@
     Selection,
     SelectionKind,
     SpaceRect,
+    WallLine,
     WallDirection
   } from "./lib/types";
   import { dumpPlanYaml } from "./lib/yamlFormat";
@@ -45,8 +46,14 @@
     resolveSpaceRect,
     snapToGrid
   } from "./lib/geometry";
+  import {
+    inferSpaceSideForWallLine,
+    stabilizeGeneratedExteriorWallOpenings
+  } from "./lib/exteriorOpenings";
+  import { roundHalf, uniqueListId } from "./lib/inspectorModel";
   import { buildConstraintRefs } from "./lib/selectionModel";
   import {
+    cssEscape,
     hardenCanvasTextSelection,
     lineFromSvgElement,
     markSelectedInSvg,
@@ -577,6 +584,7 @@
       setError(`No editable mass edge matched ${id}.`);
       return null;
     }
+    stabilizeExteriorOpenings(levelId);
     return {
       type: "exterior-wall" as const,
       id,
@@ -587,6 +595,26 @@
       line,
       snapshot: structuredClone(data)
     };
+  }
+
+  function stabilizeExteriorOpenings(levelId: string) {
+    return stabilizeGeneratedExteriorWallOpenings(data, levelId, (wallId) => renderedWallLine(levelId, wallId));
+  }
+
+  function stabilizeRenderedExteriorOpenings() {
+    let changed = false;
+    for (const levelId of Object.keys((data.levels as AnyRecord | undefined) ?? {})) {
+      changed = stabilizeExteriorOpenings(levelId) || changed;
+    }
+    return changed;
+  }
+
+  function renderedWallLine(levelId: string, wallId: string): WallLine | null {
+    const scale = Number(data.scale ?? 16);
+    const element = canvasElement?.querySelector(
+      `.wall-select-target[data-fp-id="${cssEscape(wallId)}"][data-fp-level="${cssEscape(levelId)}"]`
+    );
+    return element instanceof SVGGraphicsElement ? lineFromSvgElement(element, scale) : null;
   }
 
   function createOpeningDrag(id: string, levelId: string, event: PointerEvent, element: SVGGraphicsElement) {
@@ -617,6 +645,10 @@
       level: levelForOpening,
       index,
       source,
+      preserveSpaceSide:
+        source === "opening" &&
+        Boolean((selectedLevel.openings?.[index] as AnyRecord | undefined)?.space) &&
+        Boolean((selectedLevel.openings?.[index] as AnyRecord | undefined)?.side),
       startPoint: svgPoint(canvasElement, event),
       wall,
       direction,
@@ -654,6 +686,7 @@
   }
 
   function updateField(path: Array<string | number>, value: unknown) {
+    stabilizeRenderedExteriorOpenings();
     setPath(data, path, value);
     syncDataToYaml();
   }
@@ -661,6 +694,7 @@
   function updateNumber(path: Array<string | number>, value: string) {
     const numberValue = Number(value);
     if (!Number.isNaN(numberValue)) {
+      stabilizeRenderedExteriorOpenings();
       if (
         path[0] === "levels" &&
         path[2] === "features" &&
@@ -683,6 +717,34 @@
 
   function deleteSelected() {
     selected = deleteSelection(data, selected);
+    syncDataToYaml();
+  }
+
+  function addWindowToSelectedWall() {
+    if (selected.kind !== "wall" || !selected.level || !selected.id) {
+      return;
+    }
+    const levelData = ((data.levels as AnyRecord | undefined)?.[selected.level] ?? {}) as AnyRecord;
+    const openings = Array.isArray(levelData.openings) ? levelData.openings : [];
+    levelData.openings = openings;
+    const line = renderedWallLine(selected.level, selected.id);
+    const length = line ? Math.hypot(line.x2 - line.x1, line.y2 - line.y1) : 5;
+    const width = roundHalf(Math.max(0.5, Math.min(5, length > 1 ? length - 1 : length || 0.5)));
+    const opening: AnyRecord = {
+      id: uniqueListId(openings, `${selected.id}_window`),
+      kind: "window",
+      width,
+      offset: roundHalf(Math.max(0, (length - width) / 2))
+    };
+    const stableRef = line ? inferSpaceSideForWallLine(data, selected.level, line) : null;
+    if (stableRef) {
+      opening.space = stableRef.space;
+      opening.side = stableRef.side;
+    } else {
+      opening.wall = selected.id;
+    }
+    openings.push(opening);
+    selected = { kind: "opening", level: selected.level, id: opening.id, index: openings.length - 1 };
     syncDataToYaml();
   }
 
@@ -734,6 +796,7 @@
     {catalog}
     {constraintRefs}
     {deleteSelected}
+    {addWindowToSelectedWall}
     {selectObject}
     {updateField}
     {updateNumber}

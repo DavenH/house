@@ -123,6 +123,7 @@ export type OpeningDrag = {
   level: string;
   index: number;
   source: "opening" | "connection";
+  preserveSpaceSide?: boolean;
   startPoint: { x: number; y: number };
   wall: string;
   direction: WallDirection;

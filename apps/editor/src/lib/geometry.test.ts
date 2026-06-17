@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
-import { moveSharedWall, resolveSpaceRect } from "./geometry";
-import type { AnyRecord, SharedWallDrag, SpaceRect } from "./types";
+import { moveOpening, moveSharedWall, resolveSpaceRect } from "./geometry";
+import type { AnyRecord, OpeningDrag, SharedWallDrag, SpaceRect } from "./types";
 
 function rect(left: number, top: number, right: number, bottom: number): SpaceRect {
   return { left, top, right, bottom, width: right - left, height: bottom - top };
@@ -85,5 +85,44 @@ describe("moveSharedWall", () => {
     expect(resolveSpaceRect(data, "L1", "bathroom")?.bottom).toBe(14);
     expect(resolveSpaceRect(data, "L1", "library")?.top).toBe(14);
     expect(resolveSpaceRect(data, "L1", "laundry")?.bottom).toBe(14);
+  });
+});
+
+describe("moveOpening", () => {
+  it("preserves space-side openings instead of rewriting them to generated wall ids", () => {
+    const data: AnyRecord = {
+      levels: {
+        L1: {
+          openings: [{ id: "bath_window", space: "bathroom", side: "north", offset: 2, width: 5, kind: "window" }]
+        }
+      }
+    };
+    const drag: OpeningDrag = {
+      type: "opening",
+      id: "bath_window",
+      level: "L1",
+      index: 0,
+      source: "opening",
+      preserveSpaceSide: true,
+      startPoint: { x: 0, y: 0 },
+      wall: "exterior_5",
+      direction: "E",
+      orientation: "horizontal",
+      startOffset: 2,
+      width: 5,
+      wallLength: 13,
+      snapshot: structuredClone(data)
+    };
+
+    moveOpening(data, drag, 4);
+
+    expect(data.levels.L1.openings[0]).toEqual({
+      id: "bath_window",
+      space: "bathroom",
+      side: "north",
+      offset: 4,
+      width: 5,
+      kind: "window"
+    });
   });
 });

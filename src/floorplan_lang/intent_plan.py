@@ -620,7 +620,12 @@ def _compile_openings(openings: list[dict[str, Any]], context: IntentContext) ->
             side = _side(data["side"])
             wall, start, end = _wall_for_space_side(context, space, side)
             width = float(data["width"])
-            offset = _opening_offset(wall, start, end, width, data.get("position", "center"))
+            if "offset" in data:
+                min_offset = _offset_from_axis_start(wall, start, 0)
+                max_offset = _offset_from_axis_start(wall, end - width, 0)
+                offset = max(min(float(data["offset"]), max(min_offset, max_offset)), min(min_offset, max_offset))
+            else:
+                offset = _opening_offset(wall, start, end, width, data.get("position", "center"))
             wall_id = wall.id
         width = float(data["width"]) if "width" in data else 0
         if kind in {"open", "arch"} and wall_id in context.walls:
