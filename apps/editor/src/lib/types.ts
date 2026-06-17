@@ -1,5 +1,37 @@
 export type AnyRecord = Record<string, any>;
 
+export type PlanData = AnyRecord & {
+  levels?: Record<string, LevelData>;
+  catalog?: Record<string, FeatureData>;
+  datums?: Record<string, Record<string, number>>;
+  stacks?: AnyRecord[];
+  alignments?: AnyRecord[];
+};
+
+export type LevelData = AnyRecord & {
+  spaces?: Record<string, SpaceData>;
+  features?: Record<string, FeatureData>;
+  connections?: Array<AnyRecord | string[]>;
+  openings?: AnyRecord[];
+  partitions?: AnyRecord[];
+  access?: Array<AnyRecord | string[]>;
+};
+
+export type SpaceData = AnyRecord & {
+  label?: string;
+  rect?: number[];
+  x?: Array<string | number>;
+  y?: Array<string | number>;
+};
+
+export type FeatureData = AnyRecord & {
+  kind?: string;
+  label?: string;
+  at?: [number, number];
+  size?: [number, number];
+  rotation?: number;
+};
+
 export type SelectionKind = "space" | "feature" | "opening" | "connection" | "wall" | "stair" | "level" | "";
 
 export type Selection = {

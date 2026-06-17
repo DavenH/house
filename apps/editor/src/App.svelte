@@ -45,6 +45,7 @@
     resolveSpaceRect,
     snapToGrid
   } from "./lib/geometry";
+  import { buildConstraintRefs } from "./lib/selectionModel";
   import {
     hardenCanvasTextSelection,
     lineFromSvgElement,
@@ -57,6 +58,7 @@
     removeWallDragPreview,
     svgPoint
   } from "./lib/canvasSvg";
+  import { liveRenderWait, YAML_RENDER_DEBOUNCE_MS } from "./lib/renderTiming";
   import { findYamlRangeForSelection } from "./lib/yamlSelection";
 
   let plans: PlanSummary[] = [];
@@ -230,13 +232,13 @@
     status = "Rendering";
     renderTimer = setTimeout(() => {
       void renderCurrentYaml();
-    }, 250);
+    }, YAML_RENDER_DEBOUNCE_MS);
   }
 
   function scheduleLiveRender() {
     liveRenderQueued = true;
     const now = performance.now();
-    const wait = Math.max(0, 90 - (now - lastLiveRenderAt));
+    const wait = liveRenderWait(now, lastLiveRenderAt);
     if (liveRenderTimer) {
       return;
     }
@@ -682,21 +684,6 @@
   function deleteSelected() {
     selected = deleteSelection(data, selected);
     syncDataToYaml();
-  }
-
-  function buildConstraintRefs(source: AnyRecord) {
-    const refs: Array<{ value: string; label: string }> = [];
-    const levels = (source.levels as AnyRecord | undefined) ?? {};
-    for (const [levelId, levelData] of Object.entries(levels)) {
-      const levelRecord = levelData as AnyRecord;
-      for (const [id, object] of entries(levelRecord.spaces)) {
-        refs.push({ value: `${levelId}.${id}`, label: `${levelId} room: ${(object.label || id).toString().replaceAll("/", " ")}` });
-      }
-      for (const [id, object] of entries(levelRecord.features)) {
-        refs.push({ value: `${levelId}.${id}`, label: `${levelId} feature: ${(object.label || object.kind || id).toString().replaceAll("/", " ")}` });
-      }
-    }
-    return refs;
   }
 
   function setError(err: unknown) {

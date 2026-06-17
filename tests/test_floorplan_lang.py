@@ -17,6 +17,7 @@ from floorplan_lang import (
 )
 from floorplan_lang.wall_plan import load_wall_plan_yaml, render_wall_plan_svg, wall_plan_from_dict
 from floorplan_lang.yaml_io import plan_from_dict
+from tests.svg_assertions import assert_has_class, elements_with_class
 
 
 def test_intent_plan_compiles_shared_masses_and_inferred_door() -> None:
@@ -949,10 +950,11 @@ def test_wall_plan_renders_door_swing_arcs() -> None:
 
     svg = render_wall_plan_svg(plan)
 
-    assert 'class="door"' in svg
-    assert 'class="door-leaf"' in svg
-    assert 'class="door-swing"' in svg
-    assert 'A 64.000 64.000 0 0 1' in svg
+    assert_has_class(svg, "door", "line")
+    assert_has_class(svg, "door-leaf", "line")
+    swing_arcs = elements_with_class(svg, "door-swing", "path")
+    assert len(swing_arcs) == 1
+    assert "A 64.000 64.000 0 0 1" in (swing_arcs[0].attrib.get("d") or "")
 
 
 def test_wall_plan_renders_arch_openings() -> None:
@@ -1416,13 +1418,13 @@ def test_wall_plan_renders_compass_with_sun_arcs() -> None:
 
     svg = render_wall_plan_svg(plan)
 
-    assert '<g class="compass" aria-label="Compass">' in svg
-    assert 'class="compass-bg"' not in svg
-    assert 'class="compass-ring"' not in svg
-    assert svg.count('class="compass-arrow-head"') == 4
+    assert elements_with_class(svg, "compass", "g")
+    assert not elements_with_class(svg, "compass-bg", "circle")
+    assert not elements_with_class(svg, "compass-ring", "circle")
+    assert len(elements_with_class(svg, "compass-arrow-head", "polygon")) == 4
     assert "Georgia,'Times New Roman',serif" in svg
-    assert 'class="sun-arc summer"' in svg
-    assert 'class="sun-arc winter"' in svg
+    assert elements_with_class(svg, "summer", "path")
+    assert elements_with_class(svg, "winter", "path")
     assert ">SUM</text>" not in svg
     assert ">WIN</text>" not in svg
 

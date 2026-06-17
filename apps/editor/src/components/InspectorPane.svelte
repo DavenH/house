@@ -1,5 +1,17 @@
 <script lang="ts">
+  import {
+    type DatumRow,
+    relationData as accessData,
+    relationData as connectionData,
+    relationIncludesPair,
+    roundHalf,
+    sameKey,
+    splitList,
+    uniqueListId
+  } from "../lib/inspectorModel";
   import type { AnyRecord, Selection, SelectionKind } from "../lib/types";
+  import InspectorHeader from "./InspectorHeader.svelte";
+  import PulloutTab from "./PulloutTab.svelte";
 
   export let selected: Selection = { kind: "", level: "", id: "" };
   export let open = true;
@@ -215,21 +227,6 @@
     }
   }
 
-  function splitList(value: string) {
-    return value
-      .split(",")
-      .map((part) => part.trim())
-      .filter(Boolean);
-  }
-
-  function connectionData(item: AnyRecord | string[]) {
-    return Array.isArray(item) ? { between: item } : item;
-  }
-
-  function accessData(item: AnyRecord | string[]) {
-    return Array.isArray(item) ? { between: item } : item;
-  }
-
   function updateConnectionAt(index: number, field: string, value: unknown) {
     const current = { ...connectionData(connections[index] ?? {}) };
     if (value === undefined || value === "") {
@@ -307,10 +304,6 @@
     updateField([kind, index, field], value);
   }
 
-  function sameKey(value: unknown) {
-    return Array.isArray(value) ? value.join(",") : "";
-  }
-
   function sameLabel(value: unknown) {
     const key = sameKey(value);
     return sameOptions.find((option) => option.value === key)?.label ?? `Custom (${key})`;
@@ -334,16 +327,6 @@
   function selectedRef() {
     return selected.level && selected.id ? `${selected.level}.${selected.id}` : "";
   }
-
-  type DatumRow = {
-    label: string;
-    axis: "x" | "y";
-    name: string;
-    value: unknown;
-    linked: boolean;
-    spaceId: string;
-    edgeIndex: 0 | 1;
-  };
 
   function selectedDatumRows(): DatumRow[] {
     if (selected.kind === "wall") {
@@ -583,21 +566,6 @@
     return adjacentSpaceIds(subject)[0] ?? spaces.find(([spaceId]) => spaceId !== subject)?.[0] ?? "";
   }
 
-  function uniqueListId(items: AnyRecord[], prefix: string) {
-    const existing = new Set(items.map((item) => item.id).filter(Boolean));
-    let index = 1;
-    let id = prefix.replace(/[^A-Za-z0-9_-]+/g, "_");
-    while (existing.has(id)) {
-      index += 1;
-      id = `${prefix}_${index}`.replace(/[^A-Za-z0-9_-]+/g, "_");
-    }
-    return id;
-  }
-
-  function roundHalf(value: number) {
-    return Math.round(value * 2) / 2;
-  }
-
   function spaceRect(spaceId: string) {
     const space = spaces.find(([id]) => id === spaceId)?.[1];
     if (!space) {
@@ -690,10 +658,6 @@
     return ids.length > 0 && ids.some((id) => accessData(item).between?.includes?.(id));
   }
 
-  function relationIncludesPair(item: AnyRecord, pair: [string, string]) {
-    return pair.every((id) => item.between?.includes?.(id));
-  }
-
   function constraintIsScoped(item: AnyRecord) {
     return item.members?.includes?.(selectedRef());
   }
@@ -746,24 +710,12 @@
   }
 </script>
 
-<button type="button" class:open class="inspector-pullout" aria-expanded={open} aria-label={open ? "Hide inspector" : "Show inspector"} on:click={onToggle}>
-  <svg viewBox="0 0 24 24" aria-hidden="true">
-    <circle cx="10.75" cy="10.75" r="5.75" />
-    <path d="M15.25 15.25L20 20" />
-  </svg>
-</button>
+<PulloutTab {open} variant="inspector" icon="search" labelOpen="Hide inspector" labelClosed="Show inspector" {onToggle} />
 
 <aside class:open class="inspector">
   <div class="properties-grid">
     <section class="panel inspector-main">
-      <div class="panel-title">
-        <h2>Inspector</h2>
-        {#if selected.kind}
-          <button type="button" class="danger" on:click={selected.kind === "wall" ? removeSelectedWall : deleteSelected}>
-            {selected.kind === "wall" ? "Remove" : "Delete"}
-          </button>
-        {/if}
-      </div>
+      <InspectorHeader {selected} onRemove={selected.kind === "wall" ? removeSelectedWall : deleteSelected} />
 
       {#if selected.kind === "space" && selectedObject}
         <div class="field-label">ID</div>

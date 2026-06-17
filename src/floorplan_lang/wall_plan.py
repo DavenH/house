@@ -11,139 +11,35 @@ from typing import Any, Literal
 import yaml
 
 from floorplan_lang.geometry import EPSILON, Point, Poly, Rect, bbox_union
-
-Direction = Literal["N", "E", "S", "W"]
-
-EXTERIOR_WALL_THICKNESS_FT = 1.0
-INTERIOR_WALL_STROKE_FT = 0.3
-CLEARANCE_PALETTE = ("#a9d4dc", "#d2bde0", "#ddca9f", "#afd5ad", "#ddb2ae", "#b7c6e3")
-
-
-@dataclass(frozen=True)
-class WallSegment:
-    id: str
-    at: Point
-    direction: Direction
-    length: float
-    kind: str = "interior"
-    offset: float | None = None
-
-    @property
-    def end(self) -> Point:
-        dx, dy = _delta(self.direction, self.length)
-        return Point(self.at.x + dx, self.at.y + dy)
-
-    @property
-    def bbox(self) -> Rect:
-        left = min(self.at.x, self.end.x)
-        top = min(self.at.y, self.end.y)
-        right = max(self.at.x, self.end.x)
-        bottom = max(self.at.y, self.end.y)
-        return Rect(left, top, max(right - left, 0.001), max(bottom - top, 0.001))
-
-    def point_at(self, offset: float) -> Point:
-        dx, dy = _delta(self.direction, offset)
-        return Point(self.at.x + dx, self.at.y + dy)
-
-
-@dataclass(frozen=True)
-class AreaLabel:
-    id: str
-    at: Point
-    label: str
-    kind: str = "area"
-    size: float = 16
-    angle: float = 0
-    anchor: str = "middle"
-    vertical_anchor: str = "middle"
-
-
-@dataclass(frozen=True)
-class Zone:
-    id: str
-    rect: Rect
-    label: str | None = None
-    kind: str = "zone"
-    privacy: str | None = None
-    visible: bool = False
-
-
-@dataclass(frozen=True)
-class FeatureAnchor:
-    wall: str
-    offset: float
-    distance: float
-    side: str = "left"
-
-
-@dataclass(frozen=True)
-class WallExtrusion:
-    wall: str
-    depth: float
-    offset: float = 0
-    length: float | None = None
-    side: str = "left"
-
-
-@dataclass(frozen=True)
-class Feature:
-    id: str
-    kind: str
-    size: tuple[float, float] | None = None
-    at: Point | None = None
-    anchor: FeatureAnchor | None = None
-    extrude: WallExtrusion | None = None
-    label: str | None = None
-    within: str | None = None
-    clearance: dict[str, float] = field(default_factory=dict)
-    avoid_openings: bool = False
-    rotation: float = 0
-
-
-@dataclass(frozen=True)
-class WallOpening:
-    id: str
-    wall: str
-    offset: float
-    width: float
-    kind: str = "door"
-    swing: str = "in"
-
-
-@dataclass(frozen=True)
-class StairRun:
-    rect: Rect
-    direction: Direction
-    treads: int
-
-
-@dataclass(frozen=True)
-class Stair:
-    id: str
-    lower_level: str
-    upper_level: str
-    lower_space: str
-    upper_space: str
-    width: float
-    floor_to_floor: float
-    risers: int
-    rise: float
-    tread_depth: float
-    runs: list[StairRun] = field(default_factory=list)
-    landings: list[Rect] = field(default_factory=list)
-    warnings: list[str] = field(default_factory=list)
-
-
-@dataclass
-class WallLevel:
-    id: str
-    title: str | None = None
-    walls: list[WallSegment] = field(default_factory=list)
-    areas: list[AreaLabel] = field(default_factory=list)
-    zones: list[Zone] = field(default_factory=list)
-    features: list[Feature] = field(default_factory=list)
-    openings: list[WallOpening] = field(default_factory=list)
-    access: list[tuple[str, str]] = field(default_factory=list)
+from floorplan_lang.render_styles import wall_plan_style
+from floorplan_lang.svg import svg_tag
+from floorplan_lang.wall_geometry import (
+    closing_direction as _shared_closing_direction,
+    direction_delta,
+    direction_normal,
+    direction_unit,
+)
+from floorplan_lang.wall_model import (
+    CLEARANCE_PALETTE,
+    EXTERIOR_WALL_THICKNESS_FT,
+    INTERIOR_WALL_STROKE_FT,
+    AreaLabel,
+    Direction,
+    Feature,
+    FeatureAnchor,
+    Stair,
+    StairRun,
+    WallExtrusion,
+    WallLevel,
+    WallOpening,
+    WallSegment,
+    Zone,
+)
+from floorplan_lang.wall_openings import (
+    render_arch as _render_arch,
+    render_door as _render_door,
+    render_window as _render_window,
+)
 
 
 @dataclass
@@ -338,72 +234,16 @@ def render_wall_plan_svg(
     parts = [
         f'<svg xmlns="http://www.w3.org/2000/svg" width="{width}" height="{height}" '
         f'viewBox="0 0 {width} {height}">',
-        f'<rect x="0" y="0" width="{width}" height="{height}" fill="#fff" />',
+        svg_tag("rect", x=0, y=0, width=width, height=height, fill="#fff"),
         _clearance_pattern_defs(),
-        "<style>",
-        ".exterior-wall{fill:#333;stroke:none;fill-rule:evenodd}",
-        ".building-fill{fill:#fff;stroke:none}",
-        ".grid-1ft{stroke:#e7e1d8;stroke-width:.55;pointer-events:none}",
-        ".grid-10ft{stroke:#d1c8bb;stroke-width:1;pointer-events:none}",
-        ".dimension{stroke:#5f5a54;stroke-width:.85;fill:none;pointer-events:none}",
-        ".dimension-projection{stroke:#b9b0a6;stroke-width:.65;fill:none;pointer-events:none}",
-        ".dimension-label{font:9px Arial,Helvetica,sans-serif;fill:#4f4943;text-anchor:middle;dominant-baseline:middle;pointer-events:none;-webkit-user-select:none;-moz-user-select:none;user-select:none}",
-        ".compass-bg{fill:#fff;stroke:#c9c1b5;stroke-width:.8;opacity:.94;pointer-events:none}",
-        ".compass-ring{stroke:#605a52;stroke-width:.9;fill:none;pointer-events:none}",
-        ".compass-line{stroke:#333;stroke-width:1.2;fill:none;stroke-linecap:round;pointer-events:none}",
-        ".compass-arrow-head{fill:#333;pointer-events:none}",
-        ".compass-center{fill:#333;pointer-events:none}",
-        ".compass-label{font:bold 9px Georgia,'Times New Roman',serif;fill:#333;text-anchor:middle;dominant-baseline:middle;pointer-events:none;-webkit-user-select:none;-moz-user-select:none;user-select:none}",
-        ".sun-arc{fill:none;stroke-width:1.4;stroke-linecap:round;stroke-linejoin:round;pointer-events:none}",
-        ".sun-arc.summer{stroke:#d2912f}",
-        ".sun-arc.winter{stroke:#7186a2}",
-        ".sun-dot{stroke:#fff;stroke-width:.8;pointer-events:none}",
-        ".sun-dot.summer{fill:#d2912f}",
-        ".sun-dot.winter{fill:#7186a2}",
-        ".stair-run{fill:#f8f6f1;stroke:#8c857b;stroke-width:.7;pointer-events:none}",
-        ".stair-run-bg{fill:#fbfaf6;stroke:none;pointer-events:none}",
-        ".stair-landing{fill:#fbfaf6;stroke:#8c857b;stroke-width:.7;pointer-events:none}",
-        ".stair-select-target{fill:transparent;stroke:transparent;stroke-width:.7;pointer-events:all}",
-        ".stair-tread{stroke:#6f6962;stroke-width:.65;pointer-events:none}",
-        ".stair-arrow{stroke:#5d5751;stroke-width:.75;fill:none;stroke-linecap:round;stroke-linejoin:round;pointer-events:none}",
-        ".stair-arrow-head{fill:#5d5751;pointer-events:none}",
-        ".stair-note-leader{stroke:#5d5751;stroke-width:.65;fill:none;stroke-linecap:round;stroke-linejoin:round;pointer-events:none}",
-        ".stair-note-dot{fill:#fff;stroke:#5d5751;stroke-width:.65;pointer-events:none}",
-        ".stair-note{font:8px Arial,Helvetica,sans-serif;fill:#4d4741;text-anchor:start;dominant-baseline:middle;pointer-events:none;-webkit-user-select:none;-moz-user-select:none;user-select:none}",
-        ".interior{fill:#555;stroke:none}",
-        ".feature{stroke:#555;stroke-width:1.4;stroke-linecap:square;fill:none}",
-        ".guide{stroke:#777;stroke-width:1.2;stroke-dasharray:5 4;stroke-linecap:square}",
-        ".opening-mask{stroke:#fff;stroke-linecap:butt}",
-        f".exterior-opening-mask{{stroke-width:{exterior_opening_mask_stroke:.3f}}}",
-        f".interior-opening-mask{{stroke-width:{interior_opening_mask_stroke:.3f}}}",
-        f".interior-open-mask{{stroke-width:{INTERIOR_WALL_STROKE_FT * scale + 0.02:.3f}}}",
-        ".opening-hit-target{stroke:transparent;stroke-width:18;fill:none;stroke-linecap:square}",
-        ".window-fill{fill:#d8eef7;stroke:none;pointer-events:none}",
-        ".window{stroke:#45718a;stroke-width:1.4;stroke-linecap:square}",
-        ".door{stroke:#666;stroke-width:1.4;stroke-dasharray:3 2;fill:none;stroke-linecap:square}",
-        ".door-leaf{stroke:#666;stroke-width:1.2;stroke-dasharray:none;fill:none;stroke-linecap:square}",
-        ".door-swing{stroke:#777;stroke-width:1;stroke-dasharray:2 2;fill:none;stroke-linecap:round}",
-        ".arch{stroke:#555;stroke-width:1.4;stroke-dasharray:5 3;fill:none;stroke-linecap:square}",
-        ".zone{stroke:#777;stroke-width:1.2;stroke-dasharray:5 4;fill:none}",
-        ".zone-scope{stroke:#c9c1b5;stroke-width:.8;stroke-dasharray:3 3;fill:none}",
-        ".space-select-target{fill:transparent;stroke:none;pointer-events:all;cursor:pointer}",
-        ".fixture{stroke:#444;stroke-width:1.4;fill:#f7f7f7}",
-        ".piano-fixture{stroke:#333;stroke-width:1.4;fill:#f7f7f7;stroke-linejoin:round;pointer-events:all}",
-        ".piano-clearance{fill:none;stroke-linejoin:round;stroke-linecap:round;pointer-events:stroke}",
-        ".spiral-stair-fixture{stroke:#333;stroke-width:1.2;fill:#f7f7f7;pointer-events:all}",
-        ".spiral-stair-well{stroke:#777;stroke-width:.8;fill:none;pointer-events:none}",
-        ".spiral-stair-tread{stroke:#666;stroke-width:.7;stroke-linecap:round;pointer-events:none}",
-        ".clearance{stroke:none}",
-        ".wall-select-target{stroke:transparent;stroke-width:12;fill:none;stroke-linecap:square;cursor:pointer}",
-        ".wall-grip-target{stroke:transparent;stroke-width:18;fill:none;stroke-linecap:square}",
-        ".wall-grip-dot{fill:#fff;stroke:#111;stroke-width:.8;pointer-events:none}",
-        ".label{font:18px Arial,Helvetica,sans-serif;fill:#111;text-anchor:middle;dominant-baseline:middle;-webkit-user-select:none;-moz-user-select:none;user-select:none;pointer-events:none}",
-        ".label-dimension{font:9px Arial,Helvetica,sans-serif;fill:#5f5750;text-anchor:middle;dominant-baseline:middle;-webkit-user-select:none;-moz-user-select:none;user-select:none;pointer-events:none}",
-        ".feature-label{font:10px Arial,Helvetica,sans-serif;fill:#111;text-anchor:middle;dominant-baseline:middle;-webkit-user-select:none;-moz-user-select:none;user-select:none;pointer-events:none}",
-        ".title{font:650 20px Arial,Helvetica,sans-serif;fill:#111;letter-spacing:.3px;-webkit-user-select:none;-moz-user-select:none;user-select:none;pointer-events:none}",
-        "text,tspan{pointer-events:none;-webkit-user-select:none;-moz-user-select:none;user-select:none}",
-        "</style>",
     ]
+    parts.extend(
+        wall_plan_style(
+            exterior_opening_mask_stroke=exterior_opening_mask_stroke,
+            interior_opening_mask_stroke=interior_opening_mask_stroke,
+            interior_open_stroke=INTERIOR_WALL_STROKE_FT * scale + 0.02,
+        )
+    )
     parts.extend(_render_compass(plan.compass, scale, _compass_center(plan.compass, level_boxes, padding, level_gap_ft, scale)))
     x_cursor = padding
     for level_id, level in plan.levels.items():
@@ -2317,100 +2157,6 @@ def _wall_is_fully_open(wall: WallSegment, openings: list[WallOpening]) -> bool:
     )
 
 
-def _render_window(
-    start: Point, end: Point, direction: Direction, scale: float, editor_attrs: str = ""
-) -> list[str]:
-    nx, ny = _normal(direction)
-    inset = 0.16
-    fill_points = [
-        Point(start.x - nx * inset, start.y - ny * inset),
-        Point(end.x - nx * inset, end.y - ny * inset),
-        Point(end.x + nx * inset, end.y + ny * inset),
-        Point(start.x + nx * inset, start.y + ny * inset),
-    ]
-    parts = [
-        '<polygon class="window-fill" '
-        + " ".join(f'{name}="{value}"' for name, value in _editor_attr_pairs(editor_attrs))
-        + ' points="'
-        + " ".join(f"{point.x * scale:.3f},{point.y * scale:.3f}" for point in fill_points)
-        + '" />'
-    ]
-    for side in (-inset, inset):
-        parts.append(
-            f'<line class="window" {editor_attrs} x1="{(start.x + nx * side) * scale:.3f}" '
-            f'y1="{(start.y + ny * side) * scale:.3f}" '
-            f'x2="{(end.x + nx * side) * scale:.3f}" y2="{(end.y + ny * side) * scale:.3f}" />'
-        )
-    return parts
-
-
-def _editor_attr_pairs(attrs: str) -> list[tuple[str, str]]:
-    pairs = []
-    for chunk in attrs.split('" '):
-        if '="' not in chunk:
-            continue
-        name, value = chunk.split('="', 1)
-        pairs.append((name.strip(), value.rstrip('"')))
-    return pairs
-
-
-def _render_arch(start: Point, end: Point, direction: Direction, scale: float, editor_attrs: str = "") -> list[str]:
-    normal_x, normal_y = _normal(direction)
-    depth = 0.55
-    mid_x = (start.x + end.x) / 2
-    mid_y = (start.y + end.y) / 2
-    control_x = mid_x + normal_x * depth
-    control_y = mid_y + normal_y * depth
-    return [
-        f'<path class="arch" {editor_attrs} d="M {start.x * scale:.3f} {start.y * scale:.3f} '
-        f'Q {control_x * scale:.3f} {control_y * scale:.3f} '
-        f'{end.x * scale:.3f} {end.y * scale:.3f}" />',
-    ]
-
-
-def _render_door(
-    start: Point, end: Point, direction: Direction, swing: str, scale: float, editor_attrs: str = ""
-) -> list[str]:
-    normal_x, normal_y = _normal(direction)
-    tick = 0.28
-    parts = [
-        f'<line class="door" {editor_attrs} x1="{start.x * scale:.3f}" y1="{start.y * scale:.3f}" '
-        f'x2="{end.x * scale:.3f}" y2="{end.y * scale:.3f}" />',
-        f'<line class="door" {editor_attrs} x1="{(start.x - normal_x * tick) * scale:.3f}" '
-        f'y1="{(start.y - normal_y * tick) * scale:.3f}" '
-        f'x2="{(start.x + normal_x * tick) * scale:.3f}" y2="{(start.y + normal_y * tick) * scale:.3f}" />',
-        f'<line class="door" {editor_attrs} x1="{(end.x - normal_x * tick) * scale:.3f}" '
-        f'y1="{(end.y - normal_y * tick) * scale:.3f}" '
-        f'x2="{(end.x + normal_x * tick) * scale:.3f}" y2="{(end.y + normal_y * tick) * scale:.3f}" />',
-    ]
-    parts.extend(_render_door_swing(start, end, direction, swing, scale, editor_attrs))
-    return parts
-
-
-def _render_door_swing(
-    start: Point, end: Point, direction: Direction, swing: str, scale: float, editor_attrs: str = ""
-) -> list[str]:
-    if swing.lower() in {"none", "off", "false", "no"}:
-        return []
-    normal_x, normal_y = _normal(direction)
-    swing_side = -1 if "out" in swing.lower() else 1
-    hinge_at_end = "right" in swing.lower()
-    hinge = end if hinge_at_end else start
-    closed = start if hinge_at_end else end
-    radius = sqrt((end.x - start.x) ** 2 + (end.y - start.y) ** 2)
-    open_leaf = Point(hinge.x + normal_x * swing_side * radius, hinge.y + normal_y * swing_side * radius)
-    closed_vector = (closed.x - hinge.x, closed.y - hinge.y)
-    open_vector = (open_leaf.x - hinge.x, open_leaf.y - hinge.y)
-    sweep = 1 if closed_vector[0] * open_vector[1] - closed_vector[1] * open_vector[0] > 0 else 0
-    return [
-        f'<line class="door-leaf" {editor_attrs} x1="{hinge.x * scale:.3f}" y1="{hinge.y * scale:.3f}" '
-        f'x2="{open_leaf.x * scale:.3f}" y2="{open_leaf.y * scale:.3f}" />',
-        f'<path class="door-swing" {editor_attrs} d="M {closed.x * scale:.3f} {closed.y * scale:.3f} '
-        f'A {radius * scale:.3f} {radius * scale:.3f} 0 0 {sweep} '
-        f'{open_leaf.x * scale:.3f} {open_leaf.y * scale:.3f}" />',
-    ]
-
-
 def _point(value: list[float] | tuple[float, float]) -> Point:
     return Point(float(value[0]), float(value[1]))
 
@@ -2452,27 +2198,16 @@ def _walk_step(step: Any) -> tuple[Direction, float]:
 
 
 def _delta(direction: Direction, length: float) -> tuple[float, float]:
-    if direction == "N":
-        return (0, -length)
-    if direction == "E":
-        return (length, 0)
-    if direction == "S":
-        return (0, length)
-    return (-length, 0)
+    return direction_delta(direction, length)
 
 
 def _unit(direction: Direction) -> tuple[float, float]:
-    return _delta(direction, 1)
+    return direction_unit(direction)
 
 
 def _normal(direction: Direction) -> tuple[float, float]:
-    dx, dy = _unit(direction)
-    return (-dy, dx)
+    return direction_normal(direction)
 
 
 def _closing_direction(current: Point, start: Point) -> Direction:
-    if current.x == start.x:
-        return "S" if start.y > current.y else "N"
-    if current.y == start.y:
-        return "E" if start.x > current.x else "W"
-    raise ValueError(f"Cannot auto-close non-axis-aligned perimeter from {current} to {start}")
+    return _shared_closing_direction(current, start)
