@@ -137,6 +137,7 @@ levels:
       room_2: {x: [room_split, right_e], y: [main_n, stair_s], label: ROOM 2, privacy: private}
       lounge: {x: [right_w, right_e], y: [stair_s, main_s], privacy: public}
     features:
+      tower_spiral: {kind: spiral_stair, within: tower, size: [5, 5], label: ''}
       hearth:
         kind: chimney
         at: [49, 18.75]

@@ -462,6 +462,7 @@ function featureDefaults(data: AnyRecord, kind: string): AnyRecord {
   const base: Record<string, AnyRecord> = {
     desk_counter: { at: [20, 20], size: [6, 2], label: "DESK/COUNTER" },
     refrigerator: { at: [20, 20], size: [3, 3], label: "REFRIGERATOR" },
+    spiral_stair: { at: [20, 20], size: [5, 5], label: "SPIRAL/STAIR" },
     storage: { at: [20, 20], size: [6, 4], label: "STORAGE" }
   };
   return base[kind] ?? { at: [20, 20], size: [4, 4], label: labelFor(kind) };

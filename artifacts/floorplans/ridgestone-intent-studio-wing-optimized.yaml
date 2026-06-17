@@ -17,7 +17,7 @@ notes:
   - 'Upper-floor improvement: master bedroom claims the west upper bay for a real exterior window; hall becomes a windowed laundry/linen room close to the master suite.'
   - 'The second-floor tower is treated as stair circulation up to the nest, not as storage.'
 datums:
-  x: {west: 1, storage_e: 8, left_w: 8, closet_w: 15, gallery_w: 16, left_e: 21, stair_e: 31, piano_w: 29.5, tower_e: 38, right_w: 38, pantry_w: 43.5, room_split: 42, pantry_e: 49.5, dining_w: 54, right_e: 54, dining_e: 63}
+  x: {west: 1, storage_e: 8, left_w: 8, closet_w: 15, gallery_w: 15, left_e: 21, stair_e: 31, piano_w: 29.5, tower_e: 38, right_w: 38, pantry_w: 43.5, room_split: 42, pantry_e: 49.5, dining_w: 54, right_e: 54, dining_e: 63}
   y: {gable_n: 2, main_n: 8, ensuite_s: 10, bath_s: 13, stair_s: 18, dining_n: 17.5, closet_s: 18.5, public_split: 23, lower_storage_n: 24, entry_s: 28, dining_s: 28, tower_s: 30, gable_s: 32, main_s: 37}
 catalog:
   counter: {label: COUNTER}
@@ -56,7 +56,7 @@ levels:
     features:
       piano: {kind: piano, within: library, at: [7.5, 19], size: [7, 5], label: PIANO, avoid_openings: true, clearance: {around: 1}, rotation: 225}
       piano_bench: {kind: rectangle, within: library, at: [10.5, 22], size: [1, 2], label: '', rotation: 45}
-      library_north_books: {kind: rectangle, within: library, at: [5, 13.45], size: [7, 0.8], label: BOOKS}
+      library_north_books: {kind: rectangle, within: library, at: [8, 13.5], size: [14, 0.8], label: ''}
       hearth_fireplace: {kind: rectangle, at: [46.5, 18], size: [6, 2], label: HEARTH}
       great_room_couch: {kind: rectangle, within: great_room, at: [46.5, 10], size: [6, 3], label: COUCH}
       great_room_chair_w: {kind: rectangle, within: great_room, at: [41.5, 13.5], size: [3, 3], label: CHAIR}
@@ -69,20 +69,20 @@ levels:
       refrigerator: {kind: rectangle, within: kitchen, at: [39.25, 28.5], size: [2.5, 3], label: FRIDGE}
       mechanicals: {kind: rectangle, within: laundry, at: [2.5, 11.5], size: [2, 2], label: MECH}
       dining_table: {kind: rectangle, within: dining, at: [56.5, 23], size: [7, 3], label: TABLE, clearance: {around: 3}}
-      library_reading_seat: {kind: rectangle, within: library, at: [7, 26.5], size: [4, 2], label: READING/SEAT}
-      studio_desk: {kind: rectangle, within: office_studio, at: [14.5, 30.5], size: [5, 2.5], label: DESK}
+      library_reading_seat: {kind: rectangle, within: library, at: [4.5, 26.5], size: [4, 2], label: READING/SEAT}
+      studio_desk: {kind: rectangle, within: office_studio, at: [14.5, 28.5], size: [5, 2.5], label: DESK}
     connections:
       - {between: [laundry, bathroom], width: 3}
-      - {between: [bathroom, book_gallery], width: 3, offset: 1}
+      - {between: [bathroom, book_gallery], width: 3, offset: 1.5}
       - {between: [book_gallery, library], kind: open, width: 10, offset: 8}
       - {between: [library, office_studio], kind: open}
-      - {between: [book_gallery, office_studio], kind: arch, width: 4}
+      - {between: [book_gallery, office_studio], kind: open, width: 6}
       - {between: [entrance, hall], kind: arch, width: 6}
       - {between: [hall, book_gallery], kind: arch, width: 4}
       - {between: [entrance, tower_closet], width: 3}
       - {between: [hall, hearth_storage], width: 3}
-      - {between: [hall, great_room], width: 3, kind: arch, offset: 1}
-      - {between: [kitchen, pantry], width: 3}
+      - {between: [hall, great_room], width: 4, kind: arch, offset: 1}
+      - {between: [kitchen, pantry], width: 3, swing: out-left, kind: arch}
     access:
       - [entrance, hall]
       - [hall, book_gallery]
@@ -133,10 +133,11 @@ levels:
     features:
       chimney: {kind: rectangle, at: [46.5, 18], size: [6, 2], label: CHIMNEY, avoid_openings: true}
       queen_bed: {kind: rectangle, within: master_bedroom, at: [5, 17], size: [6.67, 5], label: BED, clearance: {left: 0, right: 2, top: 2, foot: 2}, avoid_openings: true}
-      hall_laundry_pair: {kind: rectangle, within: upper_hall, at: [23, 26.5], size: [3, 2.5], label: W/D}
+      washer: {kind: rectangle, within: upper_hall, at: [22.25, 26.5], size: [1.5, 2.5], label: W}
+      dryer: {kind: rectangle, within: upper_hall, at: [23.85, 26.5], size: [1.5, 2.5], label: D}
       hall_linen: {kind: rectangle, within: upper_hall, at: [28.5, 27], size: [4, 1.5], label: LINEN}
       upper_landing_builtins: {kind: rectangle, within: upper_landing, at: [29, 18.35], size: [5, 0.7], label: BOOKS/LINEN}
-      nest_stair: {kind: rectangle, within: tower, at: [34.5, 26.5], size: [4, 4], label: NEST/STAIR}
+      tower_spiral: {kind: spiral_stair, within: tower, size: [6, 6], label: ''}
       pool_table: {kind: rectangle, at: [46, 28], size: [4, 8], label: 'POOL TABLE', clearance: {walls: 5}}
     connections:
       - {between: [ensuite_bathroom, master_bedroom], width: 3}

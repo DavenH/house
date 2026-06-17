@@ -10,6 +10,7 @@ export const palette: PaletteItem[] = [
   { label: "Refrigerator", noun: "feature", kind: "refrigerator" },
   { label: "Bed", noun: "feature", kind: "queen_bed" },
   { label: "Storage", noun: "feature", kind: "storage" },
+  { label: "Spiral Stair", noun: "feature", kind: "spiral_stair" },
   { label: "Window", noun: "opening", openingKind: "window" },
   { label: "Door", noun: "opening", openingKind: "door" },
   { label: "Arch", noun: "connection", openingKind: "arch" },

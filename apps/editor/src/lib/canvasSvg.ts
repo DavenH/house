@@ -145,13 +145,13 @@ export function moveFeatureSvg(
   const [width, height] = featureSize(data, feature);
   const x = (at[0] - width / 2) * scale;
   const y = (at[1] - height / 2) * scale;
-  if (feature.kind === "piano") {
-    movePianoFeatureSvg(canvasElement, id, at, scale);
+  if (["piano", "spiral_stair"].includes(feature.kind)) {
+    moveFeatureGraphicsSvg(canvasElement, id, at, scale);
   }
   canvasElement
     .querySelectorAll(`[data-fp-kind="feature"][data-fp-id="${cssEscape(id)}"]`)
     .forEach((element) => {
-      if (feature.kind === "piano" && !(element instanceof SVGTextElement)) {
+      if (["piano", "spiral_stair"].includes(feature.kind) && !(element instanceof SVGTextElement)) {
         return;
       }
       if (element instanceof SVGRectElement) {
@@ -182,7 +182,7 @@ export function moveFeatureSvg(
   }
 }
 
-function movePianoFeatureSvg(canvasElement: HTMLDivElement, id: string, at: [number, number], scale: number) {
+function moveFeatureGraphicsSvg(canvasElement: HTMLDivElement, id: string, at: [number, number], scale: number) {
   canvasElement
     .querySelectorAll(`[data-fp-kind="feature"][data-fp-id="${cssEscape(id)}"]`)
     .forEach((element) => {

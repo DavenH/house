@@ -236,6 +236,7 @@ levels:
       tower: {rect: [30, 22, 8, 8], label: TOWER, privacy: circulation}
       lounge: {rect: [38, 18, 19, 17], label: LOUNGE, privacy: public}
     features:
+      tower_spiral: {kind: spiral_stair, at: [34, 26], size: [5, 5], label: ''}
       hearth:
         kind: chimney
         at: [49, 18.75]

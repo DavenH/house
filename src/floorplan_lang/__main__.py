@@ -18,15 +18,16 @@ def main() -> None:
     parser.add_argument("input", help="Input floor-plan YAML file")
     parser.add_argument("output", help="Output SVG file")
     parser.add_argument("--show-masses", action="store_true", help="Render debug mass overlays.")
+    parser.add_argument("--show-grid", action="store_true", help="Render the 1 ft / 10 ft background grid.")
     args = parser.parse_args()
 
     data = yaml.safe_load(Path(args.input).read_text())
     if data.get("type") == "wall_plan":
         plan = load_wall_plan_yaml(args.input)
-        render_wall_plan_svg(plan, args.output)
+        render_wall_plan_svg(plan, args.output, show_grid=args.show_grid)
     elif data.get("type") == "intent_plan":
         plan = load_intent_plan_yaml(args.input)
-        render_wall_plan_svg(plan, args.output)
+        render_wall_plan_svg(plan, args.output, show_grid=args.show_grid)
     else:
         plan = load_plan_yaml(args.input)
         render_svg(plan, args.output, show_masses=args.show_masses)

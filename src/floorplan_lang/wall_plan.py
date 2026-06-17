@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from html import escape
-from math import acos, cos, degrees, radians, sin
+from math import acos, cos, degrees, radians, sin, sqrt
 from pathlib import Path
 from typing import Any, Literal
 
@@ -322,6 +322,7 @@ def render_wall_plan_svg(
     path: str | Path | None = None,
     *,
     padding: float = 3,
+    show_grid: bool = False,
 ) -> str:
     plan.require_valid(strict_features=False)
     scale = plan.scale
@@ -344,14 +345,15 @@ def render_wall_plan_svg(
         ".building-fill{fill:#fff;stroke:none}",
         ".grid-1ft{stroke:#e7e1d8;stroke-width:.55;pointer-events:none}",
         ".grid-10ft{stroke:#d1c8bb;stroke-width:1;pointer-events:none}",
-        ".dimension{stroke:#68645f;stroke-width:.8;fill:none;pointer-events:none}",
-        ".dimension-projection{stroke:#9a948d;stroke-width:.65;fill:none;pointer-events:none}",
-        ".dimension-label{font:10px Arial,Helvetica,sans-serif;fill:#56514c;text-anchor:middle;dominant-baseline:middle;pointer-events:none;-webkit-user-select:none;-moz-user-select:none;user-select:none}",
+        ".dimension{stroke:#5f5a54;stroke-width:.85;fill:none;pointer-events:none}",
+        ".dimension-projection{stroke:#b9b0a6;stroke-width:.65;fill:none;pointer-events:none}",
+        ".dimension-label{font:9px Arial,Helvetica,sans-serif;fill:#4f4943;text-anchor:middle;dominant-baseline:middle;pointer-events:none;-webkit-user-select:none;-moz-user-select:none;user-select:none}",
         ".compass-bg{fill:#fff;stroke:#c9c1b5;stroke-width:.8;opacity:.94;pointer-events:none}",
         ".compass-ring{stroke:#605a52;stroke-width:.9;fill:none;pointer-events:none}",
         ".compass-line{stroke:#333;stroke-width:1.2;fill:none;stroke-linecap:round;pointer-events:none}",
+        ".compass-arrow-head{fill:#333;pointer-events:none}",
         ".compass-center{fill:#333;pointer-events:none}",
-        ".compass-label{font:bold 9px Arial,Helvetica,sans-serif;fill:#333;text-anchor:middle;dominant-baseline:middle;pointer-events:none;-webkit-user-select:none;-moz-user-select:none;user-select:none}",
+        ".compass-label{font:bold 9px Georgia,'Times New Roman',serif;fill:#333;text-anchor:middle;dominant-baseline:middle;pointer-events:none;-webkit-user-select:none;-moz-user-select:none;user-select:none}",
         ".sun-arc{fill:none;stroke-width:1.4;stroke-linecap:round;stroke-linejoin:round;pointer-events:none}",
         ".sun-arc.summer{stroke:#d2912f}",
         ".sun-arc.winter{stroke:#7186a2}",
@@ -379,6 +381,8 @@ def render_wall_plan_svg(
         ".window-fill{fill:#d8eef7;stroke:none;pointer-events:none}",
         ".window{stroke:#45718a;stroke-width:1.4;stroke-linecap:square}",
         ".door{stroke:#666;stroke-width:1.4;stroke-dasharray:3 2;fill:none;stroke-linecap:square}",
+        ".door-leaf{stroke:#666;stroke-width:1.2;stroke-dasharray:none;fill:none;stroke-linecap:square}",
+        ".door-swing{stroke:#777;stroke-width:1;stroke-dasharray:2 2;fill:none;stroke-linecap:round}",
         ".arch{stroke:#555;stroke-width:1.4;stroke-dasharray:5 3;fill:none;stroke-linecap:square}",
         ".zone{stroke:#777;stroke-width:1.2;stroke-dasharray:5 4;fill:none}",
         ".zone-scope{stroke:#c9c1b5;stroke-width:.8;stroke-dasharray:3 3;fill:none}",
@@ -386,6 +390,9 @@ def render_wall_plan_svg(
         ".fixture{stroke:#444;stroke-width:1.4;fill:#f7f7f7}",
         ".piano-fixture{stroke:#333;stroke-width:1.4;fill:#f7f7f7;stroke-linejoin:round;pointer-events:all}",
         ".piano-clearance{fill:none;stroke-linejoin:round;stroke-linecap:round;pointer-events:stroke}",
+        ".spiral-stair-fixture{stroke:#333;stroke-width:1.2;fill:#f7f7f7;pointer-events:all}",
+        ".spiral-stair-well{stroke:#777;stroke-width:.8;fill:none;pointer-events:none}",
+        ".spiral-stair-tread{stroke:#666;stroke-width:.7;stroke-linecap:round;pointer-events:none}",
         ".clearance{stroke:none}",
         ".wall-select-target{stroke:transparent;stroke-width:12;fill:none;stroke-linecap:square;cursor:pointer}",
         ".wall-grip-target{stroke:transparent;stroke-width:18;fill:none;stroke-linecap:square}",
@@ -407,7 +414,8 @@ def render_wall_plan_svg(
             f'<g id="{escape(level_id)}" data-fp-kind="level" data-fp-level="{escape(level_id)}" '
             f'data-fp-id="{escape(level_id)}" transform="translate({x_offset:.3f} {y_offset:.3f})">'
         )
-        parts.extend(_render_grid(level_box, level, scale))
+        if show_grid:
+            parts.extend(_render_grid(level_box, level, scale))
         parts.extend(_render_building_fills(level, scale))
         parts.extend(_render_perimeter_dimensions(level, scale))
         for zone in level.zones:
@@ -718,6 +726,8 @@ def _render_feature_fixture(feature: Feature, box: Rect, level_id: str, scale: f
     if feature.kind == "piano":
         body = _piano_path(box, scale)
         return [f'<path class="piano-fixture" {attrs} {_feature_rotation_attr(feature, box, scale)}d="{body}" />']
+    if feature.kind == "spiral_stair":
+        return _render_spiral_stair_fixture(feature, box, attrs, scale)
     return [
         f'<rect class="fixture" {attrs} x="{box.x * scale:.3f}" y="{box.y * scale:.3f}" '
         f'width="{box.w * scale:.3f}" height="{box.h * scale:.3f}" '
@@ -735,6 +745,41 @@ def _feature_rotation_attr(feature: Feature, box: Rect, scale: float) -> str:
     if not feature.rotation:
         return ""
     return f'transform="rotate({feature.rotation:.3f} {box.cx * scale:.3f} {box.cy * scale:.3f})" '
+
+
+def _render_spiral_stair_fixture(feature: Feature, box: Rect, attrs: str, scale: float) -> list[str]:
+    cx = box.cx * scale
+    cy = box.cy * scale
+    radius = min(box.w, box.h) * scale / 2
+    inner = radius * 0.22
+    outer = radius * 0.82
+    transform = _feature_rotation_attr(feature, box, scale)
+    parts = [
+        f'<circle class="spiral-stair-fixture" {attrs} {transform}cx="{cx:.3f}" cy="{cy:.3f}" r="{radius:.3f}" />',
+        f'<circle class="spiral-stair-well" {attrs} {transform}cx="{cx:.3f}" cy="{cy:.3f}" r="{inner:.3f}" />',
+    ]
+    for index in range(14):
+        angle = radians(-110 + index * 25)
+        x1 = cx + cos(angle) * inner
+        y1 = cy + sin(angle) * inner
+        x2 = cx + cos(angle) * outer
+        y2 = cy + sin(angle) * outer
+        parts.append(
+            f'<line class="spiral-stair-tread" {attrs} {transform}'
+            f'x1="{x1:.3f}" y1="{y1:.3f}" x2="{x2:.3f}" y2="{y2:.3f}" />'
+        )
+    spiral_points = []
+    for index in range(34):
+        fraction = index / 33
+        angle = radians(-120 + fraction * 540)
+        current_radius = inner + (outer - inner) * fraction
+        spiral_points.append((cx + cos(angle) * current_radius, cy + sin(angle) * current_radius))
+    path = " ".join(
+        ("M" if index == 0 else "L") + f" {x:.3f} {y:.3f}"
+        for index, (x, y) in enumerate(spiral_points)
+    )
+    parts.append(f'<path class="spiral-stair-well" {attrs} {transform}d="{path}" />')
+    return parts
 
 
 def _feature_clearance_outer_path(feature: Feature, clear_box: Rect, scale: float) -> str:
@@ -1597,7 +1642,6 @@ def _render_compass(compass: dict[str, Any], scale: float, center: tuple[float, 
     up_bearing = float(compass.get("up_bearing", 90))
     cx, cy = center
     axis = 2.175 * scale
-    ring = 3.225 * scale
     label = 2.73 * scale
     sun_outer = 2.43 * scale
     sun_inner = 1.8 * scale
@@ -1606,6 +1650,40 @@ def _render_compass(compass: dict[str, Any], scale: float, center: tuple[float, 
         screen_degrees = (bearing - up_bearing + 270) % 360
         angle = radians(screen_degrees)
         return (cx + cos(angle) * distance, cy + sin(angle) * distance)
+
+    def axis_with_arrowheads(a: tuple[float, float], b: tuple[float, float]) -> list[str]:
+        line_inset = 0.16 * scale
+        line_start = point_between(a, b, line_inset)
+        line_end = point_between(b, a, line_inset)
+        return [
+            f'<line class="compass-line" x1="{line_start[0]:.3f}" y1="{line_start[1]:.3f}" x2="{line_end[0]:.3f}" y2="{line_end[1]:.3f}" />',
+            arrow_head(a, b),
+            arrow_head(b, a),
+        ]
+
+    def point_between(start: tuple[float, float], end: tuple[float, float], distance: float) -> tuple[float, float]:
+        dx = end[0] - start[0]
+        dy = end[1] - start[1]
+        length = max(sqrt(dx * dx + dy * dy), EPSILON)
+        ratio = distance / length
+        return (start[0] + dx * ratio, start[1] + dy * ratio)
+
+    def arrow_head(tip: tuple[float, float], toward: tuple[float, float]) -> str:
+        dx = tip[0] - toward[0]
+        dy = tip[1] - toward[1]
+        length = max(sqrt(dx * dx + dy * dy), EPSILON)
+        ux = dx / length
+        uy = dy / length
+        depth = 0.34 * scale
+        half_width = 0.16 * scale
+        base_x = tip[0] - ux * depth
+        base_y = tip[1] - uy * depth
+        left = (base_x - uy * half_width, base_y + ux * half_width)
+        right = (base_x + uy * half_width, base_y - ux * half_width)
+        return (
+            f'<polygon class="compass-arrow-head" points="{tip[0]:.3f},{tip[1]:.3f} '
+            f'{left[0]:.3f},{left[1]:.3f} {right[0]:.3f},{right[1]:.3f}" />'
+        )
 
     n = point_for_bearing(0, axis)
     s = point_for_bearing(180, axis)
@@ -1619,17 +1697,15 @@ def _render_compass(compass: dict[str, Any], scale: float, center: tuple[float, 
     }
     parts = [
         '<g class="compass" aria-label="Compass">',
-        f'<circle class="compass-bg" cx="{cx:.3f}" cy="{cy:.3f}" r="{ring:.3f}" />',
-        f'<circle class="compass-ring" cx="{cx:.3f}" cy="{cy:.3f}" r="{(ring - 0.28 * scale):.3f}" />',
     ]
     if "latitude" in compass:
         latitude = float(compass["latitude"])
         parts.extend(_render_sun_arc(latitude, 23.44, up_bearing, cx, cy, sun_outer, "summer"))
         parts.extend(_render_sun_arc(latitude, -23.44, up_bearing, cx, cy, sun_inner, "winter"))
+    parts.extend(axis_with_arrowheads(n, s))
+    parts.extend(axis_with_arrowheads(e, w))
     parts.extend(
         [
-            f'<line class="compass-line" x1="{n[0]:.3f}" y1="{n[1]:.3f}" x2="{s[0]:.3f}" y2="{s[1]:.3f}" />',
-            f'<line class="compass-line" x1="{e[0]:.3f}" y1="{e[1]:.3f}" x2="{w[0]:.3f}" y2="{w[1]:.3f}" />',
             f'<circle class="compass-center" cx="{cx:.3f}" cy="{cy:.3f}" r="{(0.09 * scale):.3f}" />',
         ]
     )
@@ -2296,9 +2372,8 @@ def _render_door(
     start: Point, end: Point, direction: Direction, swing: str, scale: float, editor_attrs: str = ""
 ) -> list[str]:
     normal_x, normal_y = _normal(direction)
-    del swing
     tick = 0.28
-    return [
+    parts = [
         f'<line class="door" {editor_attrs} x1="{start.x * scale:.3f}" y1="{start.y * scale:.3f}" '
         f'x2="{end.x * scale:.3f}" y2="{end.y * scale:.3f}" />',
         f'<line class="door" {editor_attrs} x1="{(start.x - normal_x * tick) * scale:.3f}" '
@@ -2307,6 +2382,32 @@ def _render_door(
         f'<line class="door" {editor_attrs} x1="{(end.x - normal_x * tick) * scale:.3f}" '
         f'y1="{(end.y - normal_y * tick) * scale:.3f}" '
         f'x2="{(end.x + normal_x * tick) * scale:.3f}" y2="{(end.y + normal_y * tick) * scale:.3f}" />',
+    ]
+    parts.extend(_render_door_swing(start, end, direction, swing, scale, editor_attrs))
+    return parts
+
+
+def _render_door_swing(
+    start: Point, end: Point, direction: Direction, swing: str, scale: float, editor_attrs: str = ""
+) -> list[str]:
+    if swing.lower() in {"none", "off", "false", "no"}:
+        return []
+    normal_x, normal_y = _normal(direction)
+    swing_side = -1 if "out" in swing.lower() else 1
+    hinge_at_end = "right" in swing.lower()
+    hinge = end if hinge_at_end else start
+    closed = start if hinge_at_end else end
+    radius = sqrt((end.x - start.x) ** 2 + (end.y - start.y) ** 2)
+    open_leaf = Point(hinge.x + normal_x * swing_side * radius, hinge.y + normal_y * swing_side * radius)
+    closed_vector = (closed.x - hinge.x, closed.y - hinge.y)
+    open_vector = (open_leaf.x - hinge.x, open_leaf.y - hinge.y)
+    sweep = 1 if closed_vector[0] * open_vector[1] - closed_vector[1] * open_vector[0] > 0 else 0
+    return [
+        f'<line class="door-leaf" {editor_attrs} x1="{hinge.x * scale:.3f}" y1="{hinge.y * scale:.3f}" '
+        f'x2="{open_leaf.x * scale:.3f}" y2="{open_leaf.y * scale:.3f}" />',
+        f'<path class="door-swing" {editor_attrs} d="M {closed.x * scale:.3f} {closed.y * scale:.3f} '
+        f'A {radius * scale:.3f} {radius * scale:.3f} 0 0 {sweep} '
+        f'{open_leaf.x * scale:.3f} {open_leaf.y * scale:.3f}" />',
     ]
 
 

@@ -772,6 +772,11 @@ def test_wall_plan_grid_stops_at_exterior_perimeter() -> None:
 
     svg = render_wall_plan_svg(plan)
 
+    assert 'class="grid-1ft"' not in svg
+    assert 'class="grid-10ft"' not in svg
+
+    svg = render_wall_plan_svg(plan, show_grid=True)
+
     assert '<line class="grid-1ft" x1="80.000" y1="-48.000" x2="80.000" y2="192.000" />' not in svg
     assert '<line class="grid-1ft" x1="80.000" y1="-48.000" x2="80.000" y2="-16.000" />' in svg
     assert '<line class="grid-1ft" x1="80.000" y1="144.000" x2="80.000" y2="192.000" />' in svg
@@ -928,7 +933,7 @@ def test_interior_wall_supports_explicit_normal_offset() -> None:
     assert 'class="interior" x="32.000" y="59.200" width="64.000" height="4.800"' in svg
 
 
-def test_wall_plan_renders_doors_without_swing_arcs() -> None:
+def test_wall_plan_renders_door_swing_arcs() -> None:
     plan = wall_plan_from_dict(
         {
             "type": "wall_plan",
@@ -945,7 +950,9 @@ def test_wall_plan_renders_doors_without_swing_arcs() -> None:
     svg = render_wall_plan_svg(plan)
 
     assert 'class="door"' in svg
-    assert "<path" not in svg
+    assert 'class="door-leaf"' in svg
+    assert 'class="door-swing"' in svg
+    assert 'A 64.000 64.000 0 0 1' in svg
 
 
 def test_wall_plan_renders_arch_openings() -> None:
@@ -1254,6 +1261,35 @@ def test_wall_plan_renders_rotated_piano() -> None:
     assert 'class="clearance piano-clearance"' in svg
 
 
+def test_wall_plan_renders_spiral_stair_feature() -> None:
+    plan = wall_plan_from_dict(
+        {
+            "type": "wall_plan",
+            "plan": "spiral-stair-feature-test",
+            "levels": {
+                "L1": {
+                    "features": {
+                        "tower_spiral": {
+                            "kind": "spiral_stair",
+                            "at": [10, 10],
+                            "size": [5, 5],
+                            "label": "SPIRAL/STAIR",
+                        }
+                    }
+                }
+            },
+        }
+    )
+
+    svg = render_wall_plan_svg(plan)
+
+    assert 'class="spiral-stair-fixture"' in svg
+    assert 'class="spiral-stair-tread"' in svg
+    assert 'class="spiral-stair-well"' in svg
+    assert 'data-fp-id="tower_spiral"' in svg
+    assert 'SPIRAL/STAIR</text>' in svg
+
+
 def test_intent_plan_compiles_feature_rotation_from_catalog_and_instance_override() -> None:
     plan = intent_plan_from_dict(
         {
@@ -1381,6 +1417,10 @@ def test_wall_plan_renders_compass_with_sun_arcs() -> None:
     svg = render_wall_plan_svg(plan)
 
     assert '<g class="compass" aria-label="Compass">' in svg
+    assert 'class="compass-bg"' not in svg
+    assert 'class="compass-ring"' not in svg
+    assert svg.count('class="compass-arrow-head"') == 4
+    assert "Georgia,'Times New Roman',serif" in svg
     assert 'class="sun-arc summer"' in svg
     assert 'class="sun-arc winter"' in svg
     assert ">SUM</text>" not in svg
