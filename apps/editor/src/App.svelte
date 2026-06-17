@@ -83,6 +83,7 @@
   let drag: DragState = null;
   let canvasZoom = 0.7;
   let yamlOpen = false;
+  let inspectorOpen = true;
 
 
   $: levelIds = Object.keys((data.levels as AnyRecord | undefined) ?? {});
@@ -703,7 +704,7 @@
   }
 </script>
 
-<main class="editor-shell">
+<main class:inspector-open={inspectorOpen} class="editor-shell">
   <CanvasPane
     document={planDocument}
     {plans}
@@ -730,6 +731,7 @@
   />
 
   <InspectorPane
+    open={inspectorOpen}
     {selected}
     {selectedObject}
     planData={data}
@@ -748,5 +750,6 @@
     {selectObject}
     {updateField}
     {updateNumber}
+    onToggle={() => (inspectorOpen = !inspectorOpen)}
   />
 </main>

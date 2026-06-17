@@ -2,6 +2,7 @@
   import type { AnyRecord, Selection, SelectionKind } from "../lib/types";
 
   export let selected: Selection = { kind: "", level: "", id: "" };
+  export let open = true;
   export let selectedObject: AnyRecord | null = null;
   export let planData: AnyRecord = {};
   export let activeLevel = "";
@@ -19,6 +20,7 @@
   export let selectObject: (kind: SelectionKind, id: string, index?: number) => void;
   export let updateField: (path: Array<string | number>, value: unknown) => void;
   export let updateNumber: (path: Array<string | number>, value: string) => void;
+  export let onToggle: () => void;
 
   let featureFormKey = "";
   let featureXValue = "";
@@ -744,7 +746,14 @@
   }
 </script>
 
-<aside class="inspector">
+<button type="button" class:open class="inspector-pullout" aria-expanded={open} aria-label={open ? "Hide inspector" : "Show inspector"} on:click={onToggle}>
+  <svg viewBox="0 0 24 24" aria-hidden="true">
+    <circle cx="10.75" cy="10.75" r="5.75" />
+    <path d="M15.25 15.25L20 20" />
+  </svg>
+</button>
+
+<aside class:open class="inspector">
   <div class="properties-grid">
     <section class="panel inspector-main">
       <div class="panel-title">

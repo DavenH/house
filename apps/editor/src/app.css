@@ -100,31 +100,39 @@ textarea {
 }
 
 .editor-shell {
+  --inspector-width: min(420px, 28.5vw);
   display: grid;
-  grid-template-columns: minmax(0, 1fr);
-  grid-template-rows: minmax(0, 1fr) minmax(176px, 26vh);
+  grid-template-columns: minmax(0, 1fr) 0;
+  grid-template-rows: minmax(0, 1fr);
   grid-template-areas:
-    "canvas"
-    "inspector";
+    "canvas inspector";
   height: 100vh;
   min-height: 100vh;
   overflow: hidden;
   position: relative;
+  transition: grid-template-columns 180ms ease;
+}
+
+.editor-shell.inspector-open {
+  grid-template-columns: minmax(0, 1fr) var(--inspector-width);
 }
 
 .inspector {
   background: #fbfaf8;
-  border-color: #d4cec4;
+  border-left: 1px solid #d4cec4;
   grid-area: inspector;
   min-height: 0;
+  min-width: 0;
   overflow: hidden;
   padding: 8px;
+  display: grid;
+  transform: translateX(100%);
+  transition: transform 180ms ease;
+  width: var(--inspector-width);
 }
 
-.inspector {
-  border-top: 1px solid #d4cec4;
-  display: grid;
-  overflow: hidden;
+.inspector.open {
+  transform: translateX(0);
 }
 
 .eyebrow {
@@ -167,7 +175,8 @@ h3 {
 .properties-grid {
   display: grid;
   gap: 10px;
-  grid-template-columns: minmax(240px, 340px) minmax(0, 1fr);
+  grid-template-columns: minmax(0, 1fr);
+  align-content: start;
   min-height: 0;
   overflow: auto;
 }
@@ -182,7 +191,6 @@ h3 {
   align-items: center;
   column-gap: 8px;
   grid-template-columns: 74px minmax(0, 1fr);
-  max-width: 340px;
   row-gap: 5px;
 }
 
@@ -216,8 +224,8 @@ h3 {
 }
 
 .relations-panel {
-  border-left: 1px solid #e4ded5;
-  padding-left: 14px;
+  border-top: 1px solid #e4ded5;
+  padding-top: 12px;
 }
 
 .panel-title {
@@ -628,8 +636,7 @@ label {
 .relation-list {
   display: grid;
   gap: 6px;
-  grid-template-columns: repeat(auto-fill, minmax(240px, 320px));
-  justify-content: start;
+  grid-template-columns: minmax(0, 1fr);
 }
 
 .relation-card {
@@ -638,7 +645,6 @@ label {
   border-radius: 6px;
   display: grid;
   gap: 5px;
-  max-width: 320px;
   min-width: 0;
   padding: 6px;
 }
@@ -868,6 +874,48 @@ dd {
   transform: rotate(180deg);
 }
 
+.inspector-pullout {
+  align-items: center;
+  background: #625548;
+  border: 1px solid #51463c;
+  border-radius: 8px 0 0 8px;
+  box-shadow: -4px 4px 12px rgb(44 39 33 / 18%);
+  color: #fff;
+  cursor: pointer;
+  display: grid;
+  font-size: 12px;
+  font-weight: 800;
+  justify-items: center;
+  min-height: 54px;
+  padding: 8px 6px;
+  position: fixed;
+  right: 0;
+  text-transform: uppercase;
+  top: 150px;
+  transition: right 180ms ease;
+  width: 50px;
+  z-index: 28;
+}
+
+.inspector-pullout.open {
+  right: var(--inspector-width);
+}
+
+.inspector-pullout svg {
+  fill: none;
+  height: 25px;
+  stroke: currentColor;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  stroke-width: 2.4;
+  transition: transform 180ms ease;
+  width: 25px;
+}
+
+.inspector-pullout svg.open {
+  transform: rotate(180deg);
+}
+
 .yaml-panel textarea {
   height: 100%;
   min-height: 0;
@@ -882,16 +930,7 @@ dd {
 
 @media (max-width: 1200px) {
   .editor-shell {
-    grid-template-columns: minmax(0, 1fr);
-    grid-template-rows: minmax(0, 1fr) minmax(220px, 32vh);
-    grid-template-areas:
-      "canvas"
-      "inspector";
-  }
-
-  .inspector {
-    border-top: 1px solid #d4cec4;
-    min-height: 40vh;
+    --inspector-width: min(420px, calc(100vw - 52px));
   }
 
   .yaml-panel {

@@ -7,9 +7,10 @@
 </script>
 
 <button type="button" class:open class="yaml-pullout" aria-expanded={open} aria-label={open ? "Hide YAML" : "Show YAML"} on:click={onToggle}>
-  <svg class:open viewBox="0 0 24 24" aria-hidden="true">
-    <path d="M14.5 6L8.5 12L14.5 18" />
-    <path d="M19.5 6L13.5 12L19.5 18" />
+  <svg viewBox="0 0 24 24" aria-hidden="true">
+    <path d="M8.5 7L3.5 12L8.5 17" />
+    <path d="M15.5 7L20.5 12L15.5 17" />
+    <path d="M13 5L11 19" />
   </svg>
 </button>
 

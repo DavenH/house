@@ -79,8 +79,8 @@ levels:
       - {between: [book_gallery, office_studio], kind: open, width: 6}
       - {between: [entrance, hall], kind: arch, width: 6}
       - {between: [hall, book_gallery], kind: arch, width: 4}
-      - {between: [entrance, tower_closet], width: 3}
-      - {between: [hall, hearth_storage], width: 3}
+      - {between: [entrance, tower_closet], width: 3, kind: arch}
+      - {between: [hall, hearth_storage], width: 3, swing: out-left}
       - {between: [hall, great_room], width: 4, kind: arch, offset: 1}
       - {between: [kitchen, pantry], width: 3, swing: out-left, kind: arch}
     access:
@@ -96,7 +96,7 @@ levels:
       - [kitchen, pantry]
       - [hall, hearth_storage]
     openings:
-      - {id: front_door, space: entrance, side: south, width: 5, kind: door, swing: in-left}
+      - {id: front_door, width: 5, kind: door, swing: in-left, offset: 2.5, wall: exterior_4}
       - {id: bath_window, space: bathroom, side: north, width: 5, kind: window}
       - {id: library_window, width: 6, kind: window, offset: 5, wall: exterior_11}
       - {id: stair_window, space: stair, side: north, width: 4, kind: window}
@@ -133,22 +133,21 @@ levels:
     features:
       chimney: {kind: rectangle, at: [46.5, 18], size: [6, 2], label: CHIMNEY, avoid_openings: true}
       queen_bed: {kind: rectangle, within: master_bedroom, at: [5, 17], size: [6.67, 5], label: BED, clearance: {left: 0, right: 2, top: 2, foot: 2}, avoid_openings: true}
-      washer: {kind: rectangle, within: upper_hall, at: [22.25, 26.5], size: [1.5, 2.5], label: W}
-      dryer: {kind: rectangle, within: upper_hall, at: [23.85, 26.5], size: [1.5, 2.5], label: D}
+      washer: {kind: rectangle, within: upper_hall, at: [22.5, 26.5], size: [2, 2.5], label: W}
+      dryer: {kind: rectangle, within: upper_hall, at: [25, 26.5], size: [2, 2.5], label: D}
       hall_linen: {kind: rectangle, within: upper_hall, at: [28.5, 27], size: [4, 1.5], label: LINEN}
       upper_landing_builtins: {kind: rectangle, within: upper_landing, at: [29, 18.35], size: [5, 0.7], label: BOOKS/LINEN}
       tower_spiral: {kind: spiral_stair, within: tower, size: [6, 6], label: ''}
       pool_table: {kind: rectangle, at: [46, 28], size: [4, 8], label: 'POOL TABLE', clearance: {walls: 5}}
     connections:
-      - {between: [ensuite_bathroom, master_bedroom], width: 3}
+      - {between: [ensuite_bathroom, master_bedroom], width: 3, swing: out-right}
       - {between: [master_bedroom, walk_in_closet], width: 3, offset: 0.5, kind: arch}
       - {between: [master_bedroom, suite_foyer], width: 3}
-      - {between: [walk_in_closet, suite_foyer], width: 3}
       - {between: [suite_foyer, gym], kind: arch, width: 4}
       - {between: [suite_foyer, upper_landing], kind: open}
       - {between: [upper_hall, upper_landing], kind: open}
       - {between: [upper_landing, room_1], width: 3}
-      - {between: [upper_landing, tower], width: 3}
+      - {between: [upper_landing, tower], width: 3, kind: arch}
       - {between: [room_2, lounge], width: 3, swing: in-left, offset: 8.5}
     access:
       - [upper_landing, upper_hall]
