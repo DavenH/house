@@ -88,21 +88,22 @@ levels:
       - [hall, hearth_storage]
     openings:
       - {id: front_door, space: entrance, side: south, width: 4, kind: door, swing: in-left}
-      - {id: bath_window, space: bathroom, side: north, width: 5, kind: window}
+      - {id: bath_window, space: bathroom, side: north, width: 5, kind: window, offset: 4}
       - {id: library_window, width: 6, kind: window, offset: 5, wall: exterior_11}
       - {id: stair_window, space: stair, side: north, width: 4, kind: window}
       - {id: great_room_window, width: 8, kind: window, offset: 21.5, wall: exterior_10}
-      - {id: great_room_south_window, width: 6, kind: window, offset: 1.75, wall: exterior_16}
+      - {id: great_room_south_window, width: 5, kind: window, offset: 1.5, wall: exterior_16}
       - {id: kitchen_window, space: kitchen, side: south, width: 8, kind: window}
       - {id: office_window, space: office_studio, side: south, width: 7, kind: window}
-      - {id: dining_window, space: dining, side: east, width: 5, kind: window}
+      - {id: dining_window, space: dining, side: east, width: 5, kind: window, offset: 3}
       - {id: library_piano_south_window, wall: exterior_3, offset: 2.5, width: 3, kind: window}
       - {id: studio_west_window, width: 2, kind: window, offset: 0.5, wall: exterior_20}
-      - {id: kitchen_east_window, wall: exterior_17, offset: 2.5, width: 4, kind: window}
-      - {id: dining_south_window, wall: exterior_5, offset: 3, width: 4, kind: window}
+      - {id: kitchen_east_window, wall: exterior_17, offset: 3, width: 4, kind: window}
+      - {id: dining_south_window, wall: exterior_5, offset: 2, width: 4, kind: window}
       - {id: kitchen__dining_wall_open, wall: kitchen__dining_wall, offset: 0, kind: open}
       - {id: great_room__dining_wall_open, wall: great_room__dining_wall, offset: 0, kind: open}
       - {id: great_room__kitchen_wall_open, wall: great_room__kitchen_wall, offset: 0, kind: open}
+      - {id: exterior_15_window, kind: window, width: 3, offset: 1.5, space: kitchen, side: west}
   L2:
     title: 'Second Floor'
     derive_partitions: true

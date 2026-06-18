@@ -371,6 +371,29 @@ def test_intent_space_side_opening_respects_explicit_offset() -> None:
     assert opening.offset == pytest.approx(7)
 
 
+def test_intent_space_side_opening_respects_explicit_offset_on_reversed_wall() -> None:
+    plan = intent_plan_from_dict(
+        {
+            "type": "intent_plan",
+            "plan": "space-side-reversed-offset-test",
+            "masses": {"body": {"rect": [0, 0, 20, 10]}},
+            "levels": {
+                "L1": {
+                    "spaces": {"room": {"rect": [0, 0, 20, 10]}},
+                    "openings": [
+                        {"id": "south_window", "space": "room", "side": "south", "width": 8, "offset": 4, "kind": "window"}
+                    ],
+                }
+            },
+        }
+    )
+
+    opening = plan.levels["L1"].openings[0]
+
+    assert opening.wall == "exterior_2"
+    assert opening.offset == pytest.approx(4)
+
+
 def test_feature_fit_can_use_open_connected_room_union() -> None:
     plan = intent_plan_from_dict(
         {

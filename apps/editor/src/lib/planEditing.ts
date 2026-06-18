@@ -55,10 +55,9 @@ export function connectionOpeningIndex(selectedLevel: AnyRecord, id: string) {
 
 export function findOpening(data: AnyRecord, id: string): Selection | null {
   for (const levelId of Object.keys((data.levels as AnyRecord | undefined) ?? {})) {
-    const currentLevel = (data.levels as AnyRecord)[levelId];
-    const index = openingIndex(currentLevel, id);
-    if (index >= 0) {
-      return { kind: "opening", level: levelId, id, index };
+    const found = findOpeningInLevel(data, levelId, id);
+    if (found) {
+      return found;
     }
   }
   return null;
@@ -66,13 +65,30 @@ export function findOpening(data: AnyRecord, id: string): Selection | null {
 
 export function findConnectionOpening(data: AnyRecord, id: string): Selection | null {
   for (const levelId of Object.keys((data.levels as AnyRecord | undefined) ?? {})) {
-    const currentLevel = (data.levels as AnyRecord)[levelId];
-    const index = connectionOpeningIndex(currentLevel, id);
-    if (index >= 0) {
-      return { kind: "connection", level: levelId, id, index };
+    const found = findConnectionOpeningInLevel(data, levelId, id);
+    if (found) {
+      return found;
     }
   }
   return null;
+}
+
+export function findOpeningInLevel(data: AnyRecord, levelId: string, id: string): Selection | null {
+  const currentLevel = (data.levels as AnyRecord | undefined)?.[levelId] as AnyRecord | undefined;
+  if (!currentLevel) {
+    return null;
+  }
+  const index = openingIndex(currentLevel, id);
+  return index >= 0 ? { kind: "opening", level: levelId, id, index } : null;
+}
+
+export function findConnectionOpeningInLevel(data: AnyRecord, levelId: string, id: string): Selection | null {
+  const currentLevel = (data.levels as AnyRecord | undefined)?.[levelId] as AnyRecord | undefined;
+  if (!currentLevel) {
+    return null;
+  }
+  const index = connectionOpeningIndex(currentLevel, id);
+  return index >= 0 ? { kind: "connection", level: levelId, id, index } : null;
 }
 
 export function connectionOpeningId(connection: unknown, index: number) {

@@ -8,7 +8,6 @@ compass:
   up_bearing: 115
   latitude: 45.96
 notes:
-  - 'Opinionated optimization variant of the studio/library/piano wing.'
   - 'Keeps the no-basement storage strategy intact while making circulation space do double duty where there are real wall stubs.'
   - 'Splits the former office/library into a real west library/study and an east gallery spine; bathroom circulation now runs on the stair side instead of through the room.'
   - 'The piano remains visible from the library/studio overlap, but the bookable wall area is protected from bathroom traffic.'
@@ -96,19 +95,19 @@ levels:
       - [kitchen, pantry]
       - [hall, hearth_storage]
     openings:
-      - {id: front_door, width: 5, kind: door, swing: in-left, offset: 2.5, wall: exterior_4}
+      - {id: front_door, width: 3, kind: door, swing: in-left, offset: 3.5, space: entrance, side: south}
       - {id: bath_window, space: bathroom, side: north, width: 5, kind: window}
-      - {id: library_window, width: 6, kind: window, offset: 5, wall: exterior_11}
+      - {id: library_window, width: 6, kind: window, offset: 5, space: library, side: west}
       - {id: stair_window, space: stair, side: north, width: 4, kind: window}
-      - {id: great_room_window, width: 8, kind: window, offset: 21.5, wall: exterior_10}
-      - {id: great_room_south_window, width: 6, kind: window, offset: 1.75, wall: exterior_16}
+      - {id: great_room_window, width: 8, kind: window, offset: 21.5, space: great_room, side: north}
+      - {id: great_room_south_window, width: 6, kind: window, offset: 1.75, space: great_room, side: east}
       - {id: kitchen_window, space: kitchen, side: south, width: 8, kind: window}
       - {id: office_window, space: office_studio, side: south, width: 7, kind: window}
       - {id: dining_window, space: dining, side: east, width: 5, kind: window}
-      - {id: library_piano_south_window, wall: exterior_3, offset: 2.5, width: 3, kind: window}
-      - {id: studio_west_window, width: 2, kind: window, offset: 0.5, wall: exterior_20}
-      - {id: kitchen_east_window, wall: exterior_17, offset: 2.5, width: 4, kind: window}
-      - {id: dining_south_window, wall: exterior_5, offset: 3, width: 4, kind: window}
+      - {id: library_piano_south_window, offset: 2.5, width: 3, kind: window, space: library, side: south}
+      - {id: studio_west_window, width: 2, kind: window, offset: 0.5, space: office_studio, side: west}
+      - {id: kitchen_east_window, offset: 3.5, width: 4, kind: window, space: kitchen, side: east}
+      - {id: dining_south_window, offset: 2, width: 4, kind: window, space: dining, side: south}
       - {id: kitchen__dining_wall_open, wall: kitchen__dining_wall, offset: 0, kind: open}
       - {id: great_room__dining_wall_open, wall: great_room__dining_wall, offset: 0, kind: open}
       - {id: great_room__kitchen_wall_open, wall: great_room__kitchen_wall, offset: 0, kind: open}
@@ -171,6 +170,7 @@ levels:
       - {id: gym_window, space: gym, side: south, width: 7, kind: window}
       - {id: master_gym_borrowed_light, wall: master_bedroom__gym_wall, offset: 0.75, width: 5, kind: window}
       - {id: upper_landing__lounge_wall_open, wall: upper_landing__lounge_wall, offset: 0, width: 6, kind: open}
+      - {id: exterior_4_window, kind: window, width: 1, offset: 3.5, space: tower, side: south}
 stairs:
   main_stair:
     spaces:

@@ -59,7 +59,8 @@ export function markSelectedInSvg(canvasElement: HTMLDivElement | undefined, sel
   if (!selected.kind || !selected.id) {
     return;
   }
-  const selector = `[data-fp-kind][data-fp-id="${cssEscape(selected.id)}"]`;
+  const levelSelector = selected.level ? `[data-fp-level="${cssEscape(selected.level)}"]` : "";
+  const selector = `[data-fp-kind][data-fp-id="${cssEscape(selected.id)}"]${levelSelector}`;
   canvasElement.querySelectorAll(selector).forEach((element) => {
     if (element instanceof SVGTextElement || element instanceof SVGTSpanElement) {
       return;
@@ -122,7 +123,9 @@ export function previewOpeningSvg(
   const vector = openingDeltaVector(openingDrag.direction, offsetDelta);
   const transform = `translate(${(vector.x * scale).toFixed(3)} ${(vector.y * scale).toFixed(3)})`;
   canvasElement
-    .querySelectorAll(`[data-fp-kind="opening"][data-fp-id="${cssEscape(openingDrag.id)}"]`)
+    .querySelectorAll(
+      `[data-fp-kind="opening"][data-fp-id="${cssEscape(openingDrag.id)}"][data-fp-level="${cssEscape(openingDrag.level)}"]`
+    )
     .forEach((element) => {
       if (element instanceof SVGGraphicsElement) {
         element.setAttribute("transform", transform);
@@ -226,10 +229,10 @@ export function previewSharedWallSvg(
   const [firstRect, secondRect] = wallDrag.startRects;
   const firstNext = movedPreviewRect(firstRect, secondRect, wallDrag.orientation, delta, true);
   const secondNext = movedPreviewRect(secondRect, firstRect, wallDrag.orientation, delta, false);
-  updateSpaceSvg(canvasElement, firstId, firstNext, scale);
-  updateSpaceSvg(canvasElement, secondId, secondNext, scale);
+  updateSpaceSvg(canvasElement, wallDrag.level, firstId, firstNext, scale);
+  updateSpaceSvg(canvasElement, wallDrag.level, secondId, secondNext, scale);
   updateWallLineSvg(canvasElement, wallDrag, firstNext, secondNext, scale);
-  updateWallPreviewSvg(canvasElement, wallDrag.id, wallLineFromRects(wallDrag.orientation, firstNext, secondNext), scale);
+  updateWallPreviewSvg(canvasElement, wallDrag.level, wallDrag.id, wallLineFromRects(wallDrag.orientation, firstNext, secondNext), scale);
 }
 
 export function previewContainedWallSvg(
@@ -253,12 +256,13 @@ export function previewContainedWallSvg(
   }
   next.width = next.right - next.left;
   next.height = next.bottom - next.top;
-  updateSpaceSvg(canvasElement, wallDrag.innerSpace, next, scale);
-  updateWallPreviewSvg(canvasElement, wallDrag.id, movedLine(wallDrag.line, wallDrag.orientation, delta), scale);
+  updateSpaceSvg(canvasElement, wallDrag.level, wallDrag.innerSpace, next, scale);
+  updateWallPreviewSvg(canvasElement, wallDrag.level, wallDrag.id, movedLine(wallDrag.line, wallDrag.orientation, delta), scale);
 }
 
 export function previewExteriorWallSvg(
   canvasElement: HTMLDivElement | undefined,
+  levelId: string,
   wallId: string,
   line: WallLine,
   orientation: "vertical" | "horizontal",
@@ -268,7 +272,7 @@ export function previewExteriorWallSvg(
   if (!canvasElement) {
     return;
   }
-  updateWallPreviewSvg(canvasElement, wallId, movedLine(line, orientation, delta), scale);
+  updateWallPreviewSvg(canvasElement, levelId, wallId, movedLine(line, orientation, delta), scale);
 }
 
 export function removeWallDragPreview(canvasElement: HTMLDivElement | undefined) {
@@ -279,9 +283,9 @@ export function cssEscape(value: string) {
   return value.replace(/\\/g, "\\\\").replace(/"/g, '\\"');
 }
 
-function updateSpaceSvg(canvasElement: HTMLDivElement, id: string, rect: SpaceRect, scale: number) {
+function updateSpaceSvg(canvasElement: HTMLDivElement, levelId: string, id: string, rect: SpaceRect, scale: number) {
   canvasElement
-    .querySelectorAll(`[data-fp-kind="space"][data-fp-id="${cssEscape(id)}"]`)
+    .querySelectorAll(`[data-fp-kind="space"][data-fp-id="${cssEscape(id)}"][data-fp-level="${cssEscape(levelId)}"]`)
     .forEach((element) => {
       if (element instanceof SVGRectElement) {
         element.setAttribute("x", (rect.left * scale).toFixed(3));
@@ -300,7 +304,7 @@ function updateWallLineSvg(
   scale: number
 ) {
   const wallElements = canvasElement.querySelectorAll(
-    `[data-fp-kind="wall"][data-fp-id="${cssEscape(wallDrag.id)}"]`
+    `[data-fp-kind="wall"][data-fp-id="${cssEscape(wallDrag.id)}"][data-fp-level="${cssEscape(wallDrag.level)}"]`
   );
   const x =
     Math.abs(firstRect.right - secondRect.left) < 0.01
@@ -336,8 +340,8 @@ function updateWallLineSvg(
   });
 }
 
-function updateWallPreviewSvg(canvasElement: HTMLDivElement, wallId: string, line: WallLine, scale: number) {
-  const preview = ensureWallPreviewLine(canvasElement, wallId);
+function updateWallPreviewSvg(canvasElement: HTMLDivElement, levelId: string, wallId: string, line: WallLine, scale: number) {
+  const preview = ensureWallPreviewLine(canvasElement, levelId, wallId);
   if (!preview) {
     return;
   }
@@ -347,12 +351,16 @@ function updateWallPreviewSvg(canvasElement: HTMLDivElement, wallId: string, lin
   preview.setAttribute("y2", (line.y2 * scale).toFixed(3));
 }
 
-function ensureWallPreviewLine(canvasElement: HTMLDivElement, wallId: string): SVGLineElement | null {
-  const existing = canvasElement.querySelector(`.wall-drag-preview[data-preview-for="${cssEscape(wallId)}"]`);
+function ensureWallPreviewLine(canvasElement: HTMLDivElement, levelId: string, wallId: string): SVGLineElement | null {
+  const existing = canvasElement.querySelector(
+    `.wall-drag-preview[data-preview-for="${cssEscape(wallId)}"][data-fp-level="${cssEscape(levelId)}"]`
+  );
   if (existing instanceof SVGLineElement) {
     return existing;
   }
-  const anchor = canvasElement.querySelector(`.wall-grip-target[data-fp-id="${cssEscape(wallId)}"]`);
+  const anchor = canvasElement.querySelector(
+    `.wall-grip-target[data-fp-id="${cssEscape(wallId)}"][data-fp-level="${cssEscape(levelId)}"]`
+  );
   const parent = anchor?.parentElement;
   if (!parent) {
     return null;
@@ -360,6 +368,7 @@ function ensureWallPreviewLine(canvasElement: HTMLDivElement, wallId: string): S
   const preview = document.createElementNS("http://www.w3.org/2000/svg", "line");
   preview.classList.add("wall-drag-preview");
   preview.setAttribute("data-preview-for", wallId);
+  preview.setAttribute("data-fp-level", levelId);
   parent.appendChild(preview);
   return preview;
 }

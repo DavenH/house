@@ -27,7 +27,9 @@
     deleteSelection,
     entries,
     findConnectionOpening,
+    findConnectionOpeningInLevel,
     findOpening,
+    findOpeningInLevel,
     normalizeSvgKind,
     openingIndex,
     resolveSelection,
@@ -341,7 +343,11 @@
       return;
     }
     if (kind === "opening") {
-      const found = findOpening(data, id) ?? findConnectionOpening(data, id);
+      const found =
+        findOpeningInLevel(data, levelFromSvg, id) ??
+        findConnectionOpeningInLevel(data, levelFromSvg, id) ??
+        findOpening(data, id) ??
+        findConnectionOpening(data, id);
       selected = found ?? { kind, level: levelFromSvg, id };
       activeLevel = selected.level || activeLevel;
     } else if (kind !== "wall") {
@@ -452,7 +458,7 @@
         previewContainedWallSvg(canvasElement, drag, snapToGrid(delta), scale);
       } else {
         moveExteriorWall(data, drag, snapToGrid(delta));
-        previewExteriorWallSvg(canvasElement, drag.id, drag.line, drag.orientation, snapToGrid(delta), scale);
+        previewExteriorWallSvg(canvasElement, drag.level, drag.id, drag.line, drag.orientation, snapToGrid(delta), scale);
       }
       yamlText = dumpPlanYaml(data);
       dirty = true;
@@ -601,14 +607,6 @@
     return stabilizeGeneratedExteriorWallOpenings(data, levelId, (wallId) => renderedWallLine(levelId, wallId));
   }
 
-  function stabilizeRenderedExteriorOpenings() {
-    let changed = false;
-    for (const levelId of Object.keys((data.levels as AnyRecord | undefined) ?? {})) {
-      changed = stabilizeExteriorOpenings(levelId) || changed;
-    }
-    return changed;
-  }
-
   function renderedWallLine(levelId: string, wallId: string): WallLine | null {
     const scale = Number(data.scale ?? 16);
     const element = canvasElement?.querySelector(
@@ -618,7 +616,11 @@
   }
 
   function createOpeningDrag(id: string, levelId: string, event: PointerEvent, element: SVGGraphicsElement) {
-    const found = findOpening(data, id) ?? findConnectionOpening(data, id);
+    const found =
+      findOpeningInLevel(data, levelId, id) ??
+      findConnectionOpeningInLevel(data, levelId, id) ??
+      findOpening(data, id) ??
+      findConnectionOpening(data, id);
     const levelForOpening = found?.level ?? levelId;
     const selectedLevel = ((data.levels as AnyRecord | undefined)?.[levelForOpening] ?? {}) as AnyRecord;
     const source: "opening" | "connection" = found?.kind === "connection" ? "connection" : "opening";
@@ -686,7 +688,6 @@
   }
 
   function updateField(path: Array<string | number>, value: unknown) {
-    stabilizeRenderedExteriorOpenings();
     setPath(data, path, value);
     syncDataToYaml();
   }
@@ -694,7 +695,6 @@
   function updateNumber(path: Array<string | number>, value: string) {
     const numberValue = Number(value);
     if (!Number.isNaN(numberValue)) {
-      stabilizeRenderedExteriorOpenings();
       if (
         path[0] === "levels" &&
         path[2] === "features" &&

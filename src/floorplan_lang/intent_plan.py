@@ -582,9 +582,8 @@ def _compile_connections(connections: list[Any], context: IntentContext) -> list
             else min(width, overlap_end - overlap_start)
         )
         if "offset" in data:
-            min_offset = _offset_from_axis_start(wall, overlap_start, 0)
-            max_offset = _offset_from_axis_start(wall, overlap_end - opening_width, 0)
-            offset = max(min(float(data["offset"]), max(min_offset, max_offset)), min(min_offset, max_offset))
+            min_offset, max_offset = _opening_offset_bounds(wall, overlap_start, overlap_end, opening_width)
+            offset = max(min(float(data["offset"]), max_offset), min_offset)
         else:
             offset = _opening_offset(wall, overlap_start, overlap_end, opening_width, data.get("position", "center"))
         openings.append(
@@ -621,9 +620,8 @@ def _compile_openings(openings: list[dict[str, Any]], context: IntentContext) ->
             wall, start, end = _wall_for_space_side(context, space, side)
             width = float(data["width"])
             if "offset" in data:
-                min_offset = _offset_from_axis_start(wall, start, 0)
-                max_offset = _offset_from_axis_start(wall, end - width, 0)
-                offset = max(min(float(data["offset"]), max(min_offset, max_offset)), min(min_offset, max_offset))
+                min_offset, max_offset = _opening_offset_bounds(wall, start, end, width)
+                offset = max(min(float(data["offset"]), max_offset), min_offset)
             else:
                 offset = _opening_offset(wall, start, end, width, data.get("position", "center"))
             wall_id = wall.id
@@ -1197,6 +1195,12 @@ def _opening_offset(wall: WallSegment, start: float, end: float, width: float, p
     if opening_start + width > end:
         opening_start = end - width
     return _offset_from_axis_start(wall, opening_start, width)
+
+
+def _opening_offset_bounds(wall: WallSegment, start: float, end: float, width: float) -> tuple[float, float]:
+    first = _offset_from_axis_start(wall, start, width)
+    second = _offset_from_axis_start(wall, end - width, width)
+    return min(first, second), max(first, second)
 
 
 def _offset_from_axis_start(wall: WallSegment, opening_start: float, width: float) -> float:
