@@ -1,0 +1,13 @@
+{
+  "private": true,
+  "name": "ridgestone-house",
+  "version": "0.1.0",
+  "scripts": {
+    "dev:api": "uvicorn floorplan_api.main:app --reload",
+    "dev:editor": "pnpm --dir apps/editor dev",
+    "test:py": "pytest",
+    "test:web": "pnpm --dir apps/editor test",
+    "lint:web": "pnpm --dir apps/editor check"
+  },
+  "packageManager": "pnpm@9.15.0"
+}
