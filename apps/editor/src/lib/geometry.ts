@@ -63,6 +63,37 @@ export function moveOpening(data: AnyRecord, openingDrag: OpeningDrag, offset: n
   }
 }
 
+export function spaceSideOpeningOffsetBounds(
+  direction: WallDirection,
+  openingLine: WallLine,
+  startOffset: number,
+  width: number,
+  spaceRect: SpaceRect,
+  side: string,
+  fallbackWallLength: number
+) {
+  const axisStart = direction === "E" || direction === "W" ? openingLine.x1 : openingLine.y1;
+  const wallStart =
+    direction === "E" || direction === "S"
+      ? axisStart - startOffset
+      : axisStart + startOffset;
+  const spanStart = side === "north" || side === "south" ? spaceRect.left : spaceRect.top;
+  const spanEnd = side === "north" || side === "south" ? spaceRect.right : spaceRect.bottom;
+  let first: number;
+  let second: number;
+  if (direction === "E" || direction === "S") {
+    first = spanStart - wallStart;
+    second = spanEnd - width - wallStart;
+  } else {
+    first = wallStart - (spanStart + width);
+    second = wallStart - spanEnd;
+  }
+  return {
+    min: clamp(Math.min(first, second), 0, fallbackWallLength - width),
+    max: clamp(Math.max(first, second), 0, fallbackWallLength - width)
+  };
+}
+
 export function moveSharedWall(data: AnyRecord, wallDrag: SharedWallDrag, delta: number) {
   if (delta === 0) {
     return;

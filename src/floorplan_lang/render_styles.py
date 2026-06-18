@@ -36,6 +36,8 @@ def wall_plan_style(*, exterior_opening_mask_stroke: float, interior_opening_mas
         ".stair-note-dot{fill:#fff;stroke:#5d5751;stroke-width:.65;pointer-events:none}",
         ".stair-note{font:8px Arial,Helvetica,sans-serif;fill:#4d4741;text-anchor:start;dominant-baseline:middle;pointer-events:none;-webkit-user-select:none;-moz-user-select:none;user-select:none}",
         ".interior{fill:#555;stroke:none}",
+        ".interior-line{stroke:#555;fill:none}",
+        ".feature-line{stroke:#555;fill:none}",
         ".feature{stroke:#555;stroke-width:1.4;stroke-linecap:square;fill:none}",
         ".guide{stroke:#777;stroke-width:1.2;stroke-dasharray:5 4;stroke-linecap:square}",
         ".opening-mask{stroke:#fff;stroke-linecap:butt}",

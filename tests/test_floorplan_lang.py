@@ -327,6 +327,56 @@ def test_wall_plan_renders_resolved_stairs_with_treads() -> None:
     assert "DN 16R" not in svg
 
 
+def test_wall_plan_accepts_from_to_angled_wall_with_opening() -> None:
+    plan = wall_plan_from_dict(
+        {
+            "type": "wall_plan",
+            "plan": "angled-wall-test",
+            "levels": {
+                "L1": {
+                    "walls": [{"id": "angle", "from": [0, 0], "to": [6, 6]}],
+                    "openings": [{"id": "angle_window", "wall": "angle", "offset": 2, "width": 2, "kind": "window"}],
+                }
+            },
+        }
+    )
+
+    wall = plan.levels["L1"].walls[0]
+    svg = render_wall_plan_svg(plan)
+
+    assert wall.direction is None
+    assert wall.length == pytest.approx(8.485, abs=0.001)
+    assert wall.end.x == pytest.approx(6)
+    assert wall.end.y == pytest.approx(6)
+    assert 'class="interior-line"' in svg
+    assert 'data-fp-orientation="angled"' in svg
+    assert 'data-fp-direction="angled"' in svg
+    assert 'class="window"' in svg
+
+
+def test_intent_plan_accepts_from_to_angled_partition() -> None:
+    plan = intent_plan_from_dict(
+        {
+            "type": "intent_plan",
+            "plan": "angled-partition-test",
+            "levels": {
+                "L1": {
+                    "spaces": {"room": {"rect": [0, 0, 12, 12]}},
+                    "partitions": [{"id": "angle", "from": [2, 2], "to": [8, 8]}],
+                    "openings": [{"id": "angle_opening", "wall": "angle", "offset": 1, "width": 2, "kind": "arch"}],
+                }
+            },
+        }
+    )
+
+    wall = next(wall for wall in plan.levels["L1"].walls if wall.id == "angle")
+
+    assert wall.direction is None
+    assert wall.length == pytest.approx(8.485, abs=0.001)
+    assert wall.end.x == pytest.approx(8)
+    assert wall.end.y == pytest.approx(8)
+
+
 def test_intent_room_labels_include_room_dimensions() -> None:
     plan = intent_plan_from_dict(
         {

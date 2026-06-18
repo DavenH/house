@@ -320,10 +320,12 @@ def _partition_walls(partitions: list[dict[str, Any]], datums: dict[str, dict[st
             start = _point(data["from"], datums)
             end = _point(data["to"], datums)
             direction, length = _segment_direction_and_length(start, end)
+            to = end if direction is None else None
         else:
             start = _point(data["at"], datums)
             direction = data["dir"]
             length = _value(data["len"], datums, "x" if direction in {"E", "W"} else "y")
+            to = None
         walls.append(
             WallSegment(
                 id=wall_id,
@@ -331,6 +333,7 @@ def _partition_walls(partitions: list[dict[str, Any]], datums: dict[str, dict[st
                 direction=direction,
                 length=length,
                 kind=data.get("kind", "interior"),
+                to=to,
             )
         )
     return walls
@@ -429,12 +432,12 @@ def _point(data: list[Any] | tuple[Any, Any], datums: dict[str, dict[str, float]
     return Point(_value(data[0], datums, "x"), _value(data[1], datums, "y"))
 
 
-def _segment_direction_and_length(start: Point, end: Point) -> tuple[Direction, float]:
+def _segment_direction_and_length(start: Point, end: Point) -> tuple[Direction | None, float]:
     if abs(start.x - end.x) <= EPSILON:
         return ("S" if end.y > start.y else "N", abs(end.y - start.y))
     if abs(start.y - end.y) <= EPSILON:
         return ("E" if end.x > start.x else "W", abs(end.x - start.x))
-    raise ValueError(f"Wall segment must be axis-aligned: {start} -> {end}")
+    return (None, start.distance_to(end))
 
 
 def _compile_zones(spaces: dict[str, Any], rects: dict[str, Rect]):  # noqa: ANN201
@@ -1225,7 +1228,7 @@ def _wall_offset_for_side_span(wall: WallSegment, side: Side, start: float, end:
 
 
 def _interior_side_for_space_wall(wall: WallSegment, space: Rect) -> str:
-    normal_x, normal_y = _normal(wall.direction)
+    normal_x, normal_y = wall.normal
     test = Point((wall.at.x + wall.end.x) / 2 + normal_x * 0.1, (wall.at.y + wall.end.y) / 2 + normal_y * 0.1)
     return "left" if space.contains_point(test) else "right"
 

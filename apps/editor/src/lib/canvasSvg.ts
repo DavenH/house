@@ -29,9 +29,36 @@ export function svgPoint(canvasElement: HTMLDivElement | undefined, event: Point
 }
 
 export function serializeCanvasSvgForExport(canvasElement: HTMLDivElement | undefined, fallbackSvg: string) {
+  const clone = cleanSvgClone(canvasElement?.querySelector("svg"));
+  if (!clone) {
+    return fallbackSvg;
+  }
+  return new XMLSerializer().serializeToString(clone) + "\n";
+}
+
+export function serializePrintableFloorPages(canvasElement: HTMLDivElement | undefined, fallbackSvg: string, title: string) {
   const sourceSvg = canvasElement?.querySelector("svg");
   if (!sourceSvg) {
-    return fallbackSvg;
+    return printableHtml(title, [`<div class="page"><div class="sheet">${fallbackSvg}</div></div>`]);
+  }
+  const shared = sharedSvgNodes(sourceSvg);
+  const compass = sourceSvg.querySelector(":scope > g.compass");
+  const pages = Array.from(sourceSvg.querySelectorAll(':scope > g[data-fp-kind="level"]'))
+    .filter((level): level is SVGGElement => level instanceof SVGGElement)
+    .map((level) => serializePrintableLevelSvg(level, shared, compass instanceof SVGGElement ? compass : null));
+  if (!pages.length) {
+    const full = cleanSvgClone(sourceSvg);
+    return printableHtml(title, [`<div class="page"><div class="sheet">${full ? new XMLSerializer().serializeToString(full) : fallbackSvg}</div></div>`]);
+  }
+  return printableHtml(
+    title,
+    pages.map((page) => `<section class="page"><div class="sheet">${page}</div></section>`)
+  );
+}
+
+function cleanSvgClone(sourceSvg: SVGSVGElement | null | undefined) {
+  if (!sourceSvg) {
+    return null;
   }
   const clone = sourceSvg.cloneNode(true) as SVGSVGElement;
   clone.classList.remove("selected-object");
@@ -46,7 +73,108 @@ export function serializeCanvasSvgForExport(canvasElement: HTMLDivElement | unde
     element.removeAttribute("unselectable");
     element.removeAttribute("draggable");
   });
-  return new XMLSerializer().serializeToString(clone) + "\n";
+  return clone;
+}
+
+function serializePrintableLevelSvg(level: SVGGElement, shared: string, compass: SVGGElement | null) {
+  const bbox = transformedBBox(level);
+  const padding = 64;
+  const width = Math.ceil(bbox.width + padding * 2);
+  const height = Math.ceil(bbox.height + padding * 2);
+  const clone = document.createElementNS("http://www.w3.org/2000/svg", "svg");
+  clone.setAttribute("xmlns", "http://www.w3.org/2000/svg");
+  clone.setAttribute("width", String(width));
+  clone.setAttribute("height", String(height));
+  clone.setAttribute("viewBox", `${bbox.x - padding} ${bbox.y - padding} ${width} ${height}`);
+  clone.setAttribute("preserveAspectRatio", "xMidYMid meet");
+  clone.innerHTML = `<rect x="${bbox.x - padding}" y="${bbox.y - padding}" width="${width}" height="${height}" fill="#fff" />${shared}`;
+  const levelClone = level.cloneNode(true) as SVGGElement;
+  levelClone.querySelectorAll(EXPORT_REMOVED_SELECTORS.join(",")).forEach((element) => element.remove());
+  clone.appendChild(levelClone);
+  const compassClone = compass ? positionedCompassClone(compass, bbox) : null;
+  if (compassClone) {
+    clone.appendChild(compassClone);
+  }
+  return new XMLSerializer().serializeToString(clone);
+}
+
+function positionedCompassClone(compass: SVGGElement, pageBox: { x: number; y: number; width: number; height: number }) {
+  const compassBox = transformedBBox(compass);
+  const clone = compass.cloneNode(true) as SVGGElement;
+  const scale = 0.72;
+  const margin = 12;
+  const targetX = pageBox.x + pageBox.width - compassBox.width * scale - margin;
+  const targetY = pageBox.y - compassBox.height * scale + margin;
+  clone.setAttribute(
+    "transform",
+    `translate(${(targetX - compassBox.x * scale).toFixed(3)} ${(targetY - compassBox.y * scale).toFixed(3)}) scale(${scale})`
+  );
+  return clone;
+}
+
+function transformedBBox(element: SVGGraphicsElement) {
+  const bbox = element.getBBox();
+  const matrix = element.transform.baseVal.consolidate()?.matrix;
+  if (!matrix) {
+    return bbox;
+  }
+  const points = [
+    new DOMPoint(bbox.x, bbox.y).matrixTransform(matrix),
+    new DOMPoint(bbox.x + bbox.width, bbox.y).matrixTransform(matrix),
+    new DOMPoint(bbox.x + bbox.width, bbox.y + bbox.height).matrixTransform(matrix),
+    new DOMPoint(bbox.x, bbox.y + bbox.height).matrixTransform(matrix)
+  ];
+  const xs = points.map((point) => point.x);
+  const ys = points.map((point) => point.y);
+  const x = Math.min(...xs);
+  const y = Math.min(...ys);
+  return {
+    x,
+    y,
+    width: Math.max(...xs) - x,
+    height: Math.max(...ys) - y
+  };
+}
+
+function sharedSvgNodes(sourceSvg: SVGSVGElement) {
+  return Array.from(sourceSvg.children)
+    .filter((child) => child.tagName.toLowerCase() === "defs" || child.tagName.toLowerCase() === "style")
+    .map((child) => new XMLSerializer().serializeToString(child))
+    .join("\n");
+}
+
+function printableHtml(title: string, pages: string[]) {
+  return `<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8" />
+  <title>${escapeHtml(title)}</title>
+  <style>
+    @page { size: letter landscape; margin: 0; }
+    * { box-sizing: border-box; }
+    body { margin: 0; background: #e8e2d8; color: #222; font-family: Arial, Helvetica, sans-serif; }
+    .page { min-height: 100vh; padding: 0.25in; display: flex; align-items: center; justify-content: center; }
+    .page:last-child { page-break-after: auto; break-after: auto; }
+    .sheet { width: 100%; height: 100%; display: flex; align-items: center; justify-content: center; background: white; }
+    svg { display: block; width: 100%; height: 100%; max-width: 100%; max-height: calc(100vh - 1.2in); }
+    @media print {
+      body { background: white; }
+      .page { width: 11in; height: 8.5in; min-height: 0; margin: 0; padding: 0.35in; overflow: hidden; break-inside: avoid; page-break-inside: avoid; }
+      .page + .page { break-before: page; page-break-before: always; }
+      .sheet { width: 100%; height: 100%; }
+      svg { width: 100%; height: 100%; max-width: 100%; max-height: 100%; }
+    }
+  </style>
+</head>
+<body>
+${pages.join("\n")}
+</body>
+</html>
+`;
+}
+
+function escapeHtml(value: string) {
+  return value.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
 }
 
 export function markSelectedInSvg(canvasElement: HTMLDivElement | undefined, selected: Selection) {

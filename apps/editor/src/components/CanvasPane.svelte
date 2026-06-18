@@ -1,7 +1,7 @@
 <script lang="ts">
   import { tick } from "svelte";
   import type { PlanDocument, PlanSummary } from "../lib/api";
-  import { serializeCanvasSvgForExport } from "../lib/canvasSvg";
+  import { serializeCanvasSvgForExport, serializePrintableFloorPages } from "../lib/canvasSvg";
 
   export let document: PlanDocument | null = null;
   export let plans: PlanSummary[] = [];
@@ -38,18 +38,34 @@
       return;
     }
     const exportedSvg = serializeCanvasSvgForExport(canvasElement, svg);
-    const blob = new Blob([exportedSvg], { type: "image/svg+xml;charset=utf-8" });
+    downloadBlob(exportedSvg, exportFilename(".svg"), "image/svg+xml;charset=utf-8");
+  }
+
+  function exportPrintPages() {
+    if (!svg) {
+      return;
+    }
+    const html = serializePrintableFloorPages(canvasElement, svg, exportBaseName());
+    downloadBlob(html, exportFilename(".print.html"), "text/html;charset=utf-8");
+  }
+
+  function downloadBlob(content: string, filename: string, type: string) {
+    const blob = new Blob([content], { type });
     const url = URL.createObjectURL(blob);
     const link = globalThis.document.createElement("a");
     link.href = url;
-    link.download = exportFilename();
+    link.download = filename;
     link.click();
     URL.revokeObjectURL(url);
   }
 
-  function exportFilename() {
+  function exportFilename(extension: string) {
+    return exportBaseName() + extension;
+  }
+
+  function exportBaseName() {
     const source = document?.name ?? selectedPlan ?? "floor-plan";
-    return source.replace(/\.(ya?ml|json)$/i, "") + ".svg";
+    return source.replace(/\.(ya?ml|json)$/i, "");
   }
 
   function clearSelectHighlight(event: Event) {
@@ -136,6 +152,7 @@
           </select>
         </label>
         <button type="button" disabled={!svg} on:click={exportSvg}>Export SVG</button>
+        <button type="button" disabled={!svg} on:click={exportPrintPages}>Print pages</button>
         <button type="button" class="primary" disabled={!dirty} on:click={() => saveCurrentPlan()}>Save</button>
         <span class:dirty class="status-text">{status}</span>
       </div>

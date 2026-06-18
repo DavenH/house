@@ -118,16 +118,7 @@ def wall_plan_from_dict(data: dict[str, Any]) -> WallPlan:
             if "gaps" in wall_data:
                 raise ValueError(f"{level_id}.{wall_data.get('id', f'wall_{wall_id + 1}')} uses deprecated wall gaps")
             wall_id += 1
-            level.walls.append(
-                WallSegment(
-                    id=wall_data.get("id", f"wall_{wall_id}"),
-                    at=_point(wall_data["at"]),
-                    direction=wall_data["dir"],
-                    length=float(wall_data["len"]),
-                    kind=wall_data.get("kind", "interior"),
-                    offset=float(wall_data["offset"]) if "offset" in wall_data else None,
-                )
-            )
+            level.walls.append(_wall_from_dict(wall_data, wall_data.get("id", f"wall_{wall_id}")))
         for area_id, area_data in (level_data.get("areas") or {}).items():
             level.areas.append(
                 AreaLabel(
@@ -684,7 +675,7 @@ def _validate_level(level: WallLevel, *, strict_features: bool = True) -> list[s
         if wall.id in seen:
             errors.append(f"{level.id}.{wall.id} is duplicated")
         seen.add(wall.id)
-        if wall.direction not in {"N", "E", "S", "W"}:
+        if wall.direction is not None and wall.direction not in {"N", "E", "S", "W"}:
             errors.append(f"{level.id}.{wall.id} has invalid direction {wall.direction!r}")
         if wall.length <= 0:
             errors.append(f"{level.id}.{wall.id} length must be positive")
@@ -925,13 +916,15 @@ def _render_opening(opening: WallOpening, wall: WallSegment, level: WallLevel, s
     start = mask_wall.point_at(opening.offset + inset)
     end = mask_wall.point_at(opening.offset + opening.width - inset)
     mask_class = _opening_mask_class(opening, wall)
-    orientation = "horizontal" if wall.direction in {"E", "W"} else "vertical"
+    orientation = "horizontal" if wall.direction in {"E", "W"} else "vertical" if wall.direction in {"N", "S"} else "angled"
+    render_direction = wall.direction if wall.direction is not None else wall.unit
+    direction_attr = wall.direction if wall.direction is not None else "angled"
     full_width_opening = _opening_is_full_width(opening, wall)
     editor_attrs = ""
     if editable:
         editor_attrs = (
             f'data-fp-kind="opening" data-fp-level="{escape(level_id)}" data-fp-id="{escape(opening.id)}" '
-            f'data-fp-wall="{escape(wall.id)}" data-fp-direction="{wall.direction}" '
+            f'data-fp-wall="{escape(wall.id)}" data-fp-direction="{direction_attr}" '
             f'data-fp-orientation="{orientation}" data-fp-offset="{opening.offset:.3f}" '
             f'data-fp-width="{opening.width:.3f}" data-fp-wall-length="{wall.length:.3f}"'
         )
@@ -957,12 +950,12 @@ def _render_opening(opening: WallOpening, wall: WallSegment, level: WallLevel, s
     if opening.kind == "open":
         return parts
     if opening.kind == "arch":
-        parts.extend(_render_arch(mark_start, mark_end, wall.direction, scale, editor_attrs))
+        parts.extend(_render_arch(mark_start, mark_end, render_direction, scale, editor_attrs))
         return parts
     if opening.kind == "window":
-        parts.extend(_render_window(mark_start, mark_end, wall.direction, scale, editor_attrs))
+        parts.extend(_render_window(mark_start, mark_end, render_direction, scale, editor_attrs))
     else:
-        parts.extend(_render_door(mark_start, mark_end, wall.direction, opening.swing, scale, editor_attrs))
+        parts.extend(_render_door(mark_start, mark_end, render_direction, opening.swing, scale, editor_attrs))
     if editable:
         parts.append(
             f'<line class="opening-hit-target" {editor_attrs} '
@@ -977,7 +970,15 @@ def _opening_render_wall(opening: WallOpening, wall: WallSegment, level: WallLev
         return wall
     start, end = _interior_wall_render_endpoints(wall, level)
     start, end = _interior_wall_render_points(wall, start, end, level)
-    return WallSegment(id=wall.id, at=start, direction=wall.direction, length=start.distance_to(end), kind=wall.kind, offset=wall.offset)
+    return WallSegment(
+        id=wall.id,
+        at=start,
+        direction=wall.direction,
+        length=start.distance_to(end),
+        kind=wall.kind,
+        offset=wall.offset,
+        to=end if wall.to is not None else None,
+    )
 
 
 def _opening_is_full_width(opening: WallOpening, wall: WallSegment) -> bool:
@@ -999,7 +1000,7 @@ def _opening_mask_inset(opening: WallOpening, wall: WallSegment) -> float:
 
 
 def _exterior_opening_mark_segment(wall: WallSegment) -> WallSegment:
-    nx, ny = _normal(wall.direction)
+    nx, ny = wall.normal
     offset = -EXTERIOR_WALL_THICKNESS_FT / 2
     return WallSegment(
         id=wall.id,
@@ -1007,13 +1008,14 @@ def _exterior_opening_mark_segment(wall: WallSegment) -> WallSegment:
         direction=wall.direction,
         length=wall.length,
         kind=wall.kind,
+        to=Point(wall.end.x + nx * offset, wall.end.y + ny * offset) if wall.to is not None else None,
     )
 
 
 def _render_wall_segment(wall: WallSegment) -> WallSegment:
     if wall.kind != "exterior":
         return wall
-    nx, ny = _normal(wall.direction)
+    nx, ny = wall.normal
     # Intent/wall-plan exterior boundaries are authored as the inner wall face.
     # Shift the stroke center outward so rendered wall thickness has spatial consequence
     # outside the room layout instead of straddling interior space.
@@ -1025,6 +1027,7 @@ def _render_wall_segment(wall: WallSegment) -> WallSegment:
         length=wall.length,
         kind=wall.kind,
         offset=wall.offset,
+        to=Point(wall.end.x + nx * offset, wall.end.y + ny * offset) if wall.to is not None else None,
     )
 
 
@@ -1038,11 +1041,18 @@ def _render_wall_svg(wall: WallSegment, scale: float, level: WallLevel | None = 
             y = render_start.y * scale - thickness / 2
             width = abs(render_end.x - render_start.x) * scale
             height = thickness
-        else:
+        elif wall.direction in {"N", "S"}:
             x = render_start.x * scale - thickness / 2
             y = min(render_start.y, render_end.y) * scale
             width = thickness
             height = abs(render_end.y - render_start.y) * scale
+        else:
+            return (
+                f'<line class="{escape(wall.kind)}-line" x1="{render_start.x * scale:.3f}" y1="{render_start.y * scale:.3f}" '
+                f'x2="{render_end.x * scale:.3f}" y2="{render_end.y * scale:.3f}" '
+                f'stroke-width="{thickness:.3f}" stroke-linecap="butt" '
+                f'data-fp-kind="wall-select" data-fp-id="{escape(wall.id)}" />'
+            )
         return (
             f'<rect class="{escape(wall.kind)}" x="{x:.3f}" y="{y:.3f}" '
             f'width="{width:.3f}" height="{height:.3f}" '
@@ -1063,10 +1073,10 @@ def _interior_wall_render_points(
     if level is None:
         return (start, end)
     if wall.offset is not None:
-        return _offset_wall_points(start, end, wall.direction, wall.offset)
+        return _offset_wall_points(start, end, wall.unit, wall.offset)
     offset = _interior_wall_normal_offset(wall, level)
     if abs(offset) > EPSILON:
-        return _offset_wall_points(start, end, wall.direction, offset)
+        return _offset_wall_points(start, end, wall.unit, offset)
     return (start, end)
 
 
@@ -1074,6 +1084,8 @@ def _interior_wall_normal_offset(wall: WallSegment, level: WallLevel | None) -> 
     if wall.offset is not None:
         return wall.offset
     if level is None:
+        return 0
+    if not wall.is_axis_aligned:
         return 0
     inward = _inward_normal_sign_for_exterior_wall(wall, level) if _wall_lies_on_exterior_loop(wall, level) else 0
     if inward == 0:
@@ -1085,7 +1097,9 @@ def _interior_wall_normal_offset(wall: WallSegment, level: WallLevel | None) -> 
     return -inward * INTERIOR_WALL_STROKE_FT / 2
 
 
-def _offset_wall_points(start: Point, end: Point, direction: Direction, offset: float) -> tuple[Point, Point]:
+def _offset_wall_points(
+    start: Point, end: Point, direction: Direction | tuple[float, float], offset: float
+) -> tuple[Point, Point]:
     if abs(offset) <= EPSILON:
         return (start, end)
     nx, ny = _normal(direction)
@@ -1097,7 +1111,7 @@ def _offset_wall_points(start: Point, end: Point, direction: Direction, offset: 
 
 def _inward_normal_sign_for_exterior_wall(wall: WallSegment, level: WallLevel) -> float:
     midpoint = Point((wall.at.x + wall.end.x) / 2, (wall.at.y + wall.end.y) / 2)
-    nx, ny = _normal(wall.direction)
+    nx, ny = wall.normal
     for loop in _exterior_loops(level):
         clean_loop = loop[:-1] if loop and _same_point(loop[0], loop[-1]) else loop
         if len(clean_loop) < 3:
@@ -1113,6 +1127,8 @@ def _inward_normal_sign_for_exterior_wall(wall: WallSegment, level: WallLevel) -
 
 
 def _inward_normal_sign_for_exterior_endpoint_join(wall: WallSegment, level: WallLevel) -> float:
+    if wall.direction is None:
+        return 0
     nx, ny = _normal(wall.direction)
     for point in (wall.at, wall.end):
         if not _point_on_parallel_exterior_segment(point, wall.direction, level):
@@ -1133,6 +1149,8 @@ def _inward_normal_sign_for_exterior_endpoint_join(wall: WallSegment, level: Wal
 
 
 def _inward_normal_sign_for_perpendicular_exterior_endpoint_join(wall: WallSegment, level: WallLevel) -> float:
+    if wall.direction is None:
+        return 0
     nx, ny = _normal(wall.direction)
     wall_axis = "horizontal" if wall.direction in {"E", "W"} else "vertical"
     for point in (wall.at, wall.end):
@@ -1153,6 +1171,8 @@ def _inward_normal_sign_for_perpendicular_exterior_endpoint_join(wall: WallSegme
 
 
 def _inward_normal_sign_for_parallel_exterior_datum(wall: WallSegment, level: WallLevel) -> float:
+    if wall.direction is None:
+        return 0
     if wall.direction in {"E", "W"}:
         return _inward_normal_sign_for_horizontal_exterior_datum(wall.at.y, wall.direction, level)
     return _inward_normal_sign_for_vertical_exterior_datum(wall.at.x, wall.direction, level)
@@ -1249,7 +1269,7 @@ def _point_on_segment_local(point: Point, first: Point, second: Point, tolerance
 
 
 def _render_wall_hit_svg(wall: WallSegment, level: WallLevel, scale: float, openings: list[WallOpening]) -> str:
-    orientation = "horizontal" if wall.direction in {"E", "W"} else "vertical"
+    orientation = "horizontal" if wall.direction in {"E", "W"} else "vertical" if wall.direction in {"N", "S"} else "angled"
     fully_open = _wall_is_fully_open(wall, openings)
     render_wall = _render_wall_hit_segment(wall, level)
     end = render_wall.end
@@ -1268,7 +1288,7 @@ def _render_wall_hit_svg(wall: WallSegment, level: WallLevel, scale: float, open
         f'data-fp-level="{escape(level.id)}" data-fp-id="{escape(wall.id)}" '
         f'data-fp-orientation="{orientation}" {model_attrs} />',
     ]
-    if not fully_open and grip_length > EPSILON:
+    if orientation != "angled" and not fully_open and grip_length > EPSILON:
         parts.append(
             f'<line class="wall-grip-target" x1="{grip_start.x * scale:.3f}" y1="{grip_start.y * scale:.3f}" '
             f'x2="{grip_end.x * scale:.3f}" y2="{grip_end.y * scale:.3f}" data-fp-kind="wall-grip" '
@@ -1291,6 +1311,7 @@ def _render_wall_hit_segment(wall: WallSegment, level: WallLevel) -> WallSegment
         length=start.distance_to(end),
         kind=wall.kind,
         offset=wall.offset,
+        to=end if wall.to is not None else None,
     )
 
 
@@ -1626,7 +1647,9 @@ def _perimeter_dimension_sides(clean_outer: list[Point]) -> dict[str, dict[float
         end = clean_outer[(index + 1) % len(clean_outer)]
         if _same_point(start, end):
             continue
-        direction = _segment_direction(start, end)
+        direction = _axis_direction_or_none(start, end)
+        if direction is None:
+            continue
         nx, ny = _normal(direction)
         if clockwise:
             nx, ny = -nx, -ny
@@ -1887,8 +1910,7 @@ def _offset_closed_orthogonal_loop(points: list[Point], distance: float) -> list
     count = len(clean_points)
     for index, start in enumerate(clean_points):
         end = clean_points[(index + 1) % count]
-        direction = _segment_direction(start, end)
-        nx, ny = _normal(direction)
+        nx, ny = _segment_normal(start, end)
         if clockwise:
             nx, ny = -nx, -ny
         offset_lines.append(
@@ -1914,6 +1936,20 @@ def _segment_direction(start: Point, end: Point) -> Direction:
     raise ValueError(f"Wall segment must be axis-aligned: {start} -> {end}")
 
 
+def _axis_direction_or_none(start: Point, end: Point) -> Direction | None:
+    try:
+        return _segment_direction(start, end)
+    except ValueError:
+        return None
+
+
+def _segment_normal(start: Point, end: Point) -> tuple[float, float]:
+    dx = end.x - start.x
+    dy = end.y - start.y
+    length = max(sqrt(dx * dx + dy * dy), EPSILON)
+    return (-dy / length, dx / length)
+
+
 def _signed_area(points: list[Point]) -> float:
     area = 0.0
     for index, point in enumerate(points):
@@ -1927,19 +1963,17 @@ def _line_intersection(
     second: tuple[Point, Point],
 ) -> Point:
     (a, b), (c, d) = first, second
-    if abs(a.x - b.x) <= EPSILON:
-        x = a.x
-        y = c.y if abs(c.y - d.y) <= EPSILON else a.y
-    elif abs(c.x - d.x) <= EPSILON:
-        x = c.x
-        y = a.y if abs(a.y - b.y) <= EPSILON else c.y
-    elif abs(a.y - b.y) <= EPSILON:
-        y = a.y
-        x = c.x if abs(c.x - d.x) <= EPSILON else a.x
-    else:
-        y = c.y
-        x = a.x if abs(a.x - b.x) <= EPSILON else c.x
-    return Point(x, y)
+    r_x = b.x - a.x
+    r_y = b.y - a.y
+    s_x = d.x - c.x
+    s_y = d.y - c.y
+    denominator = r_x * s_y - r_y * s_x
+    if abs(denominator) <= EPSILON:
+        return b
+    cma_x = c.x - a.x
+    cma_y = c.y - a.y
+    t = (cma_x * s_y - cma_y * s_x) / denominator
+    return Point(a.x + t * r_x, a.y + t * r_y)
 
 
 def _connected_wall_paths(walls: list[WallSegment]) -> list[list[Point]]:
@@ -2058,7 +2092,7 @@ def _feature_rect(feature: Feature, walls: dict[str, WallSegment]) -> Rect:
         if feature.anchor is None:
             raise ValueError(f"{feature.id} needs either at or anchor")
         wall = walls[feature.anchor.wall]
-        nx, ny = _normal(wall.direction)
+        nx, ny = wall.normal
         if feature.anchor.side in {"right", "outside", "opposite"}:
             nx *= -1
             ny *= -1
@@ -2076,7 +2110,7 @@ def _extrusion_rect(extrusion: WallExtrusion, walls: dict[str, WallSegment]) -> 
     length = extrusion.length if extrusion.length is not None else wall.length - extrusion.offset
     start = wall.point_at(extrusion.offset)
     end = wall.point_at(extrusion.offset + length)
-    nx, ny = _normal(wall.direction)
+    nx, ny = wall.normal
     if extrusion.side in {"right", "outside", "opposite"}:
         nx *= -1
         ny *= -1
@@ -2091,7 +2125,7 @@ def _rect_to_wall_distance(rect: Rect, wall: WallSegment) -> float:
         span_overlap = min(rect.right, wall_box.right) - max(rect.left, wall_box.left)
         if span_overlap > -EPSILON:
             return min(abs(rect.top - wall.at.y), abs(rect.bottom - wall.at.y))
-    else:
+    if wall.direction in {"N", "S"}:
         span_overlap = min(rect.bottom, wall_box.bottom) - max(rect.top, wall_box.top)
         if span_overlap > -EPSILON:
             return min(abs(rect.left - wall.at.x), abs(rect.right - wall.at.x))
@@ -2122,6 +2156,7 @@ def _wall_solid_parts(wall: WallSegment, openings: list[WallOpening]) -> list[Wa
                     direction=wall.direction,
                     length=start - cursor,
                     kind=wall.kind,
+                    to=wall.point_at(start) if wall.to is not None else None,
                 )
             )
         cursor = max(cursor, end)
@@ -2133,6 +2168,7 @@ def _wall_solid_parts(wall: WallSegment, openings: list[WallOpening]) -> list[Wa
                 direction=wall.direction,
                 length=wall.length - cursor,
                 kind=wall.kind,
+                to=wall.point_at(wall.length) if wall.to is not None else None,
             )
         )
     return parts
@@ -2159,6 +2195,29 @@ def _wall_is_fully_open(wall: WallSegment, openings: list[WallOpening]) -> bool:
 
 def _point(value: list[float] | tuple[float, float]) -> Point:
     return Point(float(value[0]), float(value[1]))
+
+
+def _wall_from_dict(data: dict[str, Any], wall_id: str) -> WallSegment:
+    if "from" in data and "to" in data:
+        start = _point(data["from"])
+        end = _point(data["to"])
+        return WallSegment(
+            id=wall_id,
+            at=start,
+            direction=_axis_direction_or_none(start, end),
+            length=start.distance_to(end),
+            kind=data.get("kind", "interior"),
+            offset=float(data["offset"]) if "offset" in data else None,
+            to=end,
+        )
+    return WallSegment(
+        id=wall_id,
+        at=_point(data["at"]),
+        direction=data["dir"],
+        length=float(data["len"]),
+        kind=data.get("kind", "interior"),
+        offset=float(data["offset"]) if "offset" in data else None,
+    )
 
 
 def _rect(value: list[float] | tuple[float, float, float, float]) -> Rect:

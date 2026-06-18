@@ -129,6 +129,8 @@ export type OpeningDrag = {
   direction: WallDirection;
   orientation: "vertical" | "horizontal";
   startOffset: number;
+  offsetMin: number;
+  offsetMax: number;
   width: number;
   wallLength: number;
   snapshot: AnyRecord;

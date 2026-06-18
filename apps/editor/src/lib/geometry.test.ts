@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { moveOpening, moveSharedWall, resolveSpaceRect } from "./geometry";
+import { moveOpening, moveSharedWall, resolveSpaceRect, spaceSideOpeningOffsetBounds } from "./geometry";
 import type { AnyRecord, OpeningDrag, SharedWallDrag, SpaceRect } from "./types";
 
 function rect(left: number, top: number, right: number, bottom: number): SpaceRect {
@@ -109,6 +109,8 @@ describe("moveOpening", () => {
       direction: "E",
       orientation: "horizontal",
       startOffset: 2,
+      offsetMin: 0,
+      offsetMax: 8,
       width: 5,
       wallLength: 13,
       snapshot: structuredClone(data)
@@ -124,5 +126,19 @@ describe("moveOpening", () => {
       width: 5,
       kind: "window"
     });
+  });
+
+  it("uses room-span bounds for west-facing space-side openings", () => {
+    const bounds = spaceSideOpeningOffsetBounds(
+      "N",
+      { x1: 1, y1: 18, x2: 1, y2: 11 },
+      19,
+      7,
+      { left: 1, right: 13, top: 10, bottom: 18, width: 12, height: 8 },
+      "west",
+      30
+    );
+
+    expect(bounds).toEqual({ min: 19, max: 20 });
   });
 });

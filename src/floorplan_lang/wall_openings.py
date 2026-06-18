@@ -5,11 +5,11 @@ from __future__ import annotations
 from math import sqrt
 
 from floorplan_lang.geometry import Point
-from floorplan_lang.wall_geometry import direction_normal
+from floorplan_lang.wall_geometry import Vector, direction_normal
 from floorplan_lang.wall_model import Direction
 
 
-def render_window(start: Point, end: Point, direction: Direction, scale: float, editor_attrs: str = "") -> list[str]:
+def render_window(start: Point, end: Point, direction: Direction | Vector, scale: float, editor_attrs: str = "") -> list[str]:
     nx, ny = direction_normal(direction)
     inset = 0.16
     fill_points = [
@@ -32,7 +32,7 @@ def render_window(start: Point, end: Point, direction: Direction, scale: float, 
     return parts
 
 
-def render_arch(start: Point, end: Point, direction: Direction, scale: float, editor_attrs: str = "") -> list[str]:
+def render_arch(start: Point, end: Point, direction: Direction | Vector, scale: float, editor_attrs: str = "") -> list[str]:
     normal_x, normal_y = direction_normal(direction)
     depth = 0.55
     mid_x = (start.x + end.x) / 2
@@ -46,7 +46,9 @@ def render_arch(start: Point, end: Point, direction: Direction, scale: float, ed
     ]
 
 
-def render_door(start: Point, end: Point, direction: Direction, swing: str, scale: float, editor_attrs: str = "") -> list[str]:
+def render_door(
+    start: Point, end: Point, direction: Direction | Vector, swing: str, scale: float, editor_attrs: str = ""
+) -> list[str]:
     normal_x, normal_y = direction_normal(direction)
     tick = 0.28
     parts = [
@@ -64,7 +66,7 @@ def render_door(start: Point, end: Point, direction: Direction, swing: str, scal
 
 
 def render_door_swing(
-    start: Point, end: Point, direction: Direction, swing: str, scale: float, editor_attrs: str = ""
+    start: Point, end: Point, direction: Direction | Vector, swing: str, scale: float, editor_attrs: str = ""
 ) -> list[str]:
     if swing.lower() in {"none", "off", "false", "no"}:
         return []

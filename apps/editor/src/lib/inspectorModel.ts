@@ -6,8 +6,7 @@ export type DatumRow = {
   name: string;
   value: unknown;
   linked: boolean;
-  spaceId: string;
-  edgeIndex: 0 | 1;
+  path: Array<string | number>;
 };
 
 export function splitList(value: string) {

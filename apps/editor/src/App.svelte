@@ -14,6 +14,7 @@
   import type {
     AnyRecord,
     DragState,
+    MassEdgeRef,
     Selection,
     SelectionKind,
     SpaceRect,
@@ -45,6 +46,7 @@
     moveOpening,
     moveSharedWall,
     openingAxisDelta,
+    spaceSideOpeningOffsetBounds,
     resolveSpaceRect,
     snapToGrid
   } from "./lib/geometry";
@@ -110,6 +112,14 @@
   $: catalog = ((data.catalog as AnyRecord | undefined) ?? {}) as AnyRecord;
   $: constraintRefs = buildConstraintRefs(data);
   $: selectedObject = resolveSelection(data, selected);
+  $: selectedWallLine =
+    Boolean(svg) && canvasElement && selected.kind === "wall" && selected.level && selected.id
+      ? renderedWallLine(selected.level, selected.id)
+      : null;
+  $: selectedWallEdgeRefs =
+    data && selected.kind === "wall" && selected.level && selectedWallLine
+      ? massEdgeRefsForWall(selected.level, selectedWallLine)
+      : [];
 
   onMount(() => {
     document.addEventListener("keydown", handleGlobalKeydown);
@@ -467,7 +477,7 @@
     }
     if (drag.type === "opening") {
       const axisDelta = openingAxisDelta(drag.direction, dx, dy);
-      const nextOffset = clamp(snapToGrid(drag.startOffset + axisDelta), 0, drag.wallLength - drag.width);
+      const nextOffset = clamp(snapToGrid(drag.startOffset + axisDelta), drag.offsetMin, drag.offsetMax);
       data = structuredClone(drag.snapshot);
       moveOpening(data, drag, nextOffset);
       previewOpeningSvg(canvasElement, data, drag, nextOffset - drag.startOffset);
@@ -615,6 +625,16 @@
     return element instanceof SVGGraphicsElement ? lineFromSvgElement(element, scale) : null;
   }
 
+  function massEdgeRefsForWall(levelId: string, line: WallLine): MassEdgeRef[] {
+    const orientation =
+      Math.abs(line.x1 - line.x2) < 0.01 ? "vertical" : Math.abs(line.y1 - line.y2) < 0.01 ? "horizontal" : null;
+    if (!orientation) {
+      return [];
+    }
+    const refs = findMassEdgeRefs(levelId, line, orientation, data);
+    return refs.length ? refs : findMassEdgeRefs(levelId, line, orientation, lastRenderedData);
+  }
+
   function createOpeningDrag(id: string, levelId: string, event: PointerEvent, element: SVGGraphicsElement) {
     const found =
       findOpeningInLevel(data, levelId, id) ??
@@ -633,7 +653,7 @@
     }
     const wall = element.getAttribute("data-fp-wall") ?? "";
     const direction = element.getAttribute("data-fp-direction") as WallDirection | null;
-    const orientation = element.getAttribute("data-fp-orientation") as "vertical" | "horizontal" | null;
+    const orientation = element.getAttribute("data-fp-orientation") as "vertical" | "horizontal" | "angled" | null;
     const startOffset = Number(element.getAttribute("data-fp-offset") ?? NaN);
     const width = Number(element.getAttribute("data-fp-width") ?? NaN);
     const wallLength = Number(element.getAttribute("data-fp-wall-length") ?? NaN);
@@ -641,6 +661,21 @@
       setError(`Opening ${id} is missing editable wall metadata.`);
       return null;
     }
+    if (orientation === "angled") {
+      setError("Dragging openings along angled walls is not supported yet. Edit the offset in YAML or the inspector.");
+      return null;
+    }
+    const opening = (source === "connection" ? selectedLevel.connections?.[index] : selectedLevel.openings?.[index]) as
+      | AnyRecord
+      | undefined;
+    const openingLine = lineFromSvgElement(element, Number(data.scale ?? 16));
+    const offsetBounds =
+      source === "opening" &&
+      opening?.space &&
+      opening?.side &&
+      openingLine
+        ? spaceSideOpeningDragBounds(data, levelForOpening, opening, direction, openingLine, startOffset, width, wallLength)
+        : { min: 0, max: Math.max(0, wallLength - width) };
     return {
       type: "opening" as const,
       id,
@@ -656,10 +691,29 @@
       direction,
       orientation,
       startOffset,
+      offsetMin: offsetBounds.min,
+      offsetMax: offsetBounds.max,
       width,
       wallLength,
       snapshot: structuredClone(data)
     };
+  }
+
+  function spaceSideOpeningDragBounds(
+    sourceData: AnyRecord,
+    levelId: string,
+    opening: AnyRecord,
+    direction: WallDirection,
+    openingLine: WallLine,
+    startOffset: number,
+    width: number,
+    wallLength: number
+  ) {
+    const rect = resolveSpaceRect(sourceData, levelId, String(opening.space));
+    if (!rect) {
+      return { min: 0, max: Math.max(0, wallLength - width) };
+    }
+    return spaceSideOpeningOffsetBounds(direction, openingLine, startOffset, width, rect, String(opening.side), wallLength);
   }
 
   function selectObject(kind: SelectionKind, id: string, index?: number) {
@@ -783,6 +837,8 @@
     open={inspectorOpen}
     {selected}
     {selectedObject}
+    {selectedWallLine}
+    {selectedWallEdgeRefs}
     planData={data}
     activeLevel={inspectorLevelId}
     {spaces}
