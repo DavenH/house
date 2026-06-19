@@ -19,6 +19,7 @@ from floorplan_lang.wall_plan import (
     AreaLabel,
     Feature,
     FeatureAnchor,
+    OverlayLine,
     Stair,
     StairRun,
     WallExtrusion,
@@ -82,6 +83,7 @@ def intent_plan_from_dict(data: dict[str, Any]) -> WallPlan:
         level.openings.extend(_compile_openings(level_data.get("openings") or [], context))
         level.openings.extend(_compile_auto_windows(level_data, context, level.openings))
         level.access.extend(_compile_access(level_data.get("access") or [], level.openings))
+        level.overlays.extend(_compile_overlays(level_data.get("overlays") or {}, datums))
         plan.levels[level_id] = level
 
     _compile_stairs(data.get("stairs") or {}, data.get("story") or {}, plan, contexts)
@@ -130,6 +132,10 @@ def _validate_intent_references(level_id: str, level_data: dict[str, Any], space
         for space_id in endpoints:
             if space_id not in space_ids:
                 errors.append(f"{level_id}.access[{index}] references missing space {space_id!r}")
+    for layer, overlays in (level_data.get("overlays") or {}).items():
+        for index, overlay in enumerate(overlays or (), start=1):
+            if len(overlay.get("points") or ()) < 2:
+                errors.append(f"{level_id}.overlays.{layer}[{index}] needs at least two points")
     return errors
 
 
@@ -514,6 +520,25 @@ def _compile_features(
                 rotation=float(data.get("rotation", 0)),
             )
         )
+    return compiled
+
+
+def _compile_overlays(overlays: dict[str, Any], datums: dict[str, dict[str, float]]) -> list[OverlayLine]:
+    compiled = []
+    for layer, items in overlays.items():
+        for index, item in enumerate(items or (), start=1):
+            item_data = dict(item)
+            compiled.append(
+                OverlayLine(
+                    id=item_data.get("id", f"{layer}_{index}"),
+                    layer=str(item_data.get("layer", layer)),
+                    points=tuple(_point(point, datums) for point in item_data["points"]),
+                    label=item_data.get("label"),
+                    color=item_data.get("color", "#2b78c2"),
+                    width=float(item_data.get("width", 0.18)),
+                    dash=item_data.get("dash"),
+                )
+            )
     return compiled
 
 

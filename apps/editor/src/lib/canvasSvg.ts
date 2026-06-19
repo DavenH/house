@@ -3,6 +3,7 @@ import { movedLine, movedPreviewRect, openingDeltaVector, wallLineFromRects } fr
 import { normalizeSvgKind } from "./planEditing";
 
 const EXPORT_REMOVED_SELECTORS = [
+  ".layer-hidden",
   ".wall-grip-dot",
   ".wall-grip-target",
   ".wall-select-target",

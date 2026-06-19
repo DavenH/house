@@ -149,6 +149,37 @@ def test_intent_plan_places_wall_side_window_and_counter_extrusion() -> None:
     assert counter.extrude.length == pytest.approx(20)
 
 
+def test_intent_plan_renders_layered_overlay_lines() -> None:
+    plan = intent_plan_from_dict(
+        {
+            "type": "intent_plan",
+            "plan": "intent-overlay-test",
+            "datums": {"x": {"w": 0, "e": 12}, "y": {"n": 0, "s": 8}},
+            "masses": {"body": {"levels": ["L1"], "rect": {"x": ["w", "e"], "y": ["n", "s"]}}},
+            "levels": {
+                "L1": {
+                    "spaces": {"utility": {"x": ["w", "e"], "y": ["n", "s"]}},
+                    "overlays": {
+                        "plumbing": [
+                            {
+                                "id": "cold_run",
+                                "label": "CW",
+                                "points": [["w", 2], [6, 2], ["e", "s"]],
+                            }
+                        ]
+                    },
+                }
+            },
+        }
+    )
+
+    svg = render_wall_plan_svg(plan)
+
+    assert 'data-fp-layer="plumbing"' in svg
+    assert 'data-fp-id="cold_run"' in svg
+    assert 'class="overlay-line"' in svg
+
+
 def test_intent_plan_validates_unassigned_mass_cells() -> None:
     with pytest.raises(ValueError, match="not assigned to a space"):
         intent_plan_from_dict(

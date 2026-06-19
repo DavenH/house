@@ -27,6 +27,7 @@ from floorplan_lang.wall_model import (
     Direction,
     Feature,
     FeatureAnchor,
+    OverlayLine,
     Stair,
     StairRun,
     WallExtrusion,
@@ -173,6 +174,7 @@ def wall_plan_from_dict(data: dict[str, Any]) -> WallPlan:
                 level.access.append((edge["from"], edge["to"]))
             else:
                 level.access.append((edge[0], edge[1]))
+        level.overlays.extend(_overlay_lines_from_dict(level_data.get("overlays") or {}))
         plan.levels[level_id] = level
     for stair_id, stair_data in (data.get("stairs") or {}).items():
         plan.stairs.append(_stair_from_dict(stair_id, stair_data))
@@ -202,6 +204,25 @@ def _stair_from_dict(stair_id: str, data: dict[str, Any]) -> Stair:
         landings=[_rect(landing["rect"] if isinstance(landing, dict) else landing) for landing in data.get("landings") or []],
         warnings=[str(warning) for warning in data.get("warnings") or []],
     )
+
+
+def _overlay_lines_from_dict(data: Any) -> list[OverlayLine]:
+    lines = []
+    for layer, items in (data or {}).items():
+        for index, item in enumerate(items or (), start=1):
+            item_data = dict(item)
+            lines.append(
+                OverlayLine(
+                    id=item_data.get("id", f"{layer}_{index}"),
+                    layer=str(item_data.get("layer", layer)),
+                    points=tuple(_point(point) for point in item_data["points"]),
+                    label=item_data.get("label"),
+                    color=item_data.get("color", "#2b78c2"),
+                    width=float(item_data.get("width", 0.18)),
+                    dash=item_data.get("dash"),
+                )
+            )
+    return lines
 
 
 def render_wall_plan_svg(
@@ -344,6 +365,7 @@ def render_wall_plan_svg(
                     f'-webkit-user-select:none;-moz-user-select:none;user-select:none" x="{x:.3f}" '
                     f'y="{y:.3f}"{transform}>{escape(dimension_label)}</text>'
                 )
+        parts.extend(_render_overlays(level.overlays, level.id, scale))
         parts.append(
             f'<text class="title" pointer-events="none" unselectable="on" '
             f'style="-webkit-user-select:none;-moz-user-select:none;user-select:none" '
@@ -1802,6 +1824,44 @@ def _dimension_tick(point: Point, direction: Direction, scale: float) -> str:
         f'y1="{(point.y - uy * tick) * scale:.3f}" '
         f'x2="{(point.x + ux * tick) * scale:.3f}" '
         f'y2="{(point.y + uy * tick) * scale:.3f}" />'
+    )
+
+
+def _render_overlays(overlays: list[OverlayLine], level_id: str, scale: float) -> list[str]:
+    parts = []
+    for overlay in overlays:
+        if len(overlay.points) < 2:
+            continue
+        dash = f' stroke-dasharray="{escape(overlay.dash)}"' if overlay.dash else ""
+        parts.append(
+            f'<g class="plan-overlay" data-fp-layer="{escape(overlay.layer)}" '
+            f'data-fp-level="{escape(level_id)}" data-fp-id="{escape(overlay.id)}">'
+            f'<path class="overlay-line" d="{_polyline_command(list(overlay.points), scale)}" '
+            f'stroke="{escape(overlay.color)}" stroke-width="{overlay.width * scale:.3f}"{dash} />'
+            f"{_overlay_endpoint_markers(overlay, scale)}"
+            f"{_overlay_label(overlay, scale)}"
+            "</g>"
+        )
+    return parts
+
+
+def _overlay_endpoint_markers(overlay: OverlayLine, scale: float) -> str:
+    radius = max(overlay.width * scale * 1.25, 2.2)
+    endpoints = (overlay.points[0], overlay.points[-1])
+    return "".join(
+        f'<circle class="overlay-node" cx="{point.x * scale:.3f}" cy="{point.y * scale:.3f}" '
+        f'r="{radius:.3f}" fill="{escape(overlay.color)}" />'
+        for point in endpoints
+    )
+
+
+def _overlay_label(overlay: OverlayLine, scale: float) -> str:
+    if not overlay.label or not overlay.points:
+        return ""
+    point = overlay.points[len(overlay.points) // 2]
+    return (
+        f'<text class="overlay-label" x="{point.x * scale:.3f}" y="{(point.y - 0.35) * scale:.3f}" '
+        f'fill="{escape(overlay.color)}">{escape(overlay.label)}</text>'
     )
 
 

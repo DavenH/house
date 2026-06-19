@@ -52,6 +52,7 @@
   } from "./lib/geometry";
   import {
     inferSpaceSideForWallLine,
+    openingReferenceForWall,
     stabilizeGeneratedExteriorWallOpenings
   } from "./lib/exteriorOpenings";
   import { roundHalf, uniqueListId } from "./lib/inspectorModel";
@@ -790,13 +791,7 @@
       width,
       offset: roundHalf(Math.max(0, (length - width) / 2))
     };
-    const stableRef = line ? inferSpaceSideForWallLine(data, selected.level, line) : null;
-    if (stableRef) {
-      opening.space = stableRef.space;
-      opening.side = stableRef.side;
-    } else {
-      opening.wall = selected.id;
-    }
+    Object.assign(opening, openingReferenceForWall(data, selected.level, selected.id, line));
     openings.push(opening);
     selected = { kind: "opening", level: selected.level, id: opening.id, index: openings.length - 1 };
     syncDataToYaml();
@@ -812,7 +807,6 @@
     document={planDocument}
     {plans}
     bind:selectedPlan
-    {status}
     {dirty}
     {error}
     {svg}

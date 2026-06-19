@@ -18,8 +18,8 @@ notes:
   - 'The master suite route becomes bedroom -> closet -> ensuite, with the former foyer area absorbed into the bedroom as an entry zone.'
   - 'The second-floor tower is treated as stair circulation up to the nest, not as storage.'
 datums:
-  x: {west: 1, storage_e: 8, left_w: 8, closet_w: 13, gallery_w: 15, left_e: 21, stair_e: 32.5, piano_w: 29.5, tower_e: 38, right_w: 38, pantry_w: 43.5, room_split: 43.5, pantry_e: 49.5, dining_w: 54.5, right_e: 54.5, dining_e: 64, e: 31}
-  y: {gable_n: 2, main_n: 8, ensuite_s: 10, bath_s: 13, stair_s: 17.5, dining_n: 17, closet_s: 18, public_split: 22.5, lower_storage_n: 24, entry_s: 28, dining_s: 28, tower_s: 30, gable_s: 32, main_s: 37}
+  x: {west: 1, storage_e: 8, left_w: 8, closet_w: 13.5, gallery_w: 15, left_e: 21, stair_e: 32.5, piano_w: 29.5, tower_e: 38, right_w: 38, pantry_w: 43.5, room_split: 43.5, pantry_e: 49.5, dining_w: 54.5, right_e: 54.5, dining_e: 64, e: 31}
+  y: {gable_n: 2, main_n: 8, ensuite_s: 10, bath_s: 13, stair_s: 17.5, dining_n: 17, closet_s: 18, public_split: 22.5, lower_storage_n: 25.5, entry_s: 28, dining_s: 28, tower_s: 30, gable_s: 32, main_s: 37}
 catalog:
   counter: {label: COUNTER}
 masses:
@@ -77,7 +77,7 @@ levels:
       - {between: [bathroom, book_gallery], width: 3, offset: 1.5, swing: out-right}
       - {between: [book_gallery, library], kind: open, width: 10, offset: 8}
       - {between: [library, office_studio], kind: open}
-      - {between: [book_gallery, office_studio], kind: open, width: 5}
+      - {between: [book_gallery, office_studio], kind: open, width: 6}
       - {between: [entrance, hall], kind: arch, width: 6, offset: 2}
       - {between: [hall, book_gallery], kind: arch, width: 4}
       - {between: [entrance, tower_closet], width: 3, kind: arch}
@@ -97,7 +97,7 @@ levels:
       - [kitchen, pantry]
       - [hall, hearth_storage]
     openings:
-      - {id: front_door, space: entrance, side: south, width: 3.5, kind: door, swing: in-left, offset: 3}
+      - {id: front_door, space: entrance, side: south, width: 3.5, kind: door, swing: in-left, offset: 3.5}
       - {id: bath_window, space: bathroom, side: north, width: 5, kind: window}
       - {id: library_window, width: 6, kind: window, offset: 5, space: library, side: west}
       - {id: stair_window, space: stair, side: north, width: 4, kind: window}
@@ -115,6 +115,14 @@ levels:
       - {id: great_room__kitchen_wall_open, wall: great_room__kitchen_wall, offset: 0, kind: open}
       - {id: exterior_12_window, kind: window, width: 3, offset: 0.5, space: bathroom, side: east}
       - {id: exterior_6_window, kind: window, width: 1, offset: 3.5, space: tower_closet, side: south}
+      - {id: exterior_15_window, kind: window, width: 3, offset: 1.5, wall: exterior_15}
+    overlays:
+      plumbing:
+        - {id: cold_main_l1, label: COLD WATER, color: '#2678b9', width: 0.16, points: [[4, 11.5], [8, 11.5], [8, 12.5], [21, 12.5], [21, 18.5], [36, 18.5], [36, 28.5], [45, 28.5]]}
+        - {id: cold_laundry_l1, label: LAUNDRY CW, color: '#2678b9', width: 0.14, points: [[4, 11.5], [4, 10]]}
+        - {id: cold_bath_l1, label: BATH CW, color: '#2678b9', width: 0.14, points: [[13, 12.5], [13, 8]]}
+        - {id: cold_kitchen_l1, label: KITCHEN CW, color: '#2678b9', width: 0.14, points: [[45, 28.5], [48, 30]]}
+        - {id: cold_riser_l1, label: RISER, color: '#2678b9', width: 0.16, points: [[10, 12.5], [10, 10]]}
   L2:
     title: 'Second Floor'
     derive_partitions: true
@@ -122,7 +130,8 @@ levels:
       upper_storage: {x: [west, storage_e], y: [main_n, ensuite_s], label: STORAGE, privacy: service}
       lower_storage: {x: [west, storage_e], y: [lower_storage_n, entry_s], label: STORAGE, privacy: service}
       ensuite_bathroom: {x: [left_w, left_e], y: [gable_n, ensuite_s], label: ENSUITE/BATHROOM, privacy: private}
-      suite_gym: {x: [west, closet_w], y: [ensuite_s, closet_s], label: SUITE/GYM, privacy: private}
+      suite_gym: {x: [west, storage_e], y: [ensuite_s, lower_storage_n], label: SUITE/GYM, privacy: private}
+      ensuite_hall: {x: [storage_e, closet_w], y: [ensuite_s, closet_s], label: ENSUITE/HALL, privacy: circulation}
       walk_in_closet: {x: [closet_w, left_e], y: [ensuite_s, closet_s], label: WALK-IN/CLOSET, privacy: private}
       master_bedroom: {x: [left_w, left_e], y: [closet_s, gable_s], label: MASTER/BEDROOM, privacy: private}
       stair: {x: [left_e, stair_e], y: [main_n, stair_s], privacy: circulation}
@@ -135,7 +144,7 @@ levels:
     features:
       chimney: {kind: rectangle, at: [46.5, 18], size: [6, 2], label: CHIMNEY, avoid_openings: true}
       queen_bed: {kind: rectangle, within: master_bedroom, at: [14.5, 27.5], size: [5, 7], label: BED, clearance: {left: 1, right: 1, top: 1, foot: 1}, avoid_openings: true}
-      gym_mat: {kind: rectangle, within: suite_gym, at: [7, 14], size: [7, 4], label: MAT}
+      gym_mat: {kind: rectangle, within: suite_gym, at: [4.5, 19.5], size: [4, 7], label: MAT}
       washer: {kind: rectangle, within: upper_hall, at: [23, 26.5], size: [2.5, 2.5], label: W}
       dryer: {kind: rectangle, within: upper_hall, at: [25.5, 26.5], size: [2.5, 2.5], label: D}
       hall_linen: {kind: rectangle, within: upper_hall, at: [29, 27], size: [3, 1.5], label: LINEN}
@@ -143,12 +152,14 @@ levels:
       pool_table: {kind: rectangle, at: [46, 28], size: [4, 8], label: 'POOL TABLE', clearance: {walls: 5}}
     connections:
       - {between: [walk_in_closet, master_bedroom], width: 3.5, offset: 1, kind: arch}
+      - {between: [ensuite_hall, suite_gym], width: 7, kind: open}
+      - {between: [ensuite_hall, master_bedroom], width: 5, kind: arch}
+      - {between: [ensuite_bathroom, ensuite_hall], kind: door, width: 3, swing: out-left}
       - {between: [master_bedroom, upper_landing], width: 3}
       - {between: [upper_hall, upper_landing], kind: open}
       - {between: [upper_landing, room_1], width: 3, offset: 1.5}
       - {between: [upper_landing, tower], width: 3}
       - {between: [room_2, lounge], width: 3, swing: in-left, offset: 7}
-      - {between: [ensuite_bathroom, suite_gym], kind: door, width: 3, swing: out-left}
     access:
       - [upper_landing, upper_hall]
       - [upper_landing, room_1]
@@ -156,13 +167,16 @@ levels:
       - [upper_landing, lounge]
       - [upper_landing, master_bedroom]
       - [master_bedroom, walk_in_closet]
+      - [master_bedroom, ensuite_hall]
+      - [ensuite_hall, suite_gym]
+      - [ensuite_hall, walk_in_closet]
+      - [ensuite_hall, ensuite_bathroom]
       - [walk_in_closet, ensuite_bathroom]
-      - [master_bedroom, suite_gym]
     openings:
       - {id: ensuite_window, space: ensuite_bathroom, side: north, width: 5, kind: window}
       - {id: room_1_window, space: room_1, side: north, width: 5, kind: window}
       - {id: room_2_window, space: room_2, side: north, width: 5, kind: window}
-      - {id: suite_gym_west_window, width: 7, kind: window, offset: 9, space: suite_gym, side: west}
+      - {id: suite_gym_west_window, width: 7, kind: window, space: suite_gym, side: west}
       - {id: laundry_hall_view_window, space: upper_hall, side: south, width: 5, kind: window}
       - {id: lounge_window, width: 8, kind: window, offset: 4, space: lounge, side: south}
       - {id: lounge_south_window, offset: 16.5, width: 7, kind: window, space: lounge, side: east}
@@ -171,6 +185,11 @@ levels:
       - {id: exterior_4_window, kind: window, width: 1, offset: 3.5, space: tower, side: south}
       - {id: exterior_8_window, kind: window, width: 4, offset: 3.5, space: stair, side: north}
       - {id: exterior_10_window, kind: window, width: 2, offset: 1.5, space: ensuite_bathroom, side: east}
+    overlays:
+      plumbing:
+        - {id: cold_riser_l2, label: COLD WATER RISER, color: '#2678b9', width: 0.16, points: [[10, 10], [10, 12], [21, 12], [21, 23.5], [24, 23.5], [24, 26.5]]}
+        - {id: cold_ensuite_l2, label: ENSUITE CW, color: '#2678b9', width: 0.14, points: [[10, 10], [15, 7]]}
+        - {id: cold_laundry_l2, label: LAUNDRY CW, color: '#2678b9', width: 0.14, points: [[24, 26.5], [25.5, 26.5]]}
 stairs:
   main_stair:
     spaces:

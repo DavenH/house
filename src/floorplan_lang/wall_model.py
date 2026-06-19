@@ -128,6 +128,17 @@ class WallOpening:
 
 
 @dataclass(frozen=True)
+class OverlayLine:
+    id: str
+    layer: str
+    points: tuple[Point, ...]
+    label: str | None = None
+    color: str = "#2b78c2"
+    width: float = 0.18
+    dash: str | None = None
+
+
+@dataclass(frozen=True)
 class StairRun:
     rect: Rect
     direction: Direction
@@ -161,3 +172,4 @@ class WallLevel:
     features: list[Feature] = field(default_factory=list)
     openings: list[WallOpening] = field(default_factory=list)
     access: list[tuple[str, str]] = field(default_factory=list)
+    overlays: list[OverlayLine] = field(default_factory=list)
