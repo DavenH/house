@@ -29,6 +29,7 @@
     entries,
     findConnectionOpening,
     findConnectionOpeningInLevel,
+    findOverlayInLevel,
     findOpening,
     findOpeningInLevel,
     normalizeSvgKind,
@@ -43,6 +44,7 @@
     findMassEdgeRefs,
     moveContainedWall,
     moveExteriorWall,
+    moveOverlay,
     moveOpening,
     moveSharedWall,
     openingAxisDelta,
@@ -65,6 +67,7 @@
     moveFeatureSvg,
     previewContainedWallSvg,
     previewExteriorWallSvg,
+    previewOverlaySvg,
     previewOpeningSvg,
     previewSharedWallSvg,
     removeWallDragPreview,
@@ -383,12 +386,27 @@
     }
     const rawKind = element.getAttribute("data-fp-kind") ?? "";
     const kind = normalizeSvgKind(rawKind);
-    if (!["feature", "wall", "opening"].includes(kind) || event.button !== 0) {
+    if (!["feature", "wall", "opening", "overlay"].includes(kind) || event.button !== 0) {
       return;
     }
     const id = element.getAttribute("data-fp-id") ?? "";
     const levelFromSvg = element.getAttribute("data-fp-level") ?? activeLevel;
     if (kind === "wall" && rawKind !== "wall-grip") {
+      return;
+    }
+    if (kind === "overlay") {
+      const overlayDrag = createOverlayDrag(id, levelFromSvg, event, element);
+      if (!overlayDrag) {
+        return;
+      }
+      selected = { kind: "overlay", level: levelFromSvg, id, index: overlayDrag.index };
+      activeLevel = levelFromSvg;
+      drag = overlayDrag;
+      setDragCursor("move");
+      window.addEventListener("pointermove", handleWindowPointerMove);
+      window.addEventListener("pointerup", handleWindowPointerUp, { once: true });
+      void tick().then(() => markSelectedInSvg(canvasElement, selected));
+      void tick().then(jumpToSelectedYaml);
       return;
     }
     if (kind === "opening") {
@@ -487,6 +505,22 @@
       status = "Dragging";
       return;
     }
+    if (drag.type === "overlay") {
+      const nextDx = snapToGrid(dx);
+      const nextDy = snapToGrid(dy);
+      data = structuredClone(drag.snapshot);
+      moveOverlay(data, drag, nextDx, nextDy);
+      const overlay = ((data.levels as AnyRecord | undefined)?.[drag.level]?.overlays?.[drag.layer] ?? [])[drag.index] as
+        | AnyRecord
+        | undefined;
+      if (Array.isArray(overlay?.points)) {
+        previewOverlaySvg(canvasElement, drag.level, drag.id, overlay.points as Array<[number, number]>, scale);
+      }
+      yamlText = dumpPlanYaml(data);
+      dirty = true;
+      status = "Dragging";
+      return;
+    }
     const feature = ((data.levels as AnyRecord)?.[drag.level]?.features ?? {})[drag.id] as AnyRecord;
     const nextAt: [number, number] = [
       snapToGrid(drag.startAt[0] + dx),
@@ -511,6 +545,53 @@
     stopCanvasSelectionSuppression();
     cancelScheduledRender();
     void renderCurrentYaml({ rollbackData });
+  }
+
+  function createOverlayDrag(id: string, levelId: string, event: PointerEvent, element: SVGGraphicsElement) {
+    const found = findOverlayInLevel(data, levelId, id);
+    if (!found || !Array.isArray(found.item.points)) {
+      setError(`Could not find overlay ${id}.`);
+      return null;
+    }
+    const points = found.item.points.map((point: unknown, index: number) => overlayPointTuple(point, index));
+    const rawPointIndex = element.getAttribute("data-fp-point-index");
+    const pointIndex = rawPointIndex === null ? null : Number(rawPointIndex);
+    const rawSegmentIndex = element.getAttribute("data-fp-segment-index");
+    const segmentIndex = rawSegmentIndex === null ? null : Number(rawSegmentIndex);
+    return {
+      type: "overlay" as const,
+      id,
+      level: levelId,
+      layer: found.layer,
+      index: found.index,
+      pointIndex: Number.isFinite(pointIndex) ? pointIndex : null,
+      segmentIndex: Number.isFinite(segmentIndex) ? segmentIndex : null,
+      startPoint: svgPoint(canvasElement, event),
+      startPoints: points,
+      snapshot: structuredClone(data)
+    };
+  }
+
+  function overlayPointTuple(point: unknown, _index: number): [number, number] {
+    if (!Array.isArray(point)) {
+      return [0, 0];
+    }
+    return [coordinateValue(point[0], "x"), coordinateValue(point[1], "y")];
+  }
+
+  function coordinateValue(value: unknown, axis: "x" | "y") {
+    const numeric = Number(value);
+    if (Number.isFinite(numeric)) {
+      return numeric;
+    }
+    if (typeof value === "string") {
+      const datum = ((data.datums as AnyRecord | undefined)?.[axis] ?? {})[value];
+      const datumNumber = Number(datum);
+      if (Number.isFinite(datumNumber)) {
+        return datumNumber;
+      }
+    }
+    return 0;
   }
 
   function createWallDrag(id: string, levelId: string, event: PointerEvent, element: SVGGraphicsElement) {

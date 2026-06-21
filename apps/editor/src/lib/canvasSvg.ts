@@ -262,6 +262,61 @@ export function previewOpeningSvg(
     });
 }
 
+export function previewOverlaySvg(
+  canvasElement: HTMLDivElement | undefined,
+  levelId: string,
+  id: string,
+  points: Array<[number, number]>,
+  scale: number
+) {
+  if (!canvasElement) {
+    return;
+  }
+  const path = canvasElement.querySelector(
+    `path.overlay-line[data-fp-id="${cssEscape(id)}"][data-fp-level="${cssEscape(levelId)}"]`
+  );
+  if (path instanceof SVGPathElement) {
+    path.setAttribute("d", overlayPath(points, scale));
+  }
+  canvasElement
+    .querySelectorAll(`circle.overlay-node[data-fp-id="${cssEscape(id)}"][data-fp-level="${cssEscape(levelId)}"]`)
+    .forEach((element) => {
+      if (!(element instanceof SVGCircleElement)) {
+        return;
+      }
+      const index = Number(element.getAttribute("data-fp-point-index") ?? NaN);
+      const point = points[index];
+      if (!point) {
+        return;
+      }
+      element.setAttribute("cx", (point[0] * scale).toFixed(3));
+      element.setAttribute("cy", (point[1] * scale).toFixed(3));
+    });
+  canvasElement
+    .querySelectorAll(`line.overlay-segment-target[data-fp-id="${cssEscape(id)}"][data-fp-level="${cssEscape(levelId)}"]`)
+    .forEach((element) => {
+      if (!(element instanceof SVGLineElement)) {
+        return;
+      }
+      const index = Number(element.getAttribute("data-fp-segment-index") ?? NaN);
+      const first = points[index];
+      const second = points[index + 1];
+      if (!first || !second) {
+        return;
+      }
+      element.setAttribute("x1", (first[0] * scale).toFixed(3));
+      element.setAttribute("y1", (first[1] * scale).toFixed(3));
+      element.setAttribute("x2", (second[0] * scale).toFixed(3));
+      element.setAttribute("y2", (second[1] * scale).toFixed(3));
+    });
+}
+
+function overlayPath(points: Array<[number, number]>, scale: number) {
+  return points
+    .map(([x, y], index) => `${index === 0 ? "M" : "L"} ${(x * scale).toFixed(3)} ${(y * scale).toFixed(3)}`)
+    .join(" ");
+}
+
 export function moveFeatureSvg(
   canvasElement: HTMLDivElement | undefined,
   data: AnyRecord,

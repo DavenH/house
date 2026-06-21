@@ -132,10 +132,24 @@ class OverlayLine:
     id: str
     layer: str
     points: tuple[Point, ...]
+    kind: str = "line"
     label: str | None = None
     color: str = "#2b78c2"
     width: float = 0.18
     dash: str | None = None
+
+
+@dataclass(frozen=True)
+class RoofSection:
+    id: str
+    rect: Rect
+    mode: str = "hip"
+    pitch: float | None = None
+    eave_height: float | None = None
+    eave_margin: float = 2.0
+    start: str = "open"
+    end: str = "open"
+    ridge: str | None = None
 
 
 @dataclass(frozen=True)
@@ -173,3 +187,4 @@ class WallLevel:
     openings: list[WallOpening] = field(default_factory=list)
     access: list[tuple[str, str]] = field(default_factory=list)
     overlays: list[OverlayLine] = field(default_factory=list)
+    roofs: list[RoofSection] = field(default_factory=list)

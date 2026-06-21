@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   findConnectionOpeningInLevel,
+  findOverlayInLevel,
   findOpening,
   findOpeningInLevel,
   setFeatureAt,
@@ -66,6 +67,27 @@ describe("opening lookup", () => {
       kind: "connection",
       level: "L2",
       id: "shared_door",
+      index: 0
+    });
+  });
+});
+
+describe("overlay lookup", () => {
+  it("finds overlay entries by level and id", () => {
+    const data: AnyRecord = {
+      levels: {
+        L1: {
+          overlays: {
+            plumbing: [{ id: "cold_main", points: [[1, 2], [3, 2]] }],
+            electrical: [{ id: "circuit", points: [[4, 5], [6, 5]] }]
+          }
+        }
+      }
+    };
+
+    expect(findOverlayInLevel(data, "L1", "circuit")).toEqual({
+      item: data.levels.L1.overlays.electrical[0],
+      layer: "electrical",
       index: 0
     });
   });

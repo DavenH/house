@@ -32,7 +32,7 @@ export type FeatureData = AnyRecord & {
   rotation?: number;
 };
 
-export type SelectionKind = "space" | "feature" | "opening" | "connection" | "wall" | "stair" | "level" | "";
+export type SelectionKind = "space" | "feature" | "opening" | "connection" | "wall" | "stair" | "overlay" | "level" | "";
 
 export type Selection = {
   kind: SelectionKind;
@@ -136,4 +136,17 @@ export type OpeningDrag = {
   snapshot: AnyRecord;
 };
 
-export type DragState = FeatureDrag | SharedWallDrag | ContainedWallDrag | ExteriorWallDrag | OpeningDrag | null;
+export type OverlayDrag = {
+  type: "overlay";
+  id: string;
+  level: string;
+  layer: string;
+  index: number;
+  pointIndex: number | null;
+  segmentIndex: number | null;
+  startPoint: { x: number; y: number };
+  startPoints: Array<[number, number]>;
+  snapshot: AnyRecord;
+};
+
+export type DragState = FeatureDrag | SharedWallDrag | ContainedWallDrag | ExteriorWallDrag | OpeningDrag | OverlayDrag | null;

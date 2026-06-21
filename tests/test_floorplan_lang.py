@@ -65,6 +65,96 @@ def test_intent_plan_compiles_shared_masses_and_inferred_door() -> None:
     assert plan.levels["L1"].zones[0].rect == Rect(0, 0, 10, 12)
 
 
+def test_intent_plan_renders_lower_roof_on_next_level() -> None:
+    plan = intent_plan_from_dict(
+        {
+            "type": "intent_plan",
+            "plan": "intent-roof-test",
+            "story": {"floor_to_floor": 10},
+            "roof": {"pitch": "8:12"},
+            "masses": {
+                "body": {
+                    "levels": ["L1", "L2"],
+                    "rects": [
+                        {"x": ["w", "e"], "y": ["n", "s"]},
+                        {
+                            "roof": {"mode": "hip", "eave_height": 10},
+                            "x": ["e", "bay_e"],
+                            "y": ["bay_n", "bay_s"],
+                        },
+                    ],
+                },
+            },
+            "datums": {
+                "x": {"w": 0, "e": 20, "bay_e": 28},
+                "y": {"n": 0, "s": 12, "bay_n": 2, "bay_s": 10},
+            },
+            "levels": {
+                "L1": {"spaces": {"main": {"x": ["w", "e"], "y": ["n", "s"]}}},
+                "L2": {"spaces": {"upper": {"x": ["w", "e"], "y": ["n", "s"]}}},
+            },
+        }
+    )
+
+    assert plan.levels["L1"].roofs == []
+    assert len(plan.levels["L2"].roofs) == 1
+    roof = plan.levels["L2"].roofs[0]
+    assert roof.id == "body_2"
+    assert roof.mode == "hip"
+    assert roof.pitch == pytest.approx(8 / 12)
+    assert roof.eave_height == pytest.approx(10)
+
+    svg = render_wall_plan_svg(plan)
+
+    assert 'data-fp-layer="roofs"' in svg
+    assert 'class="roof-section roof-hip"' in svg
+    assert 'class="roof-ridge"' in svg
+    assert "eave 10" not in svg
+
+
+def test_wall_plan_renders_roof_modes() -> None:
+    plan = wall_plan_from_dict(
+        {
+            "plan": "wall-roof-test",
+            "levels": {
+                "L1": {
+                    "walls": [{"id": "north", "at": [0, 0], "dir": "E", "len": 10, "kind": "exterior"}],
+                    "roofs": [
+                        {"id": "flat", "mode": "flat", "pitch": 0, "rect": [0, 0, 10, 8]},
+                        {"id": "gable", "mode": "open_gable", "pitch": "6:12", "rect": [12, 0, 14, 8]},
+                        {"id": "mixed", "mode": "gable", "ends": {"start": "hip", "end": "open"}, "rect": [28, 0, 14, 8]},
+                        {"id": "tall_hip", "mode": "hip", "rect": [44, 0, 8, 14]},
+                        {"id": "square_gable", "mode": "open_gable", "ridge": "y", "rect": [54, 0, 10, 10]},
+                        {"id": "tight", "mode": "open_gable", "eave_margin": 0.5, "rect": [68, 0, 10, 10]},
+                    ],
+                }
+            },
+        }
+    )
+
+    svg = render_wall_plan_svg(plan)
+
+    assert 'class="roof-section roof-flat"' in svg
+    assert 'class="roof-section roof-open_gable"' in svg
+    assert 'class="roof-eave-fill"' in svg
+    assert 'class="roof-outline"' not in svg
+    assert 'class="roof-slope-line"' in svg
+    assert 'class="roof-gable-end"' in svg
+    assert 'class="roof-hip"' in svg
+    assert "OPEN GABLE" not in svg
+    assert "GABLE HIP/OPEN" not in svg
+    assert '<path class="roof-eave-fill" fill-rule="evenodd" d="M 656.000 -48.000 L 880.000 -48.000 L 880.000 272.000 L 656.000 272.000 Z M 704.000 0.000 L 832.000 0.000 L 832.000 224.000 L 704.000 224.000 Z" />' in svg
+    assert '<rect class="roof-fill" x="704.000" y="0.000" width="128.000" height="224.000" />' in svg
+    assert '<line class="roof-hip" x1="656.000" y1="-48.000" x2="768.000" y2="64.000" />' in svg
+    assert '<line class="roof-hip" x1="880.000" y1="-48.000" x2="768.000" y2="64.000" />' in svg
+    assert '<line class="roof-hip" x1="880.000" y1="272.000" x2="768.000" y2="160.000" />' in svg
+    assert '<line class="roof-hip" x1="656.000" y1="272.000" x2="768.000" y2="160.000" />' in svg
+    assert '<g class="roof-section roof-open_gable" data-fp-layer="roofs" data-fp-level="L1" data-fp-id="square_gable">' in svg
+    assert '<line class="roof-ridge" x1="944.000" y1="-48.000" x2="944.000" y2="208.000" />' in svg
+    assert '<g class="roof-section roof-open_gable" data-fp-layer="roofs" data-fp-level="L1" data-fp-id="tight">' in svg
+    assert '<path class="roof-eave-fill" fill-rule="evenodd" d="M 1064.000 -24.000 L 1272.000 -24.000 L 1272.000 184.000 L 1064.000 184.000 Z M 1088.000 0.000 L 1248.000 0.000 L 1248.000 160.000 L 1088.000 160.000 Z" />' in svg
+
+
 def test_intent_plan_derives_partition_walls_for_contained_room() -> None:
     plan = intent_plan_from_dict(
         {
@@ -165,6 +255,19 @@ def test_intent_plan_renders_layered_overlay_lines() -> None:
                                 "id": "cold_run",
                                 "label": "CW",
                                 "points": [["w", 2], [6, 2], ["e", "s"]],
+                            },
+                            {
+                                "id": "cold_riser",
+                                "kind": "riser",
+                                "label": "RISER",
+                                "points": [[2, 2], [2, 2]],
+                            }
+                        ],
+                        "annotations": [
+                            {
+                                "id": "cold_note",
+                                "label": "CW NOTE",
+                                "points": [[2, 4], [4, 4]],
                             }
                         ]
                     },
@@ -178,6 +281,13 @@ def test_intent_plan_renders_layered_overlay_lines() -> None:
     assert 'data-fp-layer="plumbing"' in svg
     assert 'data-fp-id="cold_run"' in svg
     assert 'class="overlay-line"' in svg
+    assert 'class="overlay-segment-target"' in svg
+    assert 'data-fp-point-index="0"' in svg
+    assert 'data-fp-point-index="1"' in svg
+    assert 'class="plan-overlay riser-overlay"' in svg
+    assert 'stroke-dasharray="4 3"' in svg
+    assert 'data-fp-layer="annotations"' in svg
+    assert 'CW NOTE' in svg
 
 
 def test_intent_plan_validates_unassigned_mass_cells() -> None:
@@ -352,6 +462,7 @@ def test_wall_plan_renders_resolved_stairs_with_treads() -> None:
     assert 'class="stair-landing"' in svg
     assert 'class="stair-tread"' in svg
     assert 'class="stair-note"' in svg
+    assert 'class="stair-note" data-fp-layer="annotations"' in svg
     assert 'class="stair-select-target" data-fp-kind="stair"' in svg
     assert '<rect class="stair-run" x="112.000" y="64.000" width="48.000" height="96.000" />' in svg
     assert "UP 16R" not in svg

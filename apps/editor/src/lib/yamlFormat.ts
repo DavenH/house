@@ -77,7 +77,7 @@ function shouldInlineListItem(path: string[], value: unknown) {
     return false;
   }
   const last = path[path.length - 1];
-  if (["rects", "connections", "access", "openings", "stacks", "alignments"].includes(last)) {
+  if (["rects", "roofs", "connections", "access", "openings", "stacks", "alignments", "annotations", "plumbing", "electrical", "lighting", "light-paths", "walking-flow"].includes(last)) {
     return true;
   }
   return path.length === 1 && path[0] === "notes" ? false : Array.isArray(value);

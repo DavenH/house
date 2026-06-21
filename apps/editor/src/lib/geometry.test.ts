@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
-import { moveOpening, moveSharedWall, resolveSpaceRect, spaceSideOpeningOffsetBounds } from "./geometry";
-import type { AnyRecord, OpeningDrag, SharedWallDrag, SpaceRect } from "./types";
+import { moveOpening, moveOverlay, moveSharedWall, resolveSpaceRect, spaceSideOpeningOffsetBounds } from "./geometry";
+import type { AnyRecord, OpeningDrag, OverlayDrag, SharedWallDrag, SpaceRect } from "./types";
 
 function rect(left: number, top: number, right: number, bottom: number): SpaceRect {
   return { left, top, right, bottom, width: right - left, height: bottom - top };
@@ -140,5 +140,119 @@ describe("moveOpening", () => {
     );
 
     expect(bounds).toEqual({ min: 19, max: 20 });
+  });
+});
+
+describe("moveOverlay", () => {
+  it("moves one endpoint when the overlay point index is set", () => {
+    const data: AnyRecord = {
+      levels: {
+        L1: {
+          overlays: {
+            plumbing: [{ id: "cold", points: [[1, 2], [4, 2], [4, 6]] }]
+          }
+        }
+      }
+    };
+    const drag: OverlayDrag = {
+      type: "overlay",
+      id: "cold",
+      level: "L1",
+      layer: "plumbing",
+      index: 0,
+      pointIndex: 2,
+      segmentIndex: null,
+      startPoint: { x: 0, y: 0 },
+      startPoints: [[1, 2], [4, 2], [4, 6]],
+      snapshot: structuredClone(data)
+    };
+
+    moveOverlay(data, drag, 1, -2);
+
+    expect(data.levels.L1.overlays.plumbing[0].points).toEqual([[1, 2], [4, 2], [5, 4]]);
+  });
+
+  it("moves every point when dragging the overlay run", () => {
+    const data: AnyRecord = {
+      levels: {
+        L1: {
+          overlays: {
+            plumbing: [{ id: "cold", points: [[1, 2], [4, 2]] }]
+          }
+        }
+      }
+    };
+    const drag: OverlayDrag = {
+      type: "overlay",
+      id: "cold",
+      level: "L1",
+      layer: "plumbing",
+      index: 0,
+      pointIndex: null,
+      segmentIndex: null,
+      startPoint: { x: 0, y: 0 },
+      startPoints: [[1, 2], [4, 2]],
+      snapshot: structuredClone(data)
+    };
+
+    moveOverlay(data, drag, 0.5, 1);
+
+    expect(data.levels.L1.overlays.plumbing[0].points).toEqual([[1.5, 3], [4.5, 3]]);
+  });
+
+  it("moves a selected orthogonal segment along its normal axis", () => {
+    const data: AnyRecord = {
+      levels: {
+        L1: {
+          overlays: {
+            plumbing: [{ id: "cold", points: [[1, 2], [4, 2], [4, 6]] }]
+          }
+        }
+      }
+    };
+    const drag: OverlayDrag = {
+      type: "overlay",
+      id: "cold",
+      level: "L1",
+      layer: "plumbing",
+      index: 0,
+      pointIndex: null,
+      segmentIndex: 1,
+      startPoint: { x: 0, y: 0 },
+      startPoints: [[1, 2], [4, 2], [4, 6]],
+      snapshot: structuredClone(data)
+    };
+
+    moveOverlay(data, drag, -1, 0.5);
+
+    expect(data.levels.L1.overlays.plumbing[0].points).toEqual([[1, 2], [3, 2], [3, 6]]);
+  });
+
+  it("moves a contiguous collinear segment chain together", () => {
+    const data: AnyRecord = {
+      levels: {
+        L1: {
+          overlays: {
+            plumbing: [{ id: "cold", points: [[1, 2], [4, 2], [4, 6], [4, 8], [8, 8]] }]
+          }
+        }
+      }
+    };
+    const drag: OverlayDrag = {
+      type: "overlay",
+      id: "cold",
+      level: "L1",
+      layer: "plumbing",
+      index: 0,
+      pointIndex: null,
+      segmentIndex: 2,
+      startPoint: { x: 0, y: 0 },
+      startPoints: [[1, 2], [4, 2], [4, 6], [4, 8], [8, 8]],
+      snapshot: structuredClone(data)
+    };
+
+    moveOverlay(data, drag, 1, 0);
+
+    expect(data.levels.L1.overlays.plumbing[0].points).toEqual([[1, 2], [5, 2], [5, 6], [5, 8], [8, 8]]);
   });
 });

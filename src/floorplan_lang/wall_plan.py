@@ -28,6 +28,7 @@ from floorplan_lang.wall_model import (
     Feature,
     FeatureAnchor,
     OverlayLine,
+    RoofSection,
     Stair,
     StairRun,
     WallExtrusion,
@@ -175,6 +176,7 @@ def wall_plan_from_dict(data: dict[str, Any]) -> WallPlan:
             else:
                 level.access.append((edge[0], edge[1]))
         level.overlays.extend(_overlay_lines_from_dict(level_data.get("overlays") or {}))
+        level.roofs.extend(_roof_sections_from_dict(level_data.get("roofs") or []))
         plan.levels[level_id] = level
     for stair_id, stair_data in (data.get("stairs") or {}).items():
         plan.stairs.append(_stair_from_dict(stair_id, stair_data))
@@ -216,6 +218,7 @@ def _overlay_lines_from_dict(data: Any) -> list[OverlayLine]:
                     id=item_data.get("id", f"{layer}_{index}"),
                     layer=str(item_data.get("layer", layer)),
                     points=tuple(_point(point) for point in item_data["points"]),
+                    kind=str(item_data.get("kind", "line")),
                     label=item_data.get("label"),
                     color=item_data.get("color", "#2b78c2"),
                     width=float(item_data.get("width", 0.18)),
@@ -223,6 +226,25 @@ def _overlay_lines_from_dict(data: Any) -> list[OverlayLine]:
                 )
             )
     return lines
+
+
+def _roof_sections_from_dict(data: Any) -> list[RoofSection]:
+    roofs = []
+    for index, item in enumerate(data or (), start=1):
+        item_data = dict(item)
+        roofs.append(
+            RoofSection(
+                id=item_data.get("id", f"roof_{index}"),
+                rect=_rect(item_data["rect"]),
+                mode=str(item_data.get("mode", "hip")),
+                pitch=_pitch(item_data.get("pitch")) if item_data.get("pitch") is not None else None,
+                eave_height=float(item_data["eave_height"]) if item_data.get("eave_height") is not None else None,
+                eave_margin=float(item_data.get("eave_margin", 2.0)),
+                ridge=_roof_ridge(item_data),
+                **_roof_end_options(item_data),
+            )
+        )
+    return roofs
 
 
 def render_wall_plan_svg(
@@ -268,6 +290,7 @@ def render_wall_plan_svg(
         )
         if show_grid:
             parts.extend(_render_grid(level_box, level, scale))
+        parts.extend(_render_roofs(level.roofs, level.id, scale))
         parts.extend(_render_building_fills(level, scale))
         parts.extend(_render_perimeter_dimensions(level, scale))
         for zone in level.zones:
@@ -535,10 +558,10 @@ def _render_stair_annotation(stair: Stair, bbox: Rect, scale: float) -> list[str
     label_at = Point(elbow.x + 1.82, elbow.y)
     label = f'{stair.risers}R  {stair.rise * 12:.1f}" rise / {stair.tread_depth * 12:.1f}" tread'
     return [
-        f'<circle class="stair-note-dot" cx="{start.x * scale:.3f}" cy="{start.y * scale:.3f}" r="{0.12 * scale:.3f}" />',
-        f'<path class="stair-note-leader" d="M {start.x * scale:.3f} {start.y * scale:.3f} '
+        f'<circle class="stair-note-dot" data-fp-layer="annotations" cx="{start.x * scale:.3f}" cy="{start.y * scale:.3f}" r="{0.12 * scale:.3f}" />',
+        f'<path class="stair-note-leader" data-fp-layer="annotations" d="M {start.x * scale:.3f} {start.y * scale:.3f} '
         f'L {elbow.x * scale:.3f} {elbow.y * scale:.3f} L {(label_at.x - 0.25) * scale:.3f} {elbow.y * scale:.3f}" />',
-        f'<text class="stair-note" x="{label_at.x * scale:.3f}" y="{label_at.y * scale:.3f}">{escape(label)}</text>',
+        f'<text class="stair-note" data-fp-layer="annotations" x="{label_at.x * scale:.3f}" y="{label_at.y * scale:.3f}">{escape(label)}</text>',
     ]
 
 
@@ -560,6 +583,132 @@ def _render_space_select_target(zone: Zone, level_id: str, scale: float) -> str:
         f'<rect class="space-select-target" data-fp-kind="space" data-fp-level="{escape(level_id)}" '
         f'data-fp-id="{escape(zone.id)}" x="{zone.rect.x * scale:.3f}" y="{zone.rect.y * scale:.3f}" '
         f'width="{zone.rect.w * scale:.3f}" height="{zone.rect.h * scale:.3f}" />'
+    )
+
+
+def _render_roofs(roofs: list[RoofSection], level_id: str, scale: float) -> list[str]:
+    return [_render_roof(roof, level_id, scale) for roof in roofs]
+
+
+def _render_roof(roof: RoofSection, level_id: str, scale: float) -> str:
+    eave_rect = _roof_eave_rect(roof)
+    footprint = roof.rect
+    parts = [
+        f'<g class="roof-section roof-{escape(roof.mode)}" data-fp-layer="roofs" '
+        f'data-fp-level="{escape(level_id)}" data-fp-id="{escape(roof.id)}">',
+        f'<path class="roof-eave-fill" fill-rule="evenodd" d="{_rect_path(eave_rect, scale)} {_rect_path(footprint, scale)}" />',
+        f'<rect class="roof-fill" x="{footprint.x * scale:.3f}" y="{footprint.y * scale:.3f}" '
+        f'width="{footprint.w * scale:.3f}" height="{footprint.h * scale:.3f}" />',
+    ]
+    parts.extend(_render_roof_lines(roof, scale))
+    parts.append("</g>")
+    return "".join(parts)
+
+
+def _render_roof_lines(roof: RoofSection, scale: float) -> list[str]:
+    rect = _roof_eave_rect(roof)
+    mode = roof.mode.replace("-", "_")
+    if mode == "flat":
+        return [
+            f'<line class="roof-slope-line" x1="{rect.left * scale:.3f}" y1="{rect.top * scale:.3f}" '
+            f'x2="{rect.right * scale:.3f}" y2="{rect.bottom * scale:.3f}" />'
+        ]
+    start = "hip" if mode == "hip" else roof.start.replace("-", "_")
+    end = "hip" if mode == "hip" else roof.end.replace("-", "_")
+    if _roof_ridge_is_horizontal(roof, rect):
+        ridge_start = Point(rect.left if start == "open" else rect.left + rect.h / 2, rect.cy)
+        ridge_end = Point(rect.right if end == "open" else rect.right - rect.h / 2, rect.cy)
+    else:
+        ridge_start = Point(rect.cx, rect.top if start == "open" else rect.top + rect.w / 2)
+        ridge_end = Point(rect.cx, rect.bottom if end == "open" else rect.bottom - rect.w / 2)
+    lines = [_roof_line(ridge_start, ridge_end, scale, "roof-ridge")]
+    if _roof_ridge_is_horizontal(roof, rect):
+        if start == "hip":
+            lines.extend(
+                [
+                    _roof_line(Point(rect.left, rect.top), ridge_start, scale, "roof-hip"),
+                    _roof_line(Point(rect.left, rect.bottom), ridge_start, scale, "roof-hip"),
+                ]
+            )
+        else:
+            lines.append(_roof_line(Point(rect.left, rect.top), Point(rect.left, rect.bottom), scale, "roof-gable-end"))
+        if end == "hip":
+            lines.extend(
+                [
+                    _roof_line(Point(rect.right, rect.top), ridge_end, scale, "roof-hip"),
+                    _roof_line(Point(rect.right, rect.bottom), ridge_end, scale, "roof-hip"),
+                ]
+            )
+        else:
+            lines.append(_roof_line(Point(rect.right, rect.top), Point(rect.right, rect.bottom), scale, "roof-gable-end"))
+    else:
+        if start == "hip":
+            lines.extend(
+                [
+                    _roof_line(Point(rect.left, rect.top), ridge_start, scale, "roof-hip"),
+                    _roof_line(Point(rect.right, rect.top), ridge_start, scale, "roof-hip"),
+                ]
+            )
+        else:
+            lines.append(_roof_line(Point(rect.left, rect.top), Point(rect.right, rect.top), scale, "roof-gable-end"))
+        if end == "hip":
+            lines.extend(
+                [
+                    _roof_line(Point(rect.right, rect.bottom), ridge_end, scale, "roof-hip"),
+                    _roof_line(Point(rect.left, rect.bottom), ridge_end, scale, "roof-hip"),
+                ]
+            )
+        else:
+            lines.append(_roof_line(Point(rect.left, rect.bottom), Point(rect.right, rect.bottom), scale, "roof-gable-end"))
+    return lines
+
+
+def _roof_end_options(data: dict[str, Any]) -> dict[str, str]:
+    mode = str(data.get("mode", "hip")).replace("-", "_")
+    start = "hip" if mode == "hip" else "open"
+    end = "hip" if mode == "hip" else "open"
+    ends = data.get("ends")
+    if isinstance(ends, dict):
+        start = str(ends.get("start", start))
+        end = str(ends.get("end", end))
+    elif isinstance(ends, list | tuple):
+        values = [str(value) for value in ends]
+        if len(values) >= 1:
+            start = values[0]
+        if len(values) >= 2:
+            end = values[1]
+    if data.get("start") is not None:
+        start = str(data["start"])
+    if data.get("end") is not None:
+        end = str(data["end"])
+    return {"start": start, "end": end}
+
+
+def _roof_ridge(data: dict[str, Any]) -> str | None:
+    ridge = data.get("ridge", data.get("ridge_axis"))
+    return str(ridge) if ridge is not None else None
+
+
+def _roof_eave_rect(roof: RoofSection) -> Rect:
+    overhang = EXTERIOR_WALL_THICKNESS_FT + roof.eave_margin
+    return roof.rect.padded(overhang)
+
+
+def _roof_ridge_is_horizontal(roof: RoofSection, rect: Rect) -> bool:
+    if roof.ridge is None:
+        return rect.w >= rect.h
+    value = roof.ridge.lower().replace("-", "_")
+    if value in {"x", "horizontal", "east_west", "e_w", "ew"}:
+        return True
+    if value in {"y", "vertical", "north_south", "n_s", "ns"}:
+        return False
+    return rect.w >= rect.h
+
+
+def _roof_line(start: Point, end: Point, scale: float, class_name: str) -> str:
+    return (
+        f'<line class="{class_name}" x1="{start.x * scale:.3f}" y1="{start.y * scale:.3f}" '
+        f'x2="{end.x * scale:.3f}" y2="{end.y * scale:.3f}" />'
     )
 
 
@@ -915,6 +1064,7 @@ def _rect_covered_by_rects(target: Rect, rects: list[Rect]) -> bool:
 
 def _level_bbox(level: WallLevel) -> Rect:
     boxes = [wall.bbox for wall in level.walls]
+    boxes.extend(_roof_eave_rect(roof) for roof in level.roofs)
     for area in level.areas:
         boxes.append(Rect(area.at.x, area.at.y, 0.001, 0.001))
     for zone in level.zones:
@@ -1832,26 +1982,88 @@ def _render_overlays(overlays: list[OverlayLine], level_id: str, scale: float) -
     for overlay in overlays:
         if len(overlay.points) < 2:
             continue
+        if overlay.layer == "annotations":
+            parts.append(_render_annotation_overlay(overlay, level_id, scale))
+            continue
+        if overlay.kind == "riser":
+            parts.append(_render_riser_overlay(overlay, level_id, scale))
+            continue
         dash = f' stroke-dasharray="{escape(overlay.dash)}"' if overlay.dash else ""
         parts.append(
-            f'<g class="plan-overlay" data-fp-layer="{escape(overlay.layer)}" '
+            f'<g class="plan-overlay" data-fp-kind="overlay" data-fp-layer="{escape(overlay.layer)}" '
             f'data-fp-level="{escape(level_id)}" data-fp-id="{escape(overlay.id)}">'
             f'<path class="overlay-line" d="{_polyline_command(list(overlay.points), scale)}" '
+            f'data-fp-kind="overlay" data-fp-layer="{escape(overlay.layer)}" '
+            f'data-fp-level="{escape(level_id)}" data-fp-id="{escape(overlay.id)}" '
             f'stroke="{escape(overlay.color)}" stroke-width="{overlay.width * scale:.3f}"{dash} />'
-            f"{_overlay_endpoint_markers(overlay, scale)}"
+            f"{_overlay_segment_targets(overlay, level_id, scale)}"
+            f"{_overlay_endpoint_markers(overlay, level_id, scale)}"
             f"{_overlay_label(overlay, scale)}"
             "</g>"
         )
     return parts
 
 
-def _overlay_endpoint_markers(overlay: OverlayLine, scale: float) -> str:
+def _render_riser_overlay(overlay: OverlayLine, level_id: str, scale: float) -> str:
+    origin = overlay.points[0]
+    length = 2.0
+    angle = radians(-60)
+    end = Point(origin.x + cos(angle) * length, origin.y + sin(angle) * length)
+    line = _polyline_command([origin, end], scale)
+    label = overlay.label or overlay.id.replace("_", " ").upper()
     radius = max(overlay.width * scale * 1.25, 2.2)
-    endpoints = (overlay.points[0], overlay.points[-1])
+    dash = escape(overlay.dash or "4 3")
+    return (
+        f'<g class="plan-overlay riser-overlay" data-fp-kind="overlay" data-fp-layer="{escape(overlay.layer)}" '
+        f'data-fp-level="{escape(level_id)}" data-fp-id="{escape(overlay.id)}">'
+        f'<path class="overlay-line" d="{line}" data-fp-kind="overlay" data-fp-layer="{escape(overlay.layer)}" '
+        f'data-fp-level="{escape(level_id)}" data-fp-id="{escape(overlay.id)}" '
+        f'stroke="{escape(overlay.color)}" stroke-width="{overlay.width * scale:.3f}" stroke-dasharray="{dash}" />'
+        f'<path class="overlay-segment-target" d="{line}" data-fp-kind="overlay" data-fp-layer="{escape(overlay.layer)}" '
+        f'data-fp-level="{escape(level_id)}" data-fp-id="{escape(overlay.id)}" />'
+        f'<circle class="overlay-node" data-fp-kind="overlay" data-fp-layer="{escape(overlay.layer)}" '
+        f'data-fp-level="{escape(level_id)}" data-fp-id="{escape(overlay.id)}" data-fp-point-index="0" '
+        f'cx="{origin.x * scale:.3f}" cy="{origin.y * scale:.3f}" r="{radius:.3f}" fill="{escape(overlay.color)}" />'
+        f'<text class="overlay-label" x="{end.x * scale:.3f}" y="{(end.y - 0.35) * scale:.3f}" '
+        f'fill="{escape(overlay.color)}">{escape(label)}</text>'
+        "</g>"
+    )
+
+
+def _render_annotation_overlay(overlay: OverlayLine, level_id: str, scale: float) -> str:
+    line = _polyline_command(list(overlay.points), scale)
+    point = overlay.points[-1]
+    label = overlay.label or overlay.id.replace("_", " ").upper()
+    return (
+        f'<g class="plan-overlay annotation-overlay" data-fp-layer="annotations" '
+        f'data-fp-level="{escape(level_id)}" data-fp-id="{escape(overlay.id)}">'
+        f'<circle class="stair-note-dot" data-fp-layer="annotations" '
+        f'cx="{overlay.points[0].x * scale:.3f}" cy="{overlay.points[0].y * scale:.3f}" r="{0.12 * scale:.3f}" />'
+        f'<path class="stair-note-leader" data-fp-layer="annotations" d="{line}" />'
+        f'<text class="stair-note" data-fp-layer="annotations" x="{point.x * scale:.3f}" '
+        f'y="{(point.y - 0.35) * scale:.3f}">{escape(label)}</text>'
+        "</g>"
+    )
+
+
+def _overlay_segment_targets(overlay: OverlayLine, level_id: str, scale: float) -> str:
     return "".join(
-        f'<circle class="overlay-node" cx="{point.x * scale:.3f}" cy="{point.y * scale:.3f}" '
-        f'r="{radius:.3f}" fill="{escape(overlay.color)}" />'
-        for point in endpoints
+        f'<line class="overlay-segment-target" data-fp-kind="overlay" data-fp-layer="{escape(overlay.layer)}" '
+        f'data-fp-level="{escape(level_id)}" data-fp-id="{escape(overlay.id)}" data-fp-segment-index="{index}" '
+        f'x1="{first.x * scale:.3f}" y1="{first.y * scale:.3f}" '
+        f'x2="{second.x * scale:.3f}" y2="{second.y * scale:.3f}" />'
+        for index, (first, second) in enumerate(zip(overlay.points, overlay.points[1:]))
+    )
+
+
+def _overlay_endpoint_markers(overlay: OverlayLine, level_id: str, scale: float) -> str:
+    radius = max(overlay.width * scale * 1.25, 2.2)
+    return "".join(
+        f'<circle class="overlay-node" data-fp-kind="overlay" data-fp-layer="{escape(overlay.layer)}" '
+        f'data-fp-level="{escape(level_id)}" data-fp-id="{escape(overlay.id)}" data-fp-point-index="{index}" '
+        f'cx="{point.x * scale:.3f}" cy="{point.y * scale:.3f}" '
+        f'r="{radius if index in {0, len(overlay.points) - 1} else radius * 0.75:.3f}" fill="{escape(overlay.color)}" />'
+        for index, point in enumerate(overlay.points)
     )
 
 
@@ -2282,6 +2494,13 @@ def _wall_from_dict(data: dict[str, Any], wall_id: str) -> WallSegment:
 
 def _rect(value: list[float] | tuple[float, float, float, float]) -> Rect:
     return Rect(float(value[0]), float(value[1]), float(value[2]), float(value[3]))
+
+
+def _pitch(value: Any) -> float:
+    if isinstance(value, str) and ":" in value:
+        rise, run = value.split(":", 1)
+        return float(rise) / float(run)
+    return float(value)
 
 
 def _size(value: list[float] | tuple[float, float]) -> tuple[float, float]:
