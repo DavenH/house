@@ -26,6 +26,9 @@ export function findYamlRangeForSelection(
     const index = Number(selected.index ?? selected.id);
     return findIndexedListItemRange(yamlText, levelOffset, levelEnd, "connections", index);
   }
+  if (selected.kind === "overlay") {
+    return findNestedListItemRange(yamlText, levelOffset, levelEnd, "overlays", `id: ${selected.id}`);
+  }
   return null;
 }
 
@@ -123,6 +126,29 @@ function findIndexedListItemRange(
       };
     }
   }
+}
+
+function findNestedListItemRange(
+  yamlText: string,
+  levelStart: number,
+  levelEnd: number,
+  section: string,
+  token: string
+) {
+  const sectionStart = yamlText.indexOf(`    ${section}:\n`, levelStart);
+  if (sectionStart < 0 || sectionStart > levelEnd) {
+    return null;
+  }
+  const sectionEnd = findNextSectionOffset(yamlText, sectionStart + 1, levelEnd);
+  const tokenOffset = yamlText.indexOf(token, sectionStart);
+  if (tokenOffset < 0 || tokenOffset >= sectionEnd) {
+    return null;
+  }
+  const itemStart = yamlText.lastIndexOf("\n        -", tokenOffset);
+  if (itemStart < sectionStart) {
+    return { start: tokenOffset, end: tokenOffset + token.length };
+  }
+  return { start: itemStart + 1, end: findNextEntryOffset(yamlText, itemStart + 2, sectionEnd, "        -") };
 }
 
 function findNextSectionOffset(yamlText: string, after: number, limit: number) {

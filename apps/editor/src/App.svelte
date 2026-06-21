@@ -14,6 +14,7 @@
   import type {
     AnyRecord,
     DragState,
+    MassEdgeRef,
     Selection,
     SelectionKind,
     SpaceRect,
@@ -28,6 +29,7 @@
     entries,
     findConnectionOpening,
     findConnectionOpeningInLevel,
+    findOverlayInLevel,
     findOpening,
     findOpeningInLevel,
     normalizeSvgKind,
@@ -42,14 +44,17 @@
     findMassEdgeRefs,
     moveContainedWall,
     moveExteriorWall,
+    moveOverlay,
     moveOpening,
     moveSharedWall,
     openingAxisDelta,
+    spaceSideOpeningOffsetBounds,
     resolveSpaceRect,
     snapToGrid
   } from "./lib/geometry";
   import {
     inferSpaceSideForWallLine,
+    openingReferenceForWall,
     stabilizeGeneratedExteriorWallOpenings
   } from "./lib/exteriorOpenings";
   import { roundHalf, uniqueListId } from "./lib/inspectorModel";
@@ -62,6 +67,7 @@
     moveFeatureSvg,
     previewContainedWallSvg,
     previewExteriorWallSvg,
+    previewOverlaySvg,
     previewOpeningSvg,
     previewSharedWallSvg,
     removeWallDragPreview,
@@ -110,6 +116,14 @@
   $: catalog = ((data.catalog as AnyRecord | undefined) ?? {}) as AnyRecord;
   $: constraintRefs = buildConstraintRefs(data);
   $: selectedObject = resolveSelection(data, selected);
+  $: selectedWallLine =
+    Boolean(svg) && canvasElement && selected.kind === "wall" && selected.level && selected.id
+      ? renderedWallLine(selected.level, selected.id)
+      : null;
+  $: selectedWallEdgeRefs =
+    data && selected.kind === "wall" && selected.level && selectedWallLine
+      ? massEdgeRefsForWall(selected.level, selectedWallLine)
+      : [];
 
   onMount(() => {
     document.addEventListener("keydown", handleGlobalKeydown);
@@ -372,12 +386,27 @@
     }
     const rawKind = element.getAttribute("data-fp-kind") ?? "";
     const kind = normalizeSvgKind(rawKind);
-    if (!["feature", "wall", "opening"].includes(kind) || event.button !== 0) {
+    if (!["feature", "wall", "opening", "overlay"].includes(kind) || event.button !== 0) {
       return;
     }
     const id = element.getAttribute("data-fp-id") ?? "";
     const levelFromSvg = element.getAttribute("data-fp-level") ?? activeLevel;
     if (kind === "wall" && rawKind !== "wall-grip") {
+      return;
+    }
+    if (kind === "overlay") {
+      const overlayDrag = createOverlayDrag(id, levelFromSvg, event, element);
+      if (!overlayDrag) {
+        return;
+      }
+      selected = { kind: "overlay", level: levelFromSvg, id, index: overlayDrag.index };
+      activeLevel = levelFromSvg;
+      drag = overlayDrag;
+      setDragCursor("move");
+      window.addEventListener("pointermove", handleWindowPointerMove);
+      window.addEventListener("pointerup", handleWindowPointerUp, { once: true });
+      void tick().then(() => markSelectedInSvg(canvasElement, selected));
+      void tick().then(jumpToSelectedYaml);
       return;
     }
     if (kind === "opening") {
@@ -467,10 +496,26 @@
     }
     if (drag.type === "opening") {
       const axisDelta = openingAxisDelta(drag.direction, dx, dy);
-      const nextOffset = clamp(snapToGrid(drag.startOffset + axisDelta), 0, drag.wallLength - drag.width);
+      const nextOffset = clamp(snapToGrid(drag.startOffset + axisDelta), drag.offsetMin, drag.offsetMax);
       data = structuredClone(drag.snapshot);
       moveOpening(data, drag, nextOffset);
       previewOpeningSvg(canvasElement, data, drag, nextOffset - drag.startOffset);
+      yamlText = dumpPlanYaml(data);
+      dirty = true;
+      status = "Dragging";
+      return;
+    }
+    if (drag.type === "overlay") {
+      const nextDx = snapToGrid(dx);
+      const nextDy = snapToGrid(dy);
+      data = structuredClone(drag.snapshot);
+      moveOverlay(data, drag, nextDx, nextDy);
+      const overlay = ((data.levels as AnyRecord | undefined)?.[drag.level]?.overlays?.[drag.layer] ?? [])[drag.index] as
+        | AnyRecord
+        | undefined;
+      if (Array.isArray(overlay?.points)) {
+        previewOverlaySvg(canvasElement, drag.level, drag.id, overlay.points as Array<[number, number]>, scale);
+      }
       yamlText = dumpPlanYaml(data);
       dirty = true;
       status = "Dragging";
@@ -500,6 +545,53 @@
     stopCanvasSelectionSuppression();
     cancelScheduledRender();
     void renderCurrentYaml({ rollbackData });
+  }
+
+  function createOverlayDrag(id: string, levelId: string, event: PointerEvent, element: SVGGraphicsElement) {
+    const found = findOverlayInLevel(data, levelId, id);
+    if (!found || !Array.isArray(found.item.points)) {
+      setError(`Could not find overlay ${id}.`);
+      return null;
+    }
+    const points = found.item.points.map((point: unknown, index: number) => overlayPointTuple(point, index));
+    const rawPointIndex = element.getAttribute("data-fp-point-index");
+    const pointIndex = rawPointIndex === null ? null : Number(rawPointIndex);
+    const rawSegmentIndex = element.getAttribute("data-fp-segment-index");
+    const segmentIndex = rawSegmentIndex === null ? null : Number(rawSegmentIndex);
+    return {
+      type: "overlay" as const,
+      id,
+      level: levelId,
+      layer: found.layer,
+      index: found.index,
+      pointIndex: Number.isFinite(pointIndex) ? pointIndex : null,
+      segmentIndex: Number.isFinite(segmentIndex) ? segmentIndex : null,
+      startPoint: svgPoint(canvasElement, event),
+      startPoints: points,
+      snapshot: structuredClone(data)
+    };
+  }
+
+  function overlayPointTuple(point: unknown, _index: number): [number, number] {
+    if (!Array.isArray(point)) {
+      return [0, 0];
+    }
+    return [coordinateValue(point[0], "x"), coordinateValue(point[1], "y")];
+  }
+
+  function coordinateValue(value: unknown, axis: "x" | "y") {
+    const numeric = Number(value);
+    if (Number.isFinite(numeric)) {
+      return numeric;
+    }
+    if (typeof value === "string") {
+      const datum = ((data.datums as AnyRecord | undefined)?.[axis] ?? {})[value];
+      const datumNumber = Number(datum);
+      if (Number.isFinite(datumNumber)) {
+        return datumNumber;
+      }
+    }
+    return 0;
   }
 
   function createWallDrag(id: string, levelId: string, event: PointerEvent, element: SVGGraphicsElement) {
@@ -615,6 +707,16 @@
     return element instanceof SVGGraphicsElement ? lineFromSvgElement(element, scale) : null;
   }
 
+  function massEdgeRefsForWall(levelId: string, line: WallLine): MassEdgeRef[] {
+    const orientation =
+      Math.abs(line.x1 - line.x2) < 0.01 ? "vertical" : Math.abs(line.y1 - line.y2) < 0.01 ? "horizontal" : null;
+    if (!orientation) {
+      return [];
+    }
+    const refs = findMassEdgeRefs(levelId, line, orientation, data);
+    return refs.length ? refs : findMassEdgeRefs(levelId, line, orientation, lastRenderedData);
+  }
+
   function createOpeningDrag(id: string, levelId: string, event: PointerEvent, element: SVGGraphicsElement) {
     const found =
       findOpeningInLevel(data, levelId, id) ??
@@ -633,7 +735,7 @@
     }
     const wall = element.getAttribute("data-fp-wall") ?? "";
     const direction = element.getAttribute("data-fp-direction") as WallDirection | null;
-    const orientation = element.getAttribute("data-fp-orientation") as "vertical" | "horizontal" | null;
+    const orientation = element.getAttribute("data-fp-orientation") as "vertical" | "horizontal" | "angled" | null;
     const startOffset = Number(element.getAttribute("data-fp-offset") ?? NaN);
     const width = Number(element.getAttribute("data-fp-width") ?? NaN);
     const wallLength = Number(element.getAttribute("data-fp-wall-length") ?? NaN);
@@ -641,6 +743,21 @@
       setError(`Opening ${id} is missing editable wall metadata.`);
       return null;
     }
+    if (orientation === "angled") {
+      setError("Dragging openings along angled walls is not supported yet. Edit the offset in YAML or the inspector.");
+      return null;
+    }
+    const opening = (source === "connection" ? selectedLevel.connections?.[index] : selectedLevel.openings?.[index]) as
+      | AnyRecord
+      | undefined;
+    const openingLine = lineFromSvgElement(element, Number(data.scale ?? 16));
+    const offsetBounds =
+      source === "opening" &&
+      opening?.space &&
+      opening?.side &&
+      openingLine
+        ? spaceSideOpeningDragBounds(data, levelForOpening, opening, direction, openingLine, startOffset, width, wallLength)
+        : { min: 0, max: Math.max(0, wallLength - width) };
     return {
       type: "opening" as const,
       id,
@@ -656,10 +773,29 @@
       direction,
       orientation,
       startOffset,
+      offsetMin: offsetBounds.min,
+      offsetMax: offsetBounds.max,
       width,
       wallLength,
       snapshot: structuredClone(data)
     };
+  }
+
+  function spaceSideOpeningDragBounds(
+    sourceData: AnyRecord,
+    levelId: string,
+    opening: AnyRecord,
+    direction: WallDirection,
+    openingLine: WallLine,
+    startOffset: number,
+    width: number,
+    wallLength: number
+  ) {
+    const rect = resolveSpaceRect(sourceData, levelId, String(opening.space));
+    if (!rect) {
+      return { min: 0, max: Math.max(0, wallLength - width) };
+    }
+    return spaceSideOpeningOffsetBounds(direction, openingLine, startOffset, width, rect, String(opening.side), wallLength);
   }
 
   function selectObject(kind: SelectionKind, id: string, index?: number) {
@@ -736,13 +872,7 @@
       width,
       offset: roundHalf(Math.max(0, (length - width) / 2))
     };
-    const stableRef = line ? inferSpaceSideForWallLine(data, selected.level, line) : null;
-    if (stableRef) {
-      opening.space = stableRef.space;
-      opening.side = stableRef.side;
-    } else {
-      opening.wall = selected.id;
-    }
+    Object.assign(opening, openingReferenceForWall(data, selected.level, selected.id, line));
     openings.push(opening);
     selected = { kind: "opening", level: selected.level, id: opening.id, index: openings.length - 1 };
     syncDataToYaml();
@@ -758,7 +888,6 @@
     document={planDocument}
     {plans}
     bind:selectedPlan
-    {status}
     {dirty}
     {error}
     {svg}
@@ -783,6 +912,8 @@
     open={inspectorOpen}
     {selected}
     {selectedObject}
+    {selectedWallLine}
+    {selectedWallEdgeRefs}
     planData={data}
     activeLevel={inspectorLevelId}
     {spaces}

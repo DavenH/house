@@ -9,7 +9,7 @@ export function normalizeSvgKind(kind: string): SelectionKind {
   if (kind === "wall-select" || kind === "wall-grip") {
     return "wall";
   }
-  if (["space", "feature", "opening", "wall", "stair", "level"].includes(kind)) {
+  if (["space", "feature", "opening", "wall", "stair", "overlay", "level"].includes(kind)) {
     return kind as SelectionKind;
   }
   return "";
@@ -37,6 +37,11 @@ export function resolveSelection(data: AnyRecord, selected: Selection): AnyRecor
   }
   if (selected.kind === "stair") {
     return ((data.stairs as AnyRecord | undefined) ?? {})[selected.id] ?? null;
+  }
+  if (selected.kind === "overlay") {
+    const found = findOverlayInLevel(data, selected.level, selected.id);
+    selected.index = found?.index;
+    return found?.item ?? null;
   }
   return { id: selected.id };
 }
@@ -96,6 +101,20 @@ export function connectionOpeningId(connection: unknown, index: number) {
   const between = Array.isArray(data.between) ? data.between : ["", ""];
   const kind = data.kind ?? "door";
   return data.id ?? `${between[0]}_${between[1]}_${kind}_${index + 1}`;
+}
+
+export function findOverlayInLevel(data: AnyRecord, levelId: string, id: string): { item: AnyRecord; layer: string; index: number } | null {
+  const overlays = ((data.levels as AnyRecord | undefined)?.[levelId]?.overlays ?? {}) as AnyRecord;
+  for (const [layer, items] of Object.entries(overlays)) {
+    if (!Array.isArray(items)) {
+      continue;
+    }
+    const index = items.findIndex((item: AnyRecord) => item.id === id);
+    if (index >= 0) {
+      return { item: items[index] as AnyRecord, layer, index };
+    }
+  }
+  return null;
 }
 
 export function ensureLevel(data: AnyRecord, levelId: string): AnyRecord {
@@ -247,6 +266,14 @@ export function deleteSelection(data: AnyRecord, selected: Selection): Selection
     }
   } else if (selected.kind === "stair") {
     delete (data.stairs as AnyRecord | undefined)?.[selected.id];
+  } else if (selected.kind === "overlay") {
+    const found = findOverlayInLevel(data, selected.level, selected.id);
+    if (found) {
+      const items = selectedLevel.overlays?.[found.layer];
+      if (Array.isArray(items)) {
+        items.splice(found.index, 1);
+      }
+    }
   }
   return { kind: "", level: "", id: "" };
 }

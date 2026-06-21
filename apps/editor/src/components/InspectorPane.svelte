@@ -9,13 +9,15 @@
     splitList,
     uniqueListId
   } from "../lib/inspectorModel";
-  import type { AnyRecord, Selection, SelectionKind } from "../lib/types";
+  import type { AnyRecord, MassEdgeRef, Selection, SelectionKind, WallLine } from "../lib/types";
   import InspectorHeader from "./InspectorHeader.svelte";
   import PulloutTab from "./PulloutTab.svelte";
 
   export let selected: Selection = { kind: "", level: "", id: "" };
   export let open = true;
   export let selectedObject: AnyRecord | null = null;
+  export let selectedWallLine: WallLine | null = null;
+  export let selectedWallEdgeRefs: MassEdgeRef[] = [];
   export let planData: AnyRecord = {};
   export let activeLevel = "";
   export let spaces: Array<[string, AnyRecord]> = [];
@@ -337,13 +339,14 @@
       return [];
     }
     const rows: DatumRow[] = [];
+    const label = spaceDisplayName(selected.id);
     if (Array.isArray(selectedObject.x)) {
-      rows.push(datumRow("West", "x", selectedObject.x[0], selected.id, 0));
-      rows.push(datumRow("East", "x", selectedObject.x[1], selected.id, 1));
+      rows.push(datumRow(`${label} West`, "x", selectedObject.x[0], ["levels", activeLevel, "spaces", selected.id, "x", 0]));
+      rows.push(datumRow(`${label} East`, "x", selectedObject.x[1], ["levels", activeLevel, "spaces", selected.id, "x", 1]));
     }
     if (Array.isArray(selectedObject.y)) {
-      rows.push(datumRow("North", "y", selectedObject.y[0], selected.id, 0));
-      rows.push(datumRow("South", "y", selectedObject.y[1], selected.id, 1));
+      rows.push(datumRow(`${label} North`, "y", selectedObject.y[0], ["levels", activeLevel, "spaces", selected.id, "y", 0]));
+      rows.push(datumRow(`${label} South`, "y", selectedObject.y[1], ["levels", activeLevel, "spaces", selected.id, "y", 1]));
     }
     return rows.filter((row) => typeof row.name === "string");
   }
@@ -358,7 +361,7 @@
     }
     const shared = wallId.match(/^(.+)__(.+)_wall$/);
     if (!shared) {
-      return [];
+      return exteriorWallDatumRows();
     }
     const firstId = shared[1];
     const secondId = shared[2];
@@ -380,6 +383,96 @@
     return rows;
   }
 
+  function exteriorWallDatumRows(): DatumRow[] {
+    return uniqueDatumRows([...massEdgeDatumRows(), ...adjacentSpaceDatumRows()]);
+  }
+
+  function massEdgeDatumRows(): DatumRow[] {
+    const masses = (planData.masses ?? {}) as AnyRecord;
+    const rows: DatumRow[] = [];
+    for (const ref of selectedWallEdgeRefs) {
+      const mass = masses[ref.massId] as AnyRecord | undefined;
+      const rect = ref.rectIndex === null ? mass?.rect : mass?.rects?.[ref.rectIndex ?? 0];
+      if (!rect || !Array.isArray(rect.x) || !Array.isArray(rect.y)) {
+        continue;
+      }
+      const axis: "x" | "y" = ref.edge === "left" || ref.edge === "right" ? "x" : "y";
+      const edgeIndex: 0 | 1 = ref.edge === "left" || ref.edge === "top" ? 0 : 1;
+      const path =
+        ref.rectIndex === null
+          ? ["masses", ref.massId, "rect", axis, edgeIndex]
+          : ["masses", ref.massId, "rects", ref.rectIndex, axis, edgeIndex];
+      const label = `${ref.massId}${ref.rectIndex === null ? "" : ` #${ref.rectIndex + 1}`} ${edgeDisplayName(ref.edge)}`;
+      rows.push(datumRow(label, axis, rect[axis][edgeIndex], path));
+    }
+    return rows;
+  }
+
+  function adjacentSpaceDatumRows(): DatumRow[] {
+    if (!selectedWallLine) {
+      return [];
+    }
+    const horizontal = Math.abs(selectedWallLine.y1 - selectedWallLine.y2) < 0.01;
+    const vertical = Math.abs(selectedWallLine.x1 - selectedWallLine.x2) < 0.01;
+    if (!horizontal && !vertical) {
+      return [];
+    }
+    const rows: DatumRow[] = [];
+    for (const [spaceId] of spaces) {
+      const rect = spaceRect(spaceId);
+      if (!rect) {
+        continue;
+      }
+      if (horizontal) {
+        const y = selectedWallLine.y1;
+        const left = Math.min(selectedWallLine.x1, selectedWallLine.x2);
+        const right = Math.max(selectedWallLine.x1, selectedWallLine.x2);
+        if (intervalOverlaps(rect.left, rect.right, left, right)) {
+          if (Math.abs(rect.top - y) < 0.02) {
+            rows.push(...compactRows(spaceEdgeDatumRow(spaceId, "north")));
+          }
+          if (Math.abs(rect.bottom - y) < 0.02) {
+            rows.push(...compactRows(spaceEdgeDatumRow(spaceId, "south")));
+          }
+        }
+      }
+      if (vertical) {
+        const x = selectedWallLine.x1;
+        const top = Math.min(selectedWallLine.y1, selectedWallLine.y2);
+        const bottom = Math.max(selectedWallLine.y1, selectedWallLine.y2);
+        if (intervalOverlaps(rect.top, rect.bottom, top, bottom)) {
+          if (Math.abs(rect.left - x) < 0.02) {
+            rows.push(...compactRows(spaceEdgeDatumRow(spaceId, "west")));
+          }
+          if (Math.abs(rect.right - x) < 0.02) {
+            rows.push(...compactRows(spaceEdgeDatumRow(spaceId, "east")));
+          }
+        }
+      }
+    }
+    return rows;
+  }
+
+  function uniqueDatumRows(rows: DatumRow[]) {
+    const seen = new Set<string>();
+    return rows.filter((row) => {
+      const key = row.path.join("|");
+      if (seen.has(key)) {
+        return false;
+      }
+      seen.add(key);
+      return true;
+    });
+  }
+
+  function intervalOverlaps(a1: number, a2: number, b1: number, b2: number) {
+    return Math.min(a2, b2) - Math.max(a1, b1) > 0.02;
+  }
+
+  function edgeDisplayName(edge: MassEdgeRef["edge"]) {
+    return edge === "left" ? "West" : edge === "right" ? "East" : edge === "top" ? "North" : "South";
+  }
+
   function compactRows(...rows: Array<DatumRow | null>) {
     return rows.filter((row): row is DatumRow => Boolean(row));
   }
@@ -390,45 +483,154 @@
       return null;
     }
     if (side === "west" && Array.isArray(space.x)) {
-      return datumRow(`${spaceDisplayName(spaceId)} West`, "x", space.x[0], spaceId, 0);
+      return datumRow(`${spaceDisplayName(spaceId)} West`, "x", space.x[0], ["levels", activeLevel, "spaces", spaceId, "x", 0]);
     }
     if (side === "east" && Array.isArray(space.x)) {
-      return datumRow(`${spaceDisplayName(spaceId)} East`, "x", space.x[1], spaceId, 1);
+      return datumRow(`${spaceDisplayName(spaceId)} East`, "x", space.x[1], ["levels", activeLevel, "spaces", spaceId, "x", 1]);
     }
     if (side === "north" && Array.isArray(space.y)) {
-      return datumRow(`${spaceDisplayName(spaceId)} North`, "y", space.y[0], spaceId, 0);
+      return datumRow(`${spaceDisplayName(spaceId)} North`, "y", space.y[0], ["levels", activeLevel, "spaces", spaceId, "y", 0]);
     }
     if (side === "south" && Array.isArray(space.y)) {
-      return datumRow(`${spaceDisplayName(spaceId)} South`, "y", space.y[1], spaceId, 1);
+      return datumRow(`${spaceDisplayName(spaceId)} South`, "y", space.y[1], ["levels", activeLevel, "spaces", spaceId, "y", 1]);
     }
     return null;
   }
 
-  function datumRow(label: string, axis: "x" | "y", name: unknown, spaceId: string, edgeIndex: 0 | 1): DatumRow {
+  function datumRow(label: string, axis: "x" | "y", name: unknown, path: Array<string | number>): DatumRow {
     const datumName = String(name ?? "");
     const numeric = Number(name);
     const linked = typeof name === "string" && Number.isNaN(numeric);
-    return { label, axis, name: datumName, value: linked ? datums[axis]?.[datumName] : numeric, linked, spaceId, edgeIndex };
+    return { label, axis, name: datumName, value: linked ? datums[axis]?.[datumName] : numeric, linked, path };
   }
 
   function updateDatumRowValue(row: DatumRow, value: string) {
     if (row.linked) {
       updateNumber(["datums", row.axis, row.name], value);
     } else {
-      updateNumber(["levels", activeLevel, "spaces", row.spaceId, row.axis, row.edgeIndex], value);
+      updateNumber(row.path, value);
     }
   }
 
-  function unlinkDatumRow(row: DatumRow) {
+  function createDatumForRow(row: DatumRow) {
+    const suggestedName = uniqueDatumName(row);
+    const requestedName = window.prompt("New datum name", suggestedName);
+    if (requestedName === null) {
+      return;
+    }
+    const datumName = uniqueDatumName(row, requestedName);
     const value = Number(row.value);
-    updateField(["levels", activeLevel, "spaces", row.spaceId, row.axis, row.edgeIndex], Number.isNaN(value) ? 0 : value);
+    updateField(["datums", row.axis, datumName], Number.isNaN(value) ? 0 : value);
+    updateDatumReference(row, datumName);
+  }
+
+  function uniqueDatumName(row: DatumRow, preferredName = "") {
+    const existing = new Set(datumOptions(row.axis));
+    const base = cleanDatumName(preferredName || row.label);
+    let name = base;
+    let index = 2;
+    while (existing.has(name)) {
+      name = `${base}_${index}`;
+      index += 1;
+    }
+    return name;
+  }
+
+  function cleanDatumName(label: string) {
+    const directionSuffix: Record<string, string> = { west: "w", east: "e", north: "n", south: "s" };
+    const parts = label
+      .toLowerCase()
+      .replace(/[/#]+/g, " ")
+      .split(/[^a-z0-9]+/)
+      .filter(Boolean);
+    const last = parts[parts.length - 1] ?? "datum";
+    if (directionSuffix[last]) {
+      parts[parts.length - 1] = directionSuffix[last];
+    }
+    return (parts.join("_") || "datum").replace(/_+/g, "_");
+  }
+
+  function changeDatumSelection(row: DatumRow, value: string) {
+    if (value === "__new") {
+      createDatumForRow(row);
+      return;
+    }
+    linkDatumRow(row, value);
   }
 
   function linkDatumRow(row: DatumRow, datumName: string) {
     if (!datumName) {
       return;
     }
-    updateField(["levels", activeLevel, "spaces", row.spaceId, row.axis, row.edgeIndex], datumName);
+    updateDatumReference(row, datumName);
+  }
+
+  function updateDatumReference(row: DatumRow, datumName: string) {
+    for (const path of constrainedDatumPaths(row)) {
+      updateField(path, datumName);
+    }
+  }
+
+  function constrainedDatumPaths(row: DatumRow) {
+    const paths = [row.path];
+    const parsed = parseSpaceDatumPath(row.path);
+    if (!parsed) {
+      return paths;
+    }
+    const sourceRef = `${parsed.levelId}.${parsed.spaceId}`;
+    for (const stack of stacks) {
+      const members = Array.isArray(stack.members) ? stack.members : [];
+      if (!members.includes(sourceRef) || !stackConstrainsDatumEdge(stack, parsed.axis, parsed.edgeIndex)) {
+        continue;
+      }
+      for (const member of members) {
+        if (member === sourceRef || typeof member !== "string" || !member.includes(".")) {
+          continue;
+        }
+        const [levelId, spaceId] = member.split(".", 2);
+        const space = ((planData.levels as AnyRecord | undefined)?.[levelId]?.spaces ?? {})[spaceId] as AnyRecord | undefined;
+        if (Array.isArray(space?.[parsed.axis])) {
+          paths.push(["levels", levelId, "spaces", spaceId, parsed.axis, parsed.edgeIndex]);
+        }
+      }
+    }
+    return uniquePaths(paths);
+  }
+
+  function parseSpaceDatumPath(
+    path: Array<string | number>
+  ): { levelId: string; spaceId: string; axis: "x" | "y"; edgeIndex: 0 | 1 } | null {
+    if (path.length !== 6 || path[0] !== "levels" || path[2] !== "spaces") {
+      return null;
+    }
+    const [_, levelId, __, spaceId, axis, edgeIndex] = path;
+    if (typeof levelId !== "string" || typeof spaceId !== "string" || (axis !== "x" && axis !== "y") || (edgeIndex !== 0 && edgeIndex !== 1)) {
+      return null;
+    }
+    return { levelId, spaceId, axis, edgeIndex };
+  }
+
+  function stackConstrainsDatumEdge(stack: AnyRecord, axis: "x" | "y", edgeIndex: 0 | 1) {
+    const same = Array.isArray(stack.same) ? stack.same : [];
+    if (same.includes("bbox")) {
+      return true;
+    }
+    if (axis === "x") {
+      return edgeIndex === 0 ? same.includes("x") || same.includes("w") : same.includes("w");
+    }
+    return edgeIndex === 0 ? same.includes("y") || same.includes("h") : same.includes("h");
+  }
+
+  function uniquePaths(paths: Array<Array<string | number>>) {
+    const seen = new Set<string>();
+    return paths.filter((path) => {
+      const key = path.join("|");
+      if (seen.has(key)) {
+        return false;
+      }
+      seen.add(key);
+      return true;
+    });
   }
 
   function datumOptions(axis: "x" | "y") {
@@ -1096,18 +1298,16 @@
               {#each scopedDatumRows as row}
                 <div class="field-label">{row.label}</div>
                 <label class="datum-pair">
-                  <span>{row.linked ? `${row.axis}: ${row.name}` : `${row.axis}: unlinked`}</span>
+                  <select class="datum-link" value={row.linked ? row.name : "__unlinked"} on:change={(event) => changeDatumSelection(row, event.currentTarget.value)}>
+                    <option value="__new">new...</option>
+                    {#if !row.linked}
+                      <option value="__unlinked" disabled>unlinked</option>
+                    {/if}
+                    {#each datumOptions(row.axis) as datumName}
+                      <option value={datumName}>{datumName}</option>
+                    {/each}
+                  </select>
                   <input type="number" step="0.5" value={row.value ?? ""} on:input={(event) => updateDatumRowValue(row, event.currentTarget.value)} />
-                  {#if row.linked}
-                    <button type="button" class="datum-action" on:click={() => unlinkDatumRow(row)}>unlink</button>
-                  {:else}
-                    <select class="datum-link" value="" on:change={(event) => linkDatumRow(row, event.currentTarget.value)}>
-                      <option value="">link...</option>
-                      {#each datumOptions(row.axis) as datumName}
-                        <option value={datumName}>{datumName}</option>
-                      {/each}
-                    </select>
-                  {/if}
                 </label>
               {/each}
             </div>

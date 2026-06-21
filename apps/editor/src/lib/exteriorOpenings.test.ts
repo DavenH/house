@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   inferSpaceSideForWallLine,
+  openingReferenceForWall,
   stabilizeGeneratedExteriorWallOpenings
 } from "./exteriorOpenings";
 import type { AnyRecord, WallLine } from "./types";
@@ -35,6 +36,15 @@ describe("exterior opening stabilization", () => {
       kind: "window",
       space: "dining",
       side: "south"
+    });
+  });
+
+  it("keeps direct add-window references on generated exterior wall ids", () => {
+    const data = planData();
+    const line = { x1: 32, y1: 22.5, x2: 32, y2: 30 };
+
+    expect(openingReferenceForWall(data, "L1", "exterior_15", line)).toEqual({
+      wall: "exterior_15"
     });
   });
 });

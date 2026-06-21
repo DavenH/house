@@ -1,12 +1,11 @@
 <script lang="ts">
   import { tick } from "svelte";
   import type { PlanDocument, PlanSummary } from "../lib/api";
-  import { serializeCanvasSvgForExport } from "../lib/canvasSvg";
+  import { serializeCanvasSvgForExport, serializePrintableFloorPages } from "../lib/canvasSvg";
 
   export let document: PlanDocument | null = null;
   export let plans: PlanSummary[] = [];
   export let selectedPlan = "";
-  export let status = "";
   export let dirty = false;
   export let error = "";
   export let svg = "";
@@ -23,8 +22,30 @@
   let canvasPadX = 0;
   let canvasPadY = 0;
   let lastPositionedPlan = "";
+  const layerOptions = [
+    { id: "dimensions", label: "Dimensions", selectors: [".dimension", ".dimension-projection", ".dimension-label"] },
+    { id: "compass", label: "Compass", selectors: [".compass"] },
+    { id: "roofs", label: "Roofs", selectors: ['[data-fp-layer="roofs"]'] },
+    { id: "labels", label: "Room labels", selectors: [".label", ".label-dimension", ".title"] },
+    { id: "furniture", label: "Furniture", selectors: ['[data-fp-kind="feature"]'] },
+    { id: "clearances", label: "Clearances", selectors: ['[data-fp-kind="feature-clearance"]'] },
+    { id: "stairs", label: "Stairs", selectors: [".stair"] },
+    { id: "openings", label: "Doors/windows", selectors: [".opening-mask", ".opening-hit-target"] },
+    { id: "grid", label: "Grid", selectors: [".grid-1ft", ".grid-10ft"] },
+    { id: "annotations", label: "Annotations", selectors: ['[data-fp-layer="annotations"]'] },
+    { id: "plumbing", label: "Plumbing", selectors: ['[data-fp-layer="plumbing"]'] },
+    { id: "electrical", label: "Electrical", selectors: ['[data-fp-layer="electrical"]'] },
+    { id: "lighting", label: "Lighting", selectors: ['[data-fp-layer="lighting"]'] },
+    { id: "light-paths", label: "Light paths", selectors: ['[data-fp-layer="light-paths"]'] },
+    { id: "walking-flow", label: "Walking flow", selectors: ['[data-fp-layer="walking-flow"]'] }
+  ];
+  let layerVisibility = defaultLayerVisibility();
+  let availableLayerIds = new Set<string>();
+  $: visibleLayerOptions = layerOptions.filter((layer) => availableLayerIds.has(layer.id));
 
-  $: void applySvgZoom(svg, canvasZoom);
+  $: void applySvgZoom(svg, canvasZoom, canvasElement);
+  $: void detectAvailableLayers(svg, canvasElement);
+  $: void applyLayerVisibility(svg, layerVisibility, canvasElement);
 
   async function copyError() {
     if (!error) {
@@ -38,18 +59,34 @@
       return;
     }
     const exportedSvg = serializeCanvasSvgForExport(canvasElement, svg);
-    const blob = new Blob([exportedSvg], { type: "image/svg+xml;charset=utf-8" });
+    downloadBlob(exportedSvg, exportFilename(".svg"), "image/svg+xml;charset=utf-8");
+  }
+
+  function exportPrintPages() {
+    if (!svg) {
+      return;
+    }
+    const html = serializePrintableFloorPages(canvasElement, svg, exportBaseName());
+    downloadBlob(html, exportFilename(".print.html"), "text/html;charset=utf-8");
+  }
+
+  function downloadBlob(content: string, filename: string, type: string) {
+    const blob = new Blob([content], { type });
     const url = URL.createObjectURL(blob);
     const link = globalThis.document.createElement("a");
     link.href = url;
-    link.download = exportFilename();
+    link.download = filename;
     link.click();
     URL.revokeObjectURL(url);
   }
 
-  function exportFilename() {
+  function exportFilename(extension: string) {
+    return exportBaseName() + extension;
+  }
+
+  function exportBaseName() {
     const source = document?.name ?? selectedPlan ?? "floor-plan";
-    return source.replace(/\.(ya?ml|json)$/i, "") + ".svg";
+    return source.replace(/\.(ya?ml|json)$/i, "");
   }
 
   function clearSelectHighlight(event: Event) {
@@ -57,7 +94,7 @@
     window.getSelection()?.removeAllRanges();
   }
 
-  async function applySvgZoom(_svg: string, zoom: number) {
+  async function applySvgZoom(_svg: string, zoom: number, _canvasElement: HTMLDivElement | undefined) {
     await tick();
     const svgElement = canvasElement?.querySelector("svg");
     if (!svgElement) {
@@ -78,6 +115,49 @@
       canvasFrame.scrollLeft = canvasPadX;
       canvasFrame.scrollTop = canvasPadY;
     }
+  }
+
+  async function applyLayerVisibility(
+    _svg: string,
+    visibility: Record<string, boolean>,
+    _canvasElement: HTMLDivElement | undefined
+  ) {
+    await tick();
+    const svgElement = canvasElement?.querySelector("svg");
+    if (!svgElement) {
+      return;
+    }
+    for (const layer of layerOptions) {
+      const visible = visibility[layer.id] !== false;
+      svgElement.querySelectorAll(layer.selectors.join(",")).forEach((element) => {
+        element.classList.toggle("layer-hidden", !visible);
+      });
+    }
+  }
+
+  async function detectAvailableLayers(_svg: string, _canvasElement: HTMLDivElement | undefined) {
+    await tick();
+    const svgElement = canvasElement?.querySelector("svg");
+    if (!svgElement) {
+      availableLayerIds = new Set();
+      return;
+    }
+    availableLayerIds = new Set(
+      layerOptions
+        .filter((layer) => svgElement.querySelector(layer.selectors.join(",")))
+        .map((layer) => layer.id)
+    );
+  }
+
+  function toggleLayer(layerId: string, checked: boolean) {
+    layerVisibility = { ...layerVisibility, [layerId]: checked };
+  }
+
+  function defaultLayerVisibility() {
+    return layerOptions.reduce<Record<string, boolean>>((visibility, layer) => {
+      visibility[layer.id] = true;
+      return visibility;
+    }, {});
   }
 
   function updateCanvasExtents(svgWidth: number, svgHeight: number) {
@@ -106,7 +186,7 @@
     const contentY = canvasFrame.scrollTop + anchorY - canvasPadY;
     const ratio = nextZoom / currentZoom;
     canvasZoom = nextZoom;
-    await applySvgZoom(svg, nextZoom);
+    await applySvgZoom(svg, nextZoom, canvasElement);
     canvasFrame.scrollLeft = contentX * ratio + canvasPadX - anchorX;
     canvasFrame.scrollTop = contentY * ratio + canvasPadY - anchorY;
   }
@@ -121,23 +201,47 @@
         <span class="current-plan-name">{document?.name ?? "No plan selected"}</span>
       </div>
       <div class="header-controls">
-        <label>
-          <span>Plan</span>
-          <select
-            bind:value={selectedPlan}
-            on:change={(event) => {
-              clearSelectHighlight(event);
-              selectPlan(selectedPlan);
-            }}
-          >
-            {#each plans as plan}
-              <option value={plan.name}>{plan.title ?? plan.name}</option>
-            {/each}
-          </select>
-        </label>
-        <button type="button" disabled={!svg} on:click={exportSvg}>Export SVG</button>
-        <button type="button" class="primary" disabled={!dirty} on:click={() => saveCurrentPlan()}>Save</button>
-        <span class:dirty class="status-text">{status}</span>
+        <div class="toolbar-group plan-group">
+          <label>
+            <span>Plan</span>
+            <select
+              bind:value={selectedPlan}
+              on:change={(event) => {
+                clearSelectHighlight(event);
+                selectPlan(selectedPlan);
+              }}
+            >
+              {#each plans as plan}
+                <option value={plan.name}>{plan.title ?? plan.name}</option>
+              {/each}
+            </select>
+          </label>
+        </div>
+        <div class="toolbar-group layers-group">
+          <details class="layer-menu">
+            <summary>Layers <span aria-hidden="true">▾</span></summary>
+            <div class="layer-options">
+              {#each visibleLayerOptions as layer}
+              <label>
+                <span>{layer.label}</span>
+                <input
+                  type="checkbox"
+                  checked={layerVisibility[layer.id] !== false}
+                  on:change={(event) => toggleLayer(layer.id, event.currentTarget.checked)}
+                />
+              </label>
+              {/each}
+            </div>
+          </details>
+        </div>
+        <div class="toolbar-group file-group">
+          <span class="toolbar-label">File</span>
+          <div class="file-actions">
+            <button type="button" disabled={!svg} on:click={exportSvg}>Export SVG</button>
+            <button type="button" disabled={!svg} on:click={exportPrintPages}>Print pages</button>
+            <button type="button" class="primary" disabled={!dirty} on:click={() => saveCurrentPlan()}>Save</button>
+          </div>
+        </div>
       </div>
     </div>
     <div class:error={Boolean(error)} class:empty-error={!error} class="error-region">

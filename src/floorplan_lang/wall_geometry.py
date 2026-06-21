@@ -1,4 +1,4 @@
-"""Shared orthogonal wall geometry helpers."""
+"""Shared wall geometry helpers."""
 
 from __future__ import annotations
 
@@ -7,9 +7,12 @@ from typing import Literal
 from floorplan_lang.geometry import Point
 
 Direction = Literal["N", "E", "S", "W"]
+Vector = tuple[float, float]
 
 
-def direction_delta(direction: Direction, length: float) -> tuple[float, float]:
+def direction_delta(direction: Direction | Vector, length: float) -> tuple[float, float]:
+    if isinstance(direction, tuple):
+        return (direction[0] * length, direction[1] * length)
     if direction == "N":
         return (0, -length)
     if direction == "E":
@@ -19,13 +22,20 @@ def direction_delta(direction: Direction, length: float) -> tuple[float, float]:
     return (-length, 0)
 
 
-def direction_unit(direction: Direction) -> tuple[float, float]:
+def direction_unit(direction: Direction | Vector) -> tuple[float, float]:
     return direction_delta(direction, 1)
 
 
-def direction_normal(direction: Direction) -> tuple[float, float]:
+def direction_normal(direction: Direction | Vector) -> tuple[float, float]:
     dx, dy = direction_unit(direction)
     return (-dy, dx)
+
+
+def unit_vector(start: Point, end: Point) -> Vector:
+    dx = end.x - start.x
+    dy = end.y - start.y
+    length = max((dx * dx + dy * dy) ** 0.5, 1e-9)
+    return (dx / length, dy / length)
 
 
 def closing_direction(current: Point, start: Point) -> Direction:

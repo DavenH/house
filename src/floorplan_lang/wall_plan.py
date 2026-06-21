@@ -27,6 +27,8 @@ from floorplan_lang.wall_model import (
     Direction,
     Feature,
     FeatureAnchor,
+    OverlayLine,
+    RoofSection,
     Stair,
     StairRun,
     WallExtrusion,
@@ -118,16 +120,7 @@ def wall_plan_from_dict(data: dict[str, Any]) -> WallPlan:
             if "gaps" in wall_data:
                 raise ValueError(f"{level_id}.{wall_data.get('id', f'wall_{wall_id + 1}')} uses deprecated wall gaps")
             wall_id += 1
-            level.walls.append(
-                WallSegment(
-                    id=wall_data.get("id", f"wall_{wall_id}"),
-                    at=_point(wall_data["at"]),
-                    direction=wall_data["dir"],
-                    length=float(wall_data["len"]),
-                    kind=wall_data.get("kind", "interior"),
-                    offset=float(wall_data["offset"]) if "offset" in wall_data else None,
-                )
-            )
+            level.walls.append(_wall_from_dict(wall_data, wall_data.get("id", f"wall_{wall_id}")))
         for area_id, area_data in (level_data.get("areas") or {}).items():
             level.areas.append(
                 AreaLabel(
@@ -182,6 +175,8 @@ def wall_plan_from_dict(data: dict[str, Any]) -> WallPlan:
                 level.access.append((edge["from"], edge["to"]))
             else:
                 level.access.append((edge[0], edge[1]))
+        level.overlays.extend(_overlay_lines_from_dict(level_data.get("overlays") or {}))
+        level.roofs.extend(_roof_sections_from_dict(level_data.get("roofs") or []))
         plan.levels[level_id] = level
     for stair_id, stair_data in (data.get("stairs") or {}).items():
         plan.stairs.append(_stair_from_dict(stair_id, stair_data))
@@ -211,6 +206,45 @@ def _stair_from_dict(stair_id: str, data: dict[str, Any]) -> Stair:
         landings=[_rect(landing["rect"] if isinstance(landing, dict) else landing) for landing in data.get("landings") or []],
         warnings=[str(warning) for warning in data.get("warnings") or []],
     )
+
+
+def _overlay_lines_from_dict(data: Any) -> list[OverlayLine]:
+    lines = []
+    for layer, items in (data or {}).items():
+        for index, item in enumerate(items or (), start=1):
+            item_data = dict(item)
+            lines.append(
+                OverlayLine(
+                    id=item_data.get("id", f"{layer}_{index}"),
+                    layer=str(item_data.get("layer", layer)),
+                    points=tuple(_point(point) for point in item_data["points"]),
+                    kind=str(item_data.get("kind", "line")),
+                    label=item_data.get("label"),
+                    color=item_data.get("color", "#2b78c2"),
+                    width=float(item_data.get("width", 0.18)),
+                    dash=item_data.get("dash"),
+                )
+            )
+    return lines
+
+
+def _roof_sections_from_dict(data: Any) -> list[RoofSection]:
+    roofs = []
+    for index, item in enumerate(data or (), start=1):
+        item_data = dict(item)
+        roofs.append(
+            RoofSection(
+                id=item_data.get("id", f"roof_{index}"),
+                rect=_rect(item_data["rect"]),
+                mode=str(item_data.get("mode", "hip")),
+                pitch=_pitch(item_data.get("pitch")) if item_data.get("pitch") is not None else None,
+                eave_height=float(item_data["eave_height"]) if item_data.get("eave_height") is not None else None,
+                eave_margin=float(item_data.get("eave_margin", 2.0)),
+                ridge=_roof_ridge(item_data),
+                **_roof_end_options(item_data),
+            )
+        )
+    return roofs
 
 
 def render_wall_plan_svg(
@@ -256,6 +290,7 @@ def render_wall_plan_svg(
         )
         if show_grid:
             parts.extend(_render_grid(level_box, level, scale))
+        parts.extend(_render_roofs(level.roofs, level.id, scale))
         parts.extend(_render_building_fills(level, scale))
         parts.extend(_render_perimeter_dimensions(level, scale))
         for zone in level.zones:
@@ -353,6 +388,7 @@ def render_wall_plan_svg(
                     f'-webkit-user-select:none;-moz-user-select:none;user-select:none" x="{x:.3f}" '
                     f'y="{y:.3f}"{transform}>{escape(dimension_label)}</text>'
                 )
+        parts.extend(_render_overlays(level.overlays, level.id, scale))
         parts.append(
             f'<text class="title" pointer-events="none" unselectable="on" '
             f'style="-webkit-user-select:none;-moz-user-select:none;user-select:none" '
@@ -522,10 +558,10 @@ def _render_stair_annotation(stair: Stair, bbox: Rect, scale: float) -> list[str
     label_at = Point(elbow.x + 1.82, elbow.y)
     label = f'{stair.risers}R  {stair.rise * 12:.1f}" rise / {stair.tread_depth * 12:.1f}" tread'
     return [
-        f'<circle class="stair-note-dot" cx="{start.x * scale:.3f}" cy="{start.y * scale:.3f}" r="{0.12 * scale:.3f}" />',
-        f'<path class="stair-note-leader" d="M {start.x * scale:.3f} {start.y * scale:.3f} '
+        f'<circle class="stair-note-dot" data-fp-layer="annotations" cx="{start.x * scale:.3f}" cy="{start.y * scale:.3f}" r="{0.12 * scale:.3f}" />',
+        f'<path class="stair-note-leader" data-fp-layer="annotations" d="M {start.x * scale:.3f} {start.y * scale:.3f} '
         f'L {elbow.x * scale:.3f} {elbow.y * scale:.3f} L {(label_at.x - 0.25) * scale:.3f} {elbow.y * scale:.3f}" />',
-        f'<text class="stair-note" x="{label_at.x * scale:.3f}" y="{label_at.y * scale:.3f}">{escape(label)}</text>',
+        f'<text class="stair-note" data-fp-layer="annotations" x="{label_at.x * scale:.3f}" y="{label_at.y * scale:.3f}">{escape(label)}</text>',
     ]
 
 
@@ -547,6 +583,132 @@ def _render_space_select_target(zone: Zone, level_id: str, scale: float) -> str:
         f'<rect class="space-select-target" data-fp-kind="space" data-fp-level="{escape(level_id)}" '
         f'data-fp-id="{escape(zone.id)}" x="{zone.rect.x * scale:.3f}" y="{zone.rect.y * scale:.3f}" '
         f'width="{zone.rect.w * scale:.3f}" height="{zone.rect.h * scale:.3f}" />'
+    )
+
+
+def _render_roofs(roofs: list[RoofSection], level_id: str, scale: float) -> list[str]:
+    return [_render_roof(roof, level_id, scale) for roof in roofs]
+
+
+def _render_roof(roof: RoofSection, level_id: str, scale: float) -> str:
+    eave_rect = _roof_eave_rect(roof)
+    footprint = roof.rect
+    parts = [
+        f'<g class="roof-section roof-{escape(roof.mode)}" data-fp-layer="roofs" '
+        f'data-fp-level="{escape(level_id)}" data-fp-id="{escape(roof.id)}">',
+        f'<path class="roof-eave-fill" fill-rule="evenodd" d="{_rect_path(eave_rect, scale)} {_rect_path(footprint, scale)}" />',
+        f'<rect class="roof-fill" x="{footprint.x * scale:.3f}" y="{footprint.y * scale:.3f}" '
+        f'width="{footprint.w * scale:.3f}" height="{footprint.h * scale:.3f}" />',
+    ]
+    parts.extend(_render_roof_lines(roof, scale))
+    parts.append("</g>")
+    return "".join(parts)
+
+
+def _render_roof_lines(roof: RoofSection, scale: float) -> list[str]:
+    rect = _roof_eave_rect(roof)
+    mode = roof.mode.replace("-", "_")
+    if mode == "flat":
+        return [
+            f'<line class="roof-slope-line" x1="{rect.left * scale:.3f}" y1="{rect.top * scale:.3f}" '
+            f'x2="{rect.right * scale:.3f}" y2="{rect.bottom * scale:.3f}" />'
+        ]
+    start = "hip" if mode == "hip" else roof.start.replace("-", "_")
+    end = "hip" if mode == "hip" else roof.end.replace("-", "_")
+    if _roof_ridge_is_horizontal(roof, rect):
+        ridge_start = Point(rect.left if start == "open" else rect.left + rect.h / 2, rect.cy)
+        ridge_end = Point(rect.right if end == "open" else rect.right - rect.h / 2, rect.cy)
+    else:
+        ridge_start = Point(rect.cx, rect.top if start == "open" else rect.top + rect.w / 2)
+        ridge_end = Point(rect.cx, rect.bottom if end == "open" else rect.bottom - rect.w / 2)
+    lines = [_roof_line(ridge_start, ridge_end, scale, "roof-ridge")]
+    if _roof_ridge_is_horizontal(roof, rect):
+        if start == "hip":
+            lines.extend(
+                [
+                    _roof_line(Point(rect.left, rect.top), ridge_start, scale, "roof-hip"),
+                    _roof_line(Point(rect.left, rect.bottom), ridge_start, scale, "roof-hip"),
+                ]
+            )
+        else:
+            lines.append(_roof_line(Point(rect.left, rect.top), Point(rect.left, rect.bottom), scale, "roof-gable-end"))
+        if end == "hip":
+            lines.extend(
+                [
+                    _roof_line(Point(rect.right, rect.top), ridge_end, scale, "roof-hip"),
+                    _roof_line(Point(rect.right, rect.bottom), ridge_end, scale, "roof-hip"),
+                ]
+            )
+        else:
+            lines.append(_roof_line(Point(rect.right, rect.top), Point(rect.right, rect.bottom), scale, "roof-gable-end"))
+    else:
+        if start == "hip":
+            lines.extend(
+                [
+                    _roof_line(Point(rect.left, rect.top), ridge_start, scale, "roof-hip"),
+                    _roof_line(Point(rect.right, rect.top), ridge_start, scale, "roof-hip"),
+                ]
+            )
+        else:
+            lines.append(_roof_line(Point(rect.left, rect.top), Point(rect.right, rect.top), scale, "roof-gable-end"))
+        if end == "hip":
+            lines.extend(
+                [
+                    _roof_line(Point(rect.right, rect.bottom), ridge_end, scale, "roof-hip"),
+                    _roof_line(Point(rect.left, rect.bottom), ridge_end, scale, "roof-hip"),
+                ]
+            )
+        else:
+            lines.append(_roof_line(Point(rect.left, rect.bottom), Point(rect.right, rect.bottom), scale, "roof-gable-end"))
+    return lines
+
+
+def _roof_end_options(data: dict[str, Any]) -> dict[str, str]:
+    mode = str(data.get("mode", "hip")).replace("-", "_")
+    start = "hip" if mode == "hip" else "open"
+    end = "hip" if mode == "hip" else "open"
+    ends = data.get("ends")
+    if isinstance(ends, dict):
+        start = str(ends.get("start", start))
+        end = str(ends.get("end", end))
+    elif isinstance(ends, list | tuple):
+        values = [str(value) for value in ends]
+        if len(values) >= 1:
+            start = values[0]
+        if len(values) >= 2:
+            end = values[1]
+    if data.get("start") is not None:
+        start = str(data["start"])
+    if data.get("end") is not None:
+        end = str(data["end"])
+    return {"start": start, "end": end}
+
+
+def _roof_ridge(data: dict[str, Any]) -> str | None:
+    ridge = data.get("ridge", data.get("ridge_axis"))
+    return str(ridge) if ridge is not None else None
+
+
+def _roof_eave_rect(roof: RoofSection) -> Rect:
+    overhang = EXTERIOR_WALL_THICKNESS_FT + roof.eave_margin
+    return roof.rect.padded(overhang)
+
+
+def _roof_ridge_is_horizontal(roof: RoofSection, rect: Rect) -> bool:
+    if roof.ridge is None:
+        return rect.w >= rect.h
+    value = roof.ridge.lower().replace("-", "_")
+    if value in {"x", "horizontal", "east_west", "e_w", "ew"}:
+        return True
+    if value in {"y", "vertical", "north_south", "n_s", "ns"}:
+        return False
+    return rect.w >= rect.h
+
+
+def _roof_line(start: Point, end: Point, scale: float, class_name: str) -> str:
+    return (
+        f'<line class="{class_name}" x1="{start.x * scale:.3f}" y1="{start.y * scale:.3f}" '
+        f'x2="{end.x * scale:.3f}" y2="{end.y * scale:.3f}" />'
     )
 
 
@@ -684,7 +846,7 @@ def _validate_level(level: WallLevel, *, strict_features: bool = True) -> list[s
         if wall.id in seen:
             errors.append(f"{level.id}.{wall.id} is duplicated")
         seen.add(wall.id)
-        if wall.direction not in {"N", "E", "S", "W"}:
+        if wall.direction is not None and wall.direction not in {"N", "E", "S", "W"}:
             errors.append(f"{level.id}.{wall.id} has invalid direction {wall.direction!r}")
         if wall.length <= 0:
             errors.append(f"{level.id}.{wall.id} length must be positive")
@@ -902,6 +1064,7 @@ def _rect_covered_by_rects(target: Rect, rects: list[Rect]) -> bool:
 
 def _level_bbox(level: WallLevel) -> Rect:
     boxes = [wall.bbox for wall in level.walls]
+    boxes.extend(_roof_eave_rect(roof) for roof in level.roofs)
     for area in level.areas:
         boxes.append(Rect(area.at.x, area.at.y, 0.001, 0.001))
     for zone in level.zones:
@@ -925,13 +1088,15 @@ def _render_opening(opening: WallOpening, wall: WallSegment, level: WallLevel, s
     start = mask_wall.point_at(opening.offset + inset)
     end = mask_wall.point_at(opening.offset + opening.width - inset)
     mask_class = _opening_mask_class(opening, wall)
-    orientation = "horizontal" if wall.direction in {"E", "W"} else "vertical"
+    orientation = "horizontal" if wall.direction in {"E", "W"} else "vertical" if wall.direction in {"N", "S"} else "angled"
+    render_direction = wall.direction if wall.direction is not None else wall.unit
+    direction_attr = wall.direction if wall.direction is not None else "angled"
     full_width_opening = _opening_is_full_width(opening, wall)
     editor_attrs = ""
     if editable:
         editor_attrs = (
             f'data-fp-kind="opening" data-fp-level="{escape(level_id)}" data-fp-id="{escape(opening.id)}" '
-            f'data-fp-wall="{escape(wall.id)}" data-fp-direction="{wall.direction}" '
+            f'data-fp-wall="{escape(wall.id)}" data-fp-direction="{direction_attr}" '
             f'data-fp-orientation="{orientation}" data-fp-offset="{opening.offset:.3f}" '
             f'data-fp-width="{opening.width:.3f}" data-fp-wall-length="{wall.length:.3f}"'
         )
@@ -957,12 +1122,12 @@ def _render_opening(opening: WallOpening, wall: WallSegment, level: WallLevel, s
     if opening.kind == "open":
         return parts
     if opening.kind == "arch":
-        parts.extend(_render_arch(mark_start, mark_end, wall.direction, scale, editor_attrs))
+        parts.extend(_render_arch(mark_start, mark_end, render_direction, scale, editor_attrs))
         return parts
     if opening.kind == "window":
-        parts.extend(_render_window(mark_start, mark_end, wall.direction, scale, editor_attrs))
+        parts.extend(_render_window(mark_start, mark_end, render_direction, scale, editor_attrs))
     else:
-        parts.extend(_render_door(mark_start, mark_end, wall.direction, opening.swing, scale, editor_attrs))
+        parts.extend(_render_door(mark_start, mark_end, render_direction, opening.swing, scale, editor_attrs))
     if editable:
         parts.append(
             f'<line class="opening-hit-target" {editor_attrs} '
@@ -977,7 +1142,15 @@ def _opening_render_wall(opening: WallOpening, wall: WallSegment, level: WallLev
         return wall
     start, end = _interior_wall_render_endpoints(wall, level)
     start, end = _interior_wall_render_points(wall, start, end, level)
-    return WallSegment(id=wall.id, at=start, direction=wall.direction, length=start.distance_to(end), kind=wall.kind, offset=wall.offset)
+    return WallSegment(
+        id=wall.id,
+        at=start,
+        direction=wall.direction,
+        length=start.distance_to(end),
+        kind=wall.kind,
+        offset=wall.offset,
+        to=end if wall.to is not None else None,
+    )
 
 
 def _opening_is_full_width(opening: WallOpening, wall: WallSegment) -> bool:
@@ -999,7 +1172,7 @@ def _opening_mask_inset(opening: WallOpening, wall: WallSegment) -> float:
 
 
 def _exterior_opening_mark_segment(wall: WallSegment) -> WallSegment:
-    nx, ny = _normal(wall.direction)
+    nx, ny = wall.normal
     offset = -EXTERIOR_WALL_THICKNESS_FT / 2
     return WallSegment(
         id=wall.id,
@@ -1007,13 +1180,14 @@ def _exterior_opening_mark_segment(wall: WallSegment) -> WallSegment:
         direction=wall.direction,
         length=wall.length,
         kind=wall.kind,
+        to=Point(wall.end.x + nx * offset, wall.end.y + ny * offset) if wall.to is not None else None,
     )
 
 
 def _render_wall_segment(wall: WallSegment) -> WallSegment:
     if wall.kind != "exterior":
         return wall
-    nx, ny = _normal(wall.direction)
+    nx, ny = wall.normal
     # Intent/wall-plan exterior boundaries are authored as the inner wall face.
     # Shift the stroke center outward so rendered wall thickness has spatial consequence
     # outside the room layout instead of straddling interior space.
@@ -1025,6 +1199,7 @@ def _render_wall_segment(wall: WallSegment) -> WallSegment:
         length=wall.length,
         kind=wall.kind,
         offset=wall.offset,
+        to=Point(wall.end.x + nx * offset, wall.end.y + ny * offset) if wall.to is not None else None,
     )
 
 
@@ -1038,11 +1213,18 @@ def _render_wall_svg(wall: WallSegment, scale: float, level: WallLevel | None = 
             y = render_start.y * scale - thickness / 2
             width = abs(render_end.x - render_start.x) * scale
             height = thickness
-        else:
+        elif wall.direction in {"N", "S"}:
             x = render_start.x * scale - thickness / 2
             y = min(render_start.y, render_end.y) * scale
             width = thickness
             height = abs(render_end.y - render_start.y) * scale
+        else:
+            return (
+                f'<line class="{escape(wall.kind)}-line" x1="{render_start.x * scale:.3f}" y1="{render_start.y * scale:.3f}" '
+                f'x2="{render_end.x * scale:.3f}" y2="{render_end.y * scale:.3f}" '
+                f'stroke-width="{thickness:.3f}" stroke-linecap="butt" '
+                f'data-fp-kind="wall-select" data-fp-id="{escape(wall.id)}" />'
+            )
         return (
             f'<rect class="{escape(wall.kind)}" x="{x:.3f}" y="{y:.3f}" '
             f'width="{width:.3f}" height="{height:.3f}" '
@@ -1063,10 +1245,10 @@ def _interior_wall_render_points(
     if level is None:
         return (start, end)
     if wall.offset is not None:
-        return _offset_wall_points(start, end, wall.direction, wall.offset)
+        return _offset_wall_points(start, end, wall.unit, wall.offset)
     offset = _interior_wall_normal_offset(wall, level)
     if abs(offset) > EPSILON:
-        return _offset_wall_points(start, end, wall.direction, offset)
+        return _offset_wall_points(start, end, wall.unit, offset)
     return (start, end)
 
 
@@ -1074,6 +1256,8 @@ def _interior_wall_normal_offset(wall: WallSegment, level: WallLevel | None) -> 
     if wall.offset is not None:
         return wall.offset
     if level is None:
+        return 0
+    if not wall.is_axis_aligned:
         return 0
     inward = _inward_normal_sign_for_exterior_wall(wall, level) if _wall_lies_on_exterior_loop(wall, level) else 0
     if inward == 0:
@@ -1085,7 +1269,9 @@ def _interior_wall_normal_offset(wall: WallSegment, level: WallLevel | None) -> 
     return -inward * INTERIOR_WALL_STROKE_FT / 2
 
 
-def _offset_wall_points(start: Point, end: Point, direction: Direction, offset: float) -> tuple[Point, Point]:
+def _offset_wall_points(
+    start: Point, end: Point, direction: Direction | tuple[float, float], offset: float
+) -> tuple[Point, Point]:
     if abs(offset) <= EPSILON:
         return (start, end)
     nx, ny = _normal(direction)
@@ -1097,7 +1283,7 @@ def _offset_wall_points(start: Point, end: Point, direction: Direction, offset: 
 
 def _inward_normal_sign_for_exterior_wall(wall: WallSegment, level: WallLevel) -> float:
     midpoint = Point((wall.at.x + wall.end.x) / 2, (wall.at.y + wall.end.y) / 2)
-    nx, ny = _normal(wall.direction)
+    nx, ny = wall.normal
     for loop in _exterior_loops(level):
         clean_loop = loop[:-1] if loop and _same_point(loop[0], loop[-1]) else loop
         if len(clean_loop) < 3:
@@ -1113,6 +1299,8 @@ def _inward_normal_sign_for_exterior_wall(wall: WallSegment, level: WallLevel) -
 
 
 def _inward_normal_sign_for_exterior_endpoint_join(wall: WallSegment, level: WallLevel) -> float:
+    if wall.direction is None:
+        return 0
     nx, ny = _normal(wall.direction)
     for point in (wall.at, wall.end):
         if not _point_on_parallel_exterior_segment(point, wall.direction, level):
@@ -1133,6 +1321,8 @@ def _inward_normal_sign_for_exterior_endpoint_join(wall: WallSegment, level: Wal
 
 
 def _inward_normal_sign_for_perpendicular_exterior_endpoint_join(wall: WallSegment, level: WallLevel) -> float:
+    if wall.direction is None:
+        return 0
     nx, ny = _normal(wall.direction)
     wall_axis = "horizontal" if wall.direction in {"E", "W"} else "vertical"
     for point in (wall.at, wall.end):
@@ -1153,6 +1343,8 @@ def _inward_normal_sign_for_perpendicular_exterior_endpoint_join(wall: WallSegme
 
 
 def _inward_normal_sign_for_parallel_exterior_datum(wall: WallSegment, level: WallLevel) -> float:
+    if wall.direction is None:
+        return 0
     if wall.direction in {"E", "W"}:
         return _inward_normal_sign_for_horizontal_exterior_datum(wall.at.y, wall.direction, level)
     return _inward_normal_sign_for_vertical_exterior_datum(wall.at.x, wall.direction, level)
@@ -1249,7 +1441,7 @@ def _point_on_segment_local(point: Point, first: Point, second: Point, tolerance
 
 
 def _render_wall_hit_svg(wall: WallSegment, level: WallLevel, scale: float, openings: list[WallOpening]) -> str:
-    orientation = "horizontal" if wall.direction in {"E", "W"} else "vertical"
+    orientation = "horizontal" if wall.direction in {"E", "W"} else "vertical" if wall.direction in {"N", "S"} else "angled"
     fully_open = _wall_is_fully_open(wall, openings)
     render_wall = _render_wall_hit_segment(wall, level)
     end = render_wall.end
@@ -1268,7 +1460,7 @@ def _render_wall_hit_svg(wall: WallSegment, level: WallLevel, scale: float, open
         f'data-fp-level="{escape(level.id)}" data-fp-id="{escape(wall.id)}" '
         f'data-fp-orientation="{orientation}" {model_attrs} />',
     ]
-    if not fully_open and grip_length > EPSILON:
+    if orientation != "angled" and not fully_open and grip_length > EPSILON:
         parts.append(
             f'<line class="wall-grip-target" x1="{grip_start.x * scale:.3f}" y1="{grip_start.y * scale:.3f}" '
             f'x2="{grip_end.x * scale:.3f}" y2="{grip_end.y * scale:.3f}" data-fp-kind="wall-grip" '
@@ -1291,6 +1483,7 @@ def _render_wall_hit_segment(wall: WallSegment, level: WallLevel) -> WallSegment
         length=start.distance_to(end),
         kind=wall.kind,
         offset=wall.offset,
+        to=end if wall.to is not None else None,
     )
 
 
@@ -1626,7 +1819,9 @@ def _perimeter_dimension_sides(clean_outer: list[Point]) -> dict[str, dict[float
         end = clean_outer[(index + 1) % len(clean_outer)]
         if _same_point(start, end):
             continue
-        direction = _segment_direction(start, end)
+        direction = _axis_direction_or_none(start, end)
+        if direction is None:
+            continue
         nx, ny = _normal(direction)
         if clockwise:
             nx, ny = -nx, -ny
@@ -1782,6 +1977,106 @@ def _dimension_tick(point: Point, direction: Direction, scale: float) -> str:
     )
 
 
+def _render_overlays(overlays: list[OverlayLine], level_id: str, scale: float) -> list[str]:
+    parts = []
+    for overlay in overlays:
+        if len(overlay.points) < 2:
+            continue
+        if overlay.layer == "annotations":
+            parts.append(_render_annotation_overlay(overlay, level_id, scale))
+            continue
+        if overlay.kind == "riser":
+            parts.append(_render_riser_overlay(overlay, level_id, scale))
+            continue
+        dash = f' stroke-dasharray="{escape(overlay.dash)}"' if overlay.dash else ""
+        parts.append(
+            f'<g class="plan-overlay" data-fp-kind="overlay" data-fp-layer="{escape(overlay.layer)}" '
+            f'data-fp-level="{escape(level_id)}" data-fp-id="{escape(overlay.id)}">'
+            f'<path class="overlay-line" d="{_polyline_command(list(overlay.points), scale)}" '
+            f'data-fp-kind="overlay" data-fp-layer="{escape(overlay.layer)}" '
+            f'data-fp-level="{escape(level_id)}" data-fp-id="{escape(overlay.id)}" '
+            f'stroke="{escape(overlay.color)}" stroke-width="{overlay.width * scale:.3f}"{dash} />'
+            f"{_overlay_segment_targets(overlay, level_id, scale)}"
+            f"{_overlay_endpoint_markers(overlay, level_id, scale)}"
+            f"{_overlay_label(overlay, scale)}"
+            "</g>"
+        )
+    return parts
+
+
+def _render_riser_overlay(overlay: OverlayLine, level_id: str, scale: float) -> str:
+    origin = overlay.points[0]
+    length = 2.0
+    angle = radians(-60)
+    end = Point(origin.x + cos(angle) * length, origin.y + sin(angle) * length)
+    line = _polyline_command([origin, end], scale)
+    label = overlay.label or overlay.id.replace("_", " ").upper()
+    radius = max(overlay.width * scale * 1.25, 2.2)
+    dash = escape(overlay.dash or "4 3")
+    return (
+        f'<g class="plan-overlay riser-overlay" data-fp-kind="overlay" data-fp-layer="{escape(overlay.layer)}" '
+        f'data-fp-level="{escape(level_id)}" data-fp-id="{escape(overlay.id)}">'
+        f'<path class="overlay-line" d="{line}" data-fp-kind="overlay" data-fp-layer="{escape(overlay.layer)}" '
+        f'data-fp-level="{escape(level_id)}" data-fp-id="{escape(overlay.id)}" '
+        f'stroke="{escape(overlay.color)}" stroke-width="{overlay.width * scale:.3f}" stroke-dasharray="{dash}" />'
+        f'<path class="overlay-segment-target" d="{line}" data-fp-kind="overlay" data-fp-layer="{escape(overlay.layer)}" '
+        f'data-fp-level="{escape(level_id)}" data-fp-id="{escape(overlay.id)}" />'
+        f'<circle class="overlay-node" data-fp-kind="overlay" data-fp-layer="{escape(overlay.layer)}" '
+        f'data-fp-level="{escape(level_id)}" data-fp-id="{escape(overlay.id)}" data-fp-point-index="0" '
+        f'cx="{origin.x * scale:.3f}" cy="{origin.y * scale:.3f}" r="{radius:.3f}" fill="{escape(overlay.color)}" />'
+        f'<text class="overlay-label" x="{end.x * scale:.3f}" y="{(end.y - 0.35) * scale:.3f}" '
+        f'fill="{escape(overlay.color)}">{escape(label)}</text>'
+        "</g>"
+    )
+
+
+def _render_annotation_overlay(overlay: OverlayLine, level_id: str, scale: float) -> str:
+    line = _polyline_command(list(overlay.points), scale)
+    point = overlay.points[-1]
+    label = overlay.label or overlay.id.replace("_", " ").upper()
+    return (
+        f'<g class="plan-overlay annotation-overlay" data-fp-layer="annotations" '
+        f'data-fp-level="{escape(level_id)}" data-fp-id="{escape(overlay.id)}">'
+        f'<circle class="stair-note-dot" data-fp-layer="annotations" '
+        f'cx="{overlay.points[0].x * scale:.3f}" cy="{overlay.points[0].y * scale:.3f}" r="{0.12 * scale:.3f}" />'
+        f'<path class="stair-note-leader" data-fp-layer="annotations" d="{line}" />'
+        f'<text class="stair-note" data-fp-layer="annotations" x="{point.x * scale:.3f}" '
+        f'y="{(point.y - 0.35) * scale:.3f}">{escape(label)}</text>'
+        "</g>"
+    )
+
+
+def _overlay_segment_targets(overlay: OverlayLine, level_id: str, scale: float) -> str:
+    return "".join(
+        f'<line class="overlay-segment-target" data-fp-kind="overlay" data-fp-layer="{escape(overlay.layer)}" '
+        f'data-fp-level="{escape(level_id)}" data-fp-id="{escape(overlay.id)}" data-fp-segment-index="{index}" '
+        f'x1="{first.x * scale:.3f}" y1="{first.y * scale:.3f}" '
+        f'x2="{second.x * scale:.3f}" y2="{second.y * scale:.3f}" />'
+        for index, (first, second) in enumerate(zip(overlay.points, overlay.points[1:]))
+    )
+
+
+def _overlay_endpoint_markers(overlay: OverlayLine, level_id: str, scale: float) -> str:
+    radius = max(overlay.width * scale * 1.25, 2.2)
+    return "".join(
+        f'<circle class="overlay-node" data-fp-kind="overlay" data-fp-layer="{escape(overlay.layer)}" '
+        f'data-fp-level="{escape(level_id)}" data-fp-id="{escape(overlay.id)}" data-fp-point-index="{index}" '
+        f'cx="{point.x * scale:.3f}" cy="{point.y * scale:.3f}" '
+        f'r="{radius if index in {0, len(overlay.points) - 1} else radius * 0.75:.3f}" fill="{escape(overlay.color)}" />'
+        for index, point in enumerate(overlay.points)
+    )
+
+
+def _overlay_label(overlay: OverlayLine, scale: float) -> str:
+    if not overlay.label or not overlay.points:
+        return ""
+    point = overlay.points[len(overlay.points) // 2]
+    return (
+        f'<text class="overlay-label" x="{point.x * scale:.3f}" y="{(point.y - 0.35) * scale:.3f}" '
+        f'fill="{escape(overlay.color)}">{escape(overlay.label)}</text>'
+    )
+
+
 def _unique_sorted(values: Any) -> list[float]:
     result: list[float] = []
     for value in sorted(values):
@@ -1887,8 +2182,7 @@ def _offset_closed_orthogonal_loop(points: list[Point], distance: float) -> list
     count = len(clean_points)
     for index, start in enumerate(clean_points):
         end = clean_points[(index + 1) % count]
-        direction = _segment_direction(start, end)
-        nx, ny = _normal(direction)
+        nx, ny = _segment_normal(start, end)
         if clockwise:
             nx, ny = -nx, -ny
         offset_lines.append(
@@ -1914,6 +2208,20 @@ def _segment_direction(start: Point, end: Point) -> Direction:
     raise ValueError(f"Wall segment must be axis-aligned: {start} -> {end}")
 
 
+def _axis_direction_or_none(start: Point, end: Point) -> Direction | None:
+    try:
+        return _segment_direction(start, end)
+    except ValueError:
+        return None
+
+
+def _segment_normal(start: Point, end: Point) -> tuple[float, float]:
+    dx = end.x - start.x
+    dy = end.y - start.y
+    length = max(sqrt(dx * dx + dy * dy), EPSILON)
+    return (-dy / length, dx / length)
+
+
 def _signed_area(points: list[Point]) -> float:
     area = 0.0
     for index, point in enumerate(points):
@@ -1927,19 +2235,17 @@ def _line_intersection(
     second: tuple[Point, Point],
 ) -> Point:
     (a, b), (c, d) = first, second
-    if abs(a.x - b.x) <= EPSILON:
-        x = a.x
-        y = c.y if abs(c.y - d.y) <= EPSILON else a.y
-    elif abs(c.x - d.x) <= EPSILON:
-        x = c.x
-        y = a.y if abs(a.y - b.y) <= EPSILON else c.y
-    elif abs(a.y - b.y) <= EPSILON:
-        y = a.y
-        x = c.x if abs(c.x - d.x) <= EPSILON else a.x
-    else:
-        y = c.y
-        x = a.x if abs(a.x - b.x) <= EPSILON else c.x
-    return Point(x, y)
+    r_x = b.x - a.x
+    r_y = b.y - a.y
+    s_x = d.x - c.x
+    s_y = d.y - c.y
+    denominator = r_x * s_y - r_y * s_x
+    if abs(denominator) <= EPSILON:
+        return b
+    cma_x = c.x - a.x
+    cma_y = c.y - a.y
+    t = (cma_x * s_y - cma_y * s_x) / denominator
+    return Point(a.x + t * r_x, a.y + t * r_y)
 
 
 def _connected_wall_paths(walls: list[WallSegment]) -> list[list[Point]]:
@@ -2058,7 +2364,7 @@ def _feature_rect(feature: Feature, walls: dict[str, WallSegment]) -> Rect:
         if feature.anchor is None:
             raise ValueError(f"{feature.id} needs either at or anchor")
         wall = walls[feature.anchor.wall]
-        nx, ny = _normal(wall.direction)
+        nx, ny = wall.normal
         if feature.anchor.side in {"right", "outside", "opposite"}:
             nx *= -1
             ny *= -1
@@ -2076,7 +2382,7 @@ def _extrusion_rect(extrusion: WallExtrusion, walls: dict[str, WallSegment]) -> 
     length = extrusion.length if extrusion.length is not None else wall.length - extrusion.offset
     start = wall.point_at(extrusion.offset)
     end = wall.point_at(extrusion.offset + length)
-    nx, ny = _normal(wall.direction)
+    nx, ny = wall.normal
     if extrusion.side in {"right", "outside", "opposite"}:
         nx *= -1
         ny *= -1
@@ -2091,7 +2397,7 @@ def _rect_to_wall_distance(rect: Rect, wall: WallSegment) -> float:
         span_overlap = min(rect.right, wall_box.right) - max(rect.left, wall_box.left)
         if span_overlap > -EPSILON:
             return min(abs(rect.top - wall.at.y), abs(rect.bottom - wall.at.y))
-    else:
+    if wall.direction in {"N", "S"}:
         span_overlap = min(rect.bottom, wall_box.bottom) - max(rect.top, wall_box.top)
         if span_overlap > -EPSILON:
             return min(abs(rect.left - wall.at.x), abs(rect.right - wall.at.x))
@@ -2122,6 +2428,7 @@ def _wall_solid_parts(wall: WallSegment, openings: list[WallOpening]) -> list[Wa
                     direction=wall.direction,
                     length=start - cursor,
                     kind=wall.kind,
+                    to=wall.point_at(start) if wall.to is not None else None,
                 )
             )
         cursor = max(cursor, end)
@@ -2133,6 +2440,7 @@ def _wall_solid_parts(wall: WallSegment, openings: list[WallOpening]) -> list[Wa
                 direction=wall.direction,
                 length=wall.length - cursor,
                 kind=wall.kind,
+                to=wall.point_at(wall.length) if wall.to is not None else None,
             )
         )
     return parts
@@ -2161,8 +2469,38 @@ def _point(value: list[float] | tuple[float, float]) -> Point:
     return Point(float(value[0]), float(value[1]))
 
 
+def _wall_from_dict(data: dict[str, Any], wall_id: str) -> WallSegment:
+    if "from" in data and "to" in data:
+        start = _point(data["from"])
+        end = _point(data["to"])
+        return WallSegment(
+            id=wall_id,
+            at=start,
+            direction=_axis_direction_or_none(start, end),
+            length=start.distance_to(end),
+            kind=data.get("kind", "interior"),
+            offset=float(data["offset"]) if "offset" in data else None,
+            to=end,
+        )
+    return WallSegment(
+        id=wall_id,
+        at=_point(data["at"]),
+        direction=data["dir"],
+        length=float(data["len"]),
+        kind=data.get("kind", "interior"),
+        offset=float(data["offset"]) if "offset" in data else None,
+    )
+
+
 def _rect(value: list[float] | tuple[float, float, float, float]) -> Rect:
     return Rect(float(value[0]), float(value[1]), float(value[2]), float(value[3]))
+
+
+def _pitch(value: Any) -> float:
+    if isinstance(value, str) and ":" in value:
+        rise, run = value.split(":", 1)
+        return float(rise) / float(run)
+    return float(value)
 
 
 def _size(value: list[float] | tuple[float, float]) -> tuple[float, float]:

@@ -19,6 +19,8 @@ from floorplan_lang.wall_plan import (
     AreaLabel,
     Feature,
     FeatureAnchor,
+    OverlayLine,
+    RoofSection,
     Stair,
     StairRun,
     WallExtrusion,
@@ -58,14 +60,17 @@ def intent_plan_from_dict(data: dict[str, Any]) -> WallPlan:
     catalog = data.get("catalog") or {}
     global_datums = _parse_datums(data.get("datums") or {})
     contexts: dict[str, IntentContext] = {}
+    level_datums: dict[str, dict[str, dict[str, float]]] = {}
+    level_elevations = _level_elevations(data)
 
     for level_id, level_data in (data.get("levels") or {}).items():
         datums = _merge_datums(global_datums, _parse_datums(level_data.get("datums") or {}))
+        level_datums[level_id] = datums
         spaces = {
             space_id: _rect_from_spec(space_data, datums)
             for space_id, space_data in (level_data.get("spaces") or {}).items()
         }
-        mass_rects = _level_mass_rects(data.get("masses") or {}, level_id, datums)
+        mass_rects = _level_mass_rects(data.get("masses") or {}, level_id, datums, level_elevations)
         _require_valid_intent_level(level_id, level_data, mass_rects, spaces)
         level = WallLevel(id=level_id, title=level_data.get("title"))
         level.walls.extend(_boundary_walls(mass_rects, prefix="exterior"))
@@ -82,8 +87,10 @@ def intent_plan_from_dict(data: dict[str, Any]) -> WallPlan:
         level.openings.extend(_compile_openings(level_data.get("openings") or [], context))
         level.openings.extend(_compile_auto_windows(level_data, context, level.openings))
         level.access.extend(_compile_access(level_data.get("access") or [], level.openings))
+        level.overlays.extend(_compile_overlays(level_data.get("overlays") or {}, datums))
         plan.levels[level_id] = level
 
+    _compile_roofs(data.get("masses") or {}, data, plan, level_datums, level_elevations)
     _compile_stairs(data.get("stairs") or {}, data.get("story") or {}, plan, contexts)
 
     return plan
@@ -130,6 +137,10 @@ def _validate_intent_references(level_id: str, level_data: dict[str, Any], space
         for space_id in endpoints:
             if space_id not in space_ids:
                 errors.append(f"{level_id}.access[{index}] references missing space {space_id!r}")
+    for layer, overlays in (level_data.get("overlays") or {}).items():
+        for index, overlay in enumerate(overlays or (), start=1):
+            if len(overlay.get("points") or ()) < 2:
+                errors.append(f"{level_id}.overlays.{layer}[{index}] needs at least two points")
     return errors
 
 
@@ -195,19 +206,189 @@ def _merge_datums(
     return merged
 
 
-def _level_mass_rects(masses: dict[str, Any], level_id: str, datums: dict[str, dict[str, float]]) -> list[Rect]:
+def _level_mass_rects(
+    masses: dict[str, Any],
+    level_id: str,
+    datums: dict[str, dict[str, float]],
+    level_elevations: dict[str, float],
+) -> list[Rect]:
     rects = []
     for mass_data in masses.values():
-        levels = mass_data.get("levels")
-        if levels is not None and level_id not in levels:
-            continue
-        if "level" in mass_data and mass_data["level"] != level_id:
+        if level_id not in _mass_level_ids(mass_data, [level_id]):
             continue
         for rect_spec in mass_data.get("rects") or ():
-            rects.append(_rect_from_spec(rect_spec, datums))
+            if level_id in _rect_level_ids(rect_spec, mass_data, [level_id], level_elevations):
+                rects.append(_rect_from_spec(rect_spec, datums))
         if "rect" in mass_data:
-            rects.append(_rect_from_spec(mass_data["rect"], datums))
+            rect_spec = mass_data["rect"]
+            if level_id in _rect_level_ids(rect_spec, mass_data, [level_id], level_elevations):
+                rects.append(_rect_from_spec(rect_spec, datums))
     return rects
+
+
+def _compile_roofs(
+    masses: dict[str, Any],
+    data: dict[str, Any],
+    plan: WallPlan,
+    level_datums: dict[str, dict[str, dict[str, float]]],
+    level_elevations: dict[str, float],
+) -> None:
+    level_ids = list(plan.levels)
+    default_roof = _roof_options(data)
+    for mass_id, mass_data in masses.items():
+        for index, rect_spec in enumerate(_mass_rect_specs(mass_data), start=1):
+            rect_levels = _rect_level_ids(rect_spec, mass_data, level_ids, level_elevations)
+            if not rect_levels:
+                continue
+            render_level = _next_level_id(level_ids, rect_levels[-1])
+            if render_level is None:
+                continue
+            datums = level_datums.get(rect_levels[-1], {"x": {}, "y": {}})
+            roof_options = _merged_roof_options(default_roof, _roof_options(mass_data), _roof_options(rect_spec))
+            if not roof_options:
+                continue
+            if roof_options.get("enabled") is False or roof_options.get("mode") is False:
+                continue
+            rect_id = rect_spec.get("id") if isinstance(rect_spec, dict) else None
+            section_id = str(rect_id or (mass_id if len(_mass_rect_specs(mass_data)) == 1 else f"{mass_id}_{index}"))
+            plan.levels[render_level].roofs.append(
+                RoofSection(
+                    id=section_id,
+                    rect=_rect_from_spec(rect_spec, datums),
+                    mode=str(roof_options.get("mode", roof_options.get("roof_mode", "hip"))),
+                    pitch=_pitch(roof_options.get("pitch", roof_options.get("roof_pitch")))
+                    if roof_options.get("pitch", roof_options.get("roof_pitch")) is not None
+                    else None,
+                    eave_height=float(roof_options["eave_height"]) if roof_options.get("eave_height") is not None else None,
+                    eave_margin=float(roof_options.get("eave_margin", 2.0)),
+                    ridge=_roof_ridge(roof_options),
+                    **_roof_end_options(roof_options),
+                )
+            )
+
+
+def _mass_level_ids(mass_data: dict[str, Any], level_ids: list[str]) -> list[str]:
+    if mass_data.get("levels") is not None:
+        selected = set(mass_data["levels"])
+        return [level_id for level_id in level_ids if level_id in selected]
+    if mass_data.get("level") is not None:
+        return [str(mass_data["level"])] if mass_data["level"] in level_ids else []
+    return list(level_ids)
+
+
+def _rect_level_ids(
+    rect_spec: Any,
+    mass_data: dict[str, Any],
+    level_ids: list[str],
+    level_elevations: dict[str, float],
+) -> list[str]:
+    if isinstance(rect_spec, dict):
+        if rect_spec.get("levels") is not None:
+            selected = set(rect_spec["levels"])
+            return [level_id for level_id in level_ids if level_id in selected]
+        if rect_spec.get("level") is not None:
+            return [str(rect_spec["level"])] if rect_spec["level"] in level_ids else []
+        eave_height = _roof_eave_height(rect_spec)
+        if eave_height is not None:
+            inherited = _mass_level_ids(mass_data, level_ids)
+            return [level_id for level_id in inherited if level_elevations.get(level_id, 0) < eave_height - EPSILON]
+    return _mass_level_ids(mass_data, level_ids)
+
+
+def _roof_eave_height(data: dict[str, Any]) -> float | None:
+    roof = data.get("roof") if isinstance(data.get("roof"), dict) else {}
+    if roof.get("eave_height") is not None:
+        return float(roof["eave_height"])
+    if data.get("eave_height") is not None:
+        return float(data["eave_height"])
+    return None
+
+
+def _level_elevations(data: dict[str, Any]) -> dict[str, float]:
+    story = data.get("story") or {}
+    default_floor_to_floor = float(story.get("floor_to_floor", 10))
+    elevation = float(story.get("base_elevation", 0))
+    elevations: dict[str, float] = {}
+    for level_id, level_data in (data.get("levels") or {}).items():
+        if level_data.get("elevation") is not None:
+            elevation = float(level_data["elevation"])
+        elevations[level_id] = elevation
+        elevation += float(level_data.get("floor_to_floor", default_floor_to_floor))
+    return elevations
+
+
+def _next_level_id(level_ids: list[str], level_id: str) -> str | None:
+    try:
+        index = level_ids.index(level_id)
+    except ValueError:
+        return None
+    if index + 1 >= len(level_ids):
+        return None
+    return level_ids[index + 1]
+
+
+def _mass_rect_specs(mass_data: dict[str, Any]) -> list[Any]:
+    specs = list(mass_data.get("rects") or ())
+    if "rect" in mass_data:
+        specs.append(mass_data["rect"])
+    return specs
+
+
+def _roof_options(data: Any) -> dict[str, Any]:
+    if not isinstance(data, dict):
+        return {}
+    options = dict(data.get("roof") or {})
+    for key in (
+        "mode",
+        "roof_mode",
+        "pitch",
+        "roof_pitch",
+        "eave_height",
+        "eave_margin",
+        "enabled",
+        "ridge",
+        "ridge_axis",
+    ):
+        if key in data:
+            options[key] = data[key]
+    if "roof_pitch" in data and "pitch" not in options:
+        options["pitch"] = data["roof_pitch"]
+    if "roof_mode" in data and "mode" not in options:
+        options["mode"] = data["roof_mode"]
+    return options
+
+
+def _roof_ridge(options: dict[str, Any]) -> str | None:
+    ridge = options.get("ridge", options.get("ridge_axis"))
+    return str(ridge) if ridge is not None else None
+
+
+def _roof_end_options(options: dict[str, Any]) -> dict[str, str]:
+    mode = str(options.get("mode", options.get("roof_mode", "hip"))).replace("-", "_")
+    start = "hip" if mode == "hip" else "open"
+    end = "hip" if mode == "hip" else "open"
+    ends = options.get("ends")
+    if isinstance(ends, dict):
+        start = str(ends.get("start", start))
+        end = str(ends.get("end", end))
+    elif isinstance(ends, list | tuple):
+        values = [str(value) for value in ends]
+        if len(values) >= 1:
+            start = values[0]
+        if len(values) >= 2:
+            end = values[1]
+    if options.get("start") is not None:
+        start = str(options["start"])
+    if options.get("end") is not None:
+        end = str(options["end"])
+    return {"start": start, "end": end}
+
+
+def _merged_roof_options(*options: dict[str, Any]) -> dict[str, Any]:
+    merged: dict[str, Any] = {}
+    for option in options:
+        merged.update(option)
+    return merged
 
 
 def _rect_from_spec(data: Any, datums: dict[str, dict[str, float]]) -> Rect:
@@ -249,6 +430,13 @@ def _value(value: Any, datums: dict[str, dict[str, float]], axis: str) -> float:
             raise ValueError(f"Unknown {axis}-axis reference {value!r}")
         return datums[axis][value]
     raise ValueError(f"Unsupported {axis}-axis value {value!r}")
+
+
+def _pitch(value: Any) -> float:
+    if isinstance(value, str) and ":" in value:
+        rise, run = value.split(":", 1)
+        return float(rise) / float(run)
+    return float(value)
 
 
 def _boundary_walls(rects: list[Rect], prefix: str) -> list[WallSegment]:
@@ -320,10 +508,12 @@ def _partition_walls(partitions: list[dict[str, Any]], datums: dict[str, dict[st
             start = _point(data["from"], datums)
             end = _point(data["to"], datums)
             direction, length = _segment_direction_and_length(start, end)
+            to = end if direction is None else None
         else:
             start = _point(data["at"], datums)
             direction = data["dir"]
             length = _value(data["len"], datums, "x" if direction in {"E", "W"} else "y")
+            to = None
         walls.append(
             WallSegment(
                 id=wall_id,
@@ -331,6 +521,7 @@ def _partition_walls(partitions: list[dict[str, Any]], datums: dict[str, dict[st
                 direction=direction,
                 length=length,
                 kind=data.get("kind", "interior"),
+                to=to,
             )
         )
     return walls
@@ -429,12 +620,12 @@ def _point(data: list[Any] | tuple[Any, Any], datums: dict[str, dict[str, float]
     return Point(_value(data[0], datums, "x"), _value(data[1], datums, "y"))
 
 
-def _segment_direction_and_length(start: Point, end: Point) -> tuple[Direction, float]:
+def _segment_direction_and_length(start: Point, end: Point) -> tuple[Direction | None, float]:
     if abs(start.x - end.x) <= EPSILON:
         return ("S" if end.y > start.y else "N", abs(end.y - start.y))
     if abs(start.y - end.y) <= EPSILON:
         return ("E" if end.x > start.x else "W", abs(end.x - start.x))
-    raise ValueError(f"Wall segment must be axis-aligned: {start} -> {end}")
+    return (None, start.distance_to(end))
 
 
 def _compile_zones(spaces: dict[str, Any], rects: dict[str, Rect]):  # noqa: ANN201
@@ -511,6 +702,26 @@ def _compile_features(
                 rotation=float(data.get("rotation", 0)),
             )
         )
+    return compiled
+
+
+def _compile_overlays(overlays: dict[str, Any], datums: dict[str, dict[str, float]]) -> list[OverlayLine]:
+    compiled = []
+    for layer, items in overlays.items():
+        for index, item in enumerate(items or (), start=1):
+            item_data = dict(item)
+            compiled.append(
+                OverlayLine(
+                    id=item_data.get("id", f"{layer}_{index}"),
+                    layer=str(item_data.get("layer", layer)),
+                    points=tuple(_point(point, datums) for point in item_data["points"]),
+                    kind=str(item_data.get("kind", "line")),
+                    label=item_data.get("label"),
+                    color=item_data.get("color", "#2b78c2"),
+                    width=float(item_data.get("width", 0.18)),
+                    dash=item_data.get("dash"),
+                )
+            )
     return compiled
 
 
@@ -1225,7 +1436,7 @@ def _wall_offset_for_side_span(wall: WallSegment, side: Side, start: float, end:
 
 
 def _interior_side_for_space_wall(wall: WallSegment, space: Rect) -> str:
-    normal_x, normal_y = _normal(wall.direction)
+    normal_x, normal_y = wall.normal
     test = Point((wall.at.x + wall.end.x) / 2 + normal_x * 0.1, (wall.at.y + wall.end.y) / 2 + normal_y * 0.1)
     return "left" if space.contains_point(test) else "right"
 

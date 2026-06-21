@@ -8,6 +8,18 @@ export type SpaceSideRef = {
 
 const GENERATED_EXTERIOR_WALL_ID = /^exterior_\d+$/;
 
+export function openingReferenceForWall(
+  data: AnyRecord,
+  levelId: string,
+  wallId: string,
+  line: WallLine | null
+): { wall: string } | SpaceSideRef {
+  if (!line || GENERATED_EXTERIOR_WALL_ID.test(wallId)) {
+    return { wall: wallId };
+  }
+  return inferSpaceSideForWallLine(data, levelId, line) ?? { wall: wallId };
+}
+
 export function inferSpaceSideForWallLine(data: AnyRecord, levelId: string, line: WallLine): SpaceSideRef | null {
   const level = ((data.levels as AnyRecord | undefined)?.[levelId] ?? {}) as AnyRecord;
   const spaces = (level.spaces ?? {}) as AnyRecord;

@@ -4,6 +4,7 @@ import type {
   ExteriorWallDrag,
   MassEdgeRef,
   OpeningDrag,
+  OverlayDrag,
   SharedWallDrag,
   SpaceRect,
   WallDirection,
@@ -61,6 +62,123 @@ export function moveOpening(data: AnyRecord, openingDrag: OpeningDrag, offset: n
     delete opening.space;
     delete opening.side;
   }
+}
+
+export function moveOverlay(data: AnyRecord, overlayDrag: OverlayDrag, dx: number, dy: number) {
+  const overlay = overlayForDrag(data, overlayDrag);
+  if (!overlay || !Array.isArray(overlay.points)) {
+    return;
+  }
+  if (overlayDrag.pointIndex !== null) {
+    const start = overlayDrag.startPoints[overlayDrag.pointIndex];
+    if (!start) {
+      return;
+    }
+    overlay.points[overlayDrag.pointIndex] = [start[0] + dx, start[1] + dy];
+    return;
+  }
+  if (overlayDrag.segmentIndex !== null) {
+    const movement = overlaySegmentMovement(overlayDrag.startPoints, overlayDrag.segmentIndex, dx, dy);
+    for (const index of movement.indices) {
+      const start = overlayDrag.startPoints[index];
+      if (start) {
+        overlay.points[index] = [start[0] + movement.dx, start[1] + movement.dy];
+      }
+    }
+    return;
+  }
+  overlay.points = overlayDrag.startPoints.map(([x, y]) => [x + dx, y + dy]);
+}
+
+function overlaySegmentMovement(points: Array<[number, number]>, segmentIndex: number, dx: number, dy: number) {
+  const orientation = overlaySegmentOrientation(points, segmentIndex);
+  if (!orientation) {
+    return { indices: [segmentIndex, segmentIndex + 1], dx, dy };
+  }
+  const indices = overlayCollinearChainPointIndices(points, segmentIndex, orientation);
+  if (orientation === "vertical") {
+    return { indices, dx, dy: 0 };
+  }
+  return { indices, dx: 0, dy };
+}
+
+function overlaySegmentOrientation(points: Array<[number, number]>, segmentIndex: number) {
+  const first = points[segmentIndex];
+  const second = points[segmentIndex + 1];
+  if (!first || !second) {
+    return null;
+  }
+  if (Math.abs(first[0] - second[0]) < 0.001) {
+    return "vertical" as const;
+  }
+  if (Math.abs(first[1] - second[1]) < 0.001) {
+    return "horizontal" as const;
+  }
+  return null;
+}
+
+function overlayCollinearChainPointIndices(
+  points: Array<[number, number]>,
+  segmentIndex: number,
+  orientation: "vertical" | "horizontal"
+) {
+  const axis = orientation === "vertical" ? 0 : 1;
+  const coordinate = points[segmentIndex]?.[axis];
+  let firstSegment = segmentIndex;
+  let lastSegment = segmentIndex;
+  while (firstSegment > 0 && segmentMatches(points, firstSegment - 1, axis, coordinate)) {
+    firstSegment -= 1;
+  }
+  while (lastSegment < points.length - 2 && segmentMatches(points, lastSegment + 1, axis, coordinate)) {
+    lastSegment += 1;
+  }
+  return Array.from({ length: lastSegment - firstSegment + 2 }, (_, index) => firstSegment + index);
+}
+
+function segmentMatches(points: Array<[number, number]>, segmentIndex: number, axis: number, coordinate: number | undefined) {
+  if (coordinate === undefined) {
+    return false;
+  }
+  const first = points[segmentIndex];
+  const second = points[segmentIndex + 1];
+  return Boolean(first && second && Math.abs(first[axis] - coordinate) < 0.001 && Math.abs(second[axis] - coordinate) < 0.001);
+}
+
+function overlayForDrag(data: AnyRecord, overlayDrag: OverlayDrag) {
+  return ((data.levels as AnyRecord | undefined)?.[overlayDrag.level]?.overlays?.[overlayDrag.layer] ?? [])[
+    overlayDrag.index
+  ] as AnyRecord | undefined;
+}
+
+export function spaceSideOpeningOffsetBounds(
+  direction: WallDirection,
+  openingLine: WallLine,
+  startOffset: number,
+  width: number,
+  spaceRect: SpaceRect,
+  side: string,
+  fallbackWallLength: number
+) {
+  const axisStart = direction === "E" || direction === "W" ? openingLine.x1 : openingLine.y1;
+  const wallStart =
+    direction === "E" || direction === "S"
+      ? axisStart - startOffset
+      : axisStart + startOffset;
+  const spanStart = side === "north" || side === "south" ? spaceRect.left : spaceRect.top;
+  const spanEnd = side === "north" || side === "south" ? spaceRect.right : spaceRect.bottom;
+  let first: number;
+  let second: number;
+  if (direction === "E" || direction === "S") {
+    first = spanStart - wallStart;
+    second = spanEnd - width - wallStart;
+  } else {
+    first = wallStart - (spanStart + width);
+    second = wallStart - spanEnd;
+  }
+  return {
+    min: clamp(Math.min(first, second), 0, fallbackWallLength - width),
+    max: clamp(Math.max(first, second), 0, fallbackWallLength - width)
+  };
 }
 
 export function moveSharedWall(data: AnyRecord, wallDrag: SharedWallDrag, delta: number) {
