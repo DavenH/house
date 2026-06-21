@@ -32,13 +32,15 @@ export type FeatureData = AnyRecord & {
   rotation?: number;
 };
 
-export type SelectionKind = "space" | "feature" | "opening" | "connection" | "wall" | "stair" | "overlay" | "level" | "";
+export type SelectionKind = "space" | "feature" | "opening" | "connection" | "wall" | "stair" | "overlay" | "roof" | "level" | "";
 
 export type Selection = {
   kind: SelectionKind;
   level: string;
   id: string;
   index?: number;
+  massId?: string;
+  rectIndex?: number;
 };
 
 export type PaletteItem = {

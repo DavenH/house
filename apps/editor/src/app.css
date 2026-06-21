@@ -546,6 +546,12 @@ h3 {
   stroke-width: 1px !important;
 }
 
+.svg-canvas [data-fp-kind="roof"].selected-object .roof-fill,
+.svg-canvas [data-fp-kind="roof"].selected-object .roof-eave-fill {
+  stroke: #1f7a93 !important;
+  stroke-width: 2px !important;
+}
+
 .svg-canvas text.selected-object,
 .svg-canvas tspan.selected-object,
 .svg-canvas .selected-object text,

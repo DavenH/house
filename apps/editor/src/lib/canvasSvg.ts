@@ -197,7 +197,7 @@ export function markSelectedInSvg(canvasElement: HTMLDivElement | undefined, sel
     if (element.classList.contains("wall-select-target") || element.classList.contains("wall-grip-target")) {
       return;
     }
-    if (element instanceof SVGGElement || element instanceof SVGSVGElement) {
+    if ((element instanceof SVGGElement && selected.kind !== "roof") || element instanceof SVGSVGElement) {
       return;
     }
     const kind = (element as HTMLElement).dataset.fpKind ?? "";

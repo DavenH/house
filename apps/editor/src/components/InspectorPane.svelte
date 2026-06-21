@@ -139,10 +139,18 @@
       ? (((planData.stairs as AnyRecord | undefined) ?? {})[selected.id] ?? selectedObject ?? {})
       : undefined;
   $: storyHeight = Number((planData.story as AnyRecord | undefined)?.floor_to_floor ?? selectedStair?.floor_to_floor ?? 10);
+  $: selectedRoofEntry = selected.kind === "roof" ? findSelectedRoofRectEntry() : null;
+  $: selectedRoof = selectedRoofEntry?.rect ?? selectedObject ?? {};
+  $: selectedRoofPath = selectedRoofEntry
+    ? ["masses", selectedRoofEntry.massId, "rects", selectedRoofEntry.rectIndex]
+    : null;
 
   const sideOptions = ["north", "east", "south", "west"];
   const positionOptions = ["west", "east", "north", "south", "start", "end"];
   const openingKindOptions = ["door", "arch", "open"];
+  const roofModeOptions = ["flat", "open_gable", "hip"];
+  const roofRidgeOptions = ["x", "y"];
+  const roofEndOptions = ["open", "hip"];
 
   function connectionIndex() {
     return selected.index ?? Number(selected.id) ?? 0;
@@ -221,6 +229,35 @@
     if (!Number.isNaN(numberValue)) {
       updateField(["stairs", selected.id, ...path], numberValue);
     }
+  }
+
+  function updateRoofField(path: Array<string | number>, value: unknown) {
+    if (!selectedRoofPath) {
+      return;
+    }
+    updateField([...selectedRoofPath, ...path], value);
+  }
+
+  function updateRoofNumber(path: Array<string | number>, value: string) {
+    const numberValue = Number(value);
+    if (!Number.isNaN(numberValue)) {
+      updateRoofField(path, numberValue);
+    }
+  }
+
+  function findSelectedRoofRectEntry(): { massId: string; rectIndex: number; rect: AnyRecord } | null {
+    const masses = (planData.masses ?? {}) as AnyRecord;
+    for (const [massId, mass] of Object.entries(masses)) {
+      const rects = (mass as AnyRecord).rects;
+      if (!Array.isArray(rects)) {
+        continue;
+      }
+      const rectIndex = rects.findIndex((rect: unknown) => Boolean((rect as AnyRecord | null)?.id === selected.id));
+      if (rectIndex >= 0) {
+        return { massId, rectIndex, rect: rects[rectIndex] as AnyRecord };
+      }
+    }
+    return null;
   }
 
   function updateStoryHeight(value: string) {
@@ -1172,6 +1209,52 @@
           </label>
           <label>wind
             <input type="checkbox" checked={Boolean(selectedStair.layout?.winders)} on:change={(event) => updateField(["stairs", selected.id, "layout", "winders"], event.currentTarget.checked)} />
+          </label>
+        </div>
+      {:else if selected.kind === "roof" && selectedRoofPath}
+        <div class="field-label">ID</div>
+        <input value={selectedRoof.id ?? selected.id} on:input={(event) => updateRoofField(["id"], event.currentTarget.value)} />
+
+        <div class="field-label">x datums</div>
+        <input value={(selectedRoof.x ?? []).join(", ")} on:input={(event) => updateRoofField(["x"], splitList(event.currentTarget.value))} />
+
+        <div class="field-label">y datums</div>
+        <input value={(selectedRoof.y ?? []).join(", ")} on:input={(event) => updateRoofField(["y"], splitList(event.currentTarget.value))} />
+
+        <div class="field-label">Roof</div>
+        <div class="field-grid stair-field-grid">
+          <label>mode
+            <select value={selectedRoof.roof?.mode ?? "hip"} on:change={(event) => updateRoofField(["roof", "mode"], event.currentTarget.value)}>
+              {#each roofModeOptions as option}
+                <option value={option}>{option}</option>
+              {/each}
+            </select>
+          </label>
+          <label>ridge
+            <select value={selectedRoof.roof?.ridge ?? ""} on:change={(event) => updateRoofField(["roof", "ridge"], event.currentTarget.value || undefined)}>
+              <option value="">auto</option>
+              {#each roofRidgeOptions as option}
+                <option value={option}>{option}</option>
+              {/each}
+            </select>
+          </label>
+          <label>eave<input type="number" step="0.5" value={selectedRoof.roof?.eave_height ?? ""} on:input={(event) => updateRoofNumber(["roof", "eave_height"], event.currentTarget.value)} /></label>
+          <label>margin<input type="number" step="0.5" value={selectedRoof.roof?.eave_margin ?? ""} on:input={(event) => updateRoofNumber(["roof", "eave_margin"], event.currentTarget.value)} /></label>
+          <label>start
+            <select value={selectedRoof.roof?.ends?.[0] ?? selectedRoof.roof?.start ?? ""} on:change={(event) => updateRoofField(["roof", "ends", 0], event.currentTarget.value || undefined)}>
+              <option value="">default</option>
+              {#each roofEndOptions as option}
+                <option value={option}>{option}</option>
+              {/each}
+            </select>
+          </label>
+          <label>end
+            <select value={selectedRoof.roof?.ends?.[1] ?? selectedRoof.roof?.end ?? ""} on:change={(event) => updateRoofField(["roof", "ends", 1], event.currentTarget.value || undefined)}>
+              <option value="">default</option>
+              {#each roofEndOptions as option}
+                <option value={option}>{option}</option>
+              {/each}
+            </select>
           </label>
         </div>
       {:else if selected.kind === "wall"}

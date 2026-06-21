@@ -9,6 +9,7 @@ compass:
   latitude: 45.96
 roof:
   pitch: '8:12'
+  eave_margin: 1.5
 notes:
   - 'Opinionated optimization variant of the studio/library/piano wing.'
   - 'Keeps the no-basement storage strategy intact while making circulation space do double duty where there are real wall stubs.'
@@ -31,13 +32,11 @@ masses:
       - L2
       - L3
     rects:
-      - {roof: {mode: open_gable, eave_height: 17.5, ridge: y}, x: [west, left_e], y: [main_n, entry_s]}
-      - {roof: {mode: open_gable, eave_height: 17.5, ridge: y}, x: [left_w, left_e], y: [gable_n, bath_s]}
-      - {roof: {mode: open_gable, eave_height: 17.5, ridge: y}, x: [left_w, left_e], y: [public_split, gable_s]}
-      - {roof: {mode: open_gable, eave_height: 17.5, ridge: x}, x: [left_e, right_e], y: [main_n, entry_s]}
-      - {roof: {mode: hip, eave_height: 17.5, ridge: x}, x: [right_w, right_e], y: [entry_s, main_s]}
-      - {roof: {mode: hip, eave_height: 30}, x: [e, tower_e], y: [public_split, tower_s]}
-      - {roof: {mode: open_gable, eave_height: 10, ridge: x}, x: [right_e, east_projection_e], y: [east_projection_n, east_projection_s]}
+      - {id: main_gable, roof: {mode: open_gable, eave_height: 17.5, ridge: x, ends: [open, hip]}, x: [west, right_e], y: [main_n, entry_s]}
+      - {id: left_gable, roof: {mode: open_gable, eave_height: 17.5, ridge: y}, x: [left_w, left_e], y: [gable_n, gable_s]}
+      - {id: right_gable, roof: {mode: open_gable, eave_height: 17.5, ridge: y}, x: [right_w, right_e], y: [main_n, main_s]}
+      - {id: dining_gable, roof: {mode: open_gable, eave_height: 10, ridge: x}, x: [right_e, east_projection_e], y: [east_projection_n, east_projection_s]}
+      - {id: tower, roof: {mode: hip, eave_height: 30}, x: [e, tower_e], y: [public_split, tower_s]}
 levels:
   L1:
     title: 'First Floor'
@@ -204,7 +203,7 @@ levels:
     features:
       tower_spiral: {kind: spiral_stair, within: tower, size: [6, 6], label: '', at: [34.5, 26]}
     openings:
-      - {id: nest_south_window, kind: window, width: 1, offset: 3.5, space: tower, side: south}
+      - {id: nest_south_window, kind: window, width: 1, offset: 3, space: tower, side: south}
 stairs:
   main_stair:
     spaces:

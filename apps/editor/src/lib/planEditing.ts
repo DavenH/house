@@ -9,7 +9,7 @@ export function normalizeSvgKind(kind: string): SelectionKind {
   if (kind === "wall-select" || kind === "wall-grip") {
     return "wall";
   }
-  if (["space", "feature", "opening", "wall", "stair", "overlay", "level"].includes(kind)) {
+  if (["space", "feature", "opening", "wall", "stair", "overlay", "roof", "level"].includes(kind)) {
     return kind as SelectionKind;
   }
   return "";
@@ -43,7 +43,28 @@ export function resolveSelection(data: AnyRecord, selected: Selection): AnyRecor
     selected.index = found?.index;
     return found?.item ?? null;
   }
+  if (selected.kind === "roof") {
+    const found = findRoofRect(data, selected.id);
+    selected.massId = found?.massId;
+    selected.rectIndex = found?.rectIndex;
+    return found?.rect ?? null;
+  }
   return { id: selected.id };
+}
+
+export function findRoofRect(data: AnyRecord, id: string): { massId: string; rectIndex: number; rect: AnyRecord } | null {
+  const masses = (data.masses ?? {}) as AnyRecord;
+  for (const [massId, mass] of Object.entries(masses)) {
+    const rects = (mass as AnyRecord).rects;
+    if (!Array.isArray(rects)) {
+      continue;
+    }
+    const rectIndex = rects.findIndex((rect: unknown) => isPlainObject(rect) && (rect as AnyRecord).id === id);
+    if (rectIndex >= 0) {
+      return { massId, rectIndex, rect: rects[rectIndex] as AnyRecord };
+    }
+  }
+  return null;
 }
 
 export function openingIndex(selectedLevel: AnyRecord, id: string) {
