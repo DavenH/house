@@ -7,6 +7,9 @@ story:
 compass:
   up_bearing: 115
   latitude: 45.96
+roof:
+  pitch: '8:12'
+  eave_margin: 2
 notes:
   - 'Principal Ridgestone candidate: studio/library/piano wing.'
   - 'Promotes the left L-shaped wing into a semi-public library + office + piano + music studio suite, matching the driveway-facing privacy gradient.'
@@ -15,8 +18,8 @@ notes:
   - 'Pattern basis: Library, Music Practice Rooms, Alcoves, Half-Open Wall, Intimacy Gradient, and Light on Two Sides of Every Room.'
   - 'Upper-floor improvement: master bedroom claims the west upper bay for a real exterior window; hall becomes a windowed laundry/linen room close to the master suite.'
 datums:
-  x: {west: 1, storage_e: 8, left_w: 8, closet_w: 15, left_e: 21, stair_e: 31, piano_w: 29.5, tower_e: 38, right_w: 38, pantry_w: 43.5, room_split: 42, pantry_e: 49.5, dining_w: 54, right_e: 54, dining_e: 63}
-  y: {gable_n: 2, main_n: 8, ensuite_s: 10, bath_s: 13, stair_s: 18, dining_n: 17.5, closet_s: 18.5, public_split: 23, lower_storage_n: 24, entry_s: 28, dining_s: 28, tower_s: 30, gable_s: 32, main_s: 37}
+  x: {west: 1, storage_e: 8, left_w: 8, closet_w: 15, left_e: 21, stair_e: 31, piano_w: 29.5, tower_e: 38, right_w: 38, pantry_w: 43.5, room_split: 42, pantry_e: 49.5, dining_w: 54, right_e: 54, east_projection_e: 63}
+  y: {gable_n: 2, main_n: 8, ensuite_s: 10, bath_s: 13, stair_s: 18, east_projection_n: 17.5, closet_s: 18.5, public_split: 23, lower_storage_n: 24, entry_s: 28, east_projection_s: 28, tower_s: 30, gable_s: 32, main_s: 37}
 catalog:
   counter: {label: COUNTER}
 masses:
@@ -25,13 +28,11 @@ masses:
       - L1
       - L2
     rects:
-      - {x: [west, left_e], y: [main_n, entry_s]}
-      - {x: [left_w, left_e], y: [gable_n, bath_s]}
-      - {x: [left_w, left_e], y: [public_split, gable_s]}
-      - {x: [left_e, right_e], y: [main_n, entry_s]}
-      - {x: [right_w, right_e], y: [entry_s, main_s]}
-      - {x: [stair_e, tower_e], y: [public_split, tower_s]}
-  dining_extrusion: {level: L1, rect: {x: [right_e, dining_e], y: [dining_n, dining_s]}}
+      - {id: main_gable, roof: {mode: open_gable, eave_height: 17.5, ridge: x, ends: [open, hip]}, x: [west, right_e], y: [main_n, entry_s]}
+      - {id: left_gable, roof: {mode: open_gable, eave_height: 17.5, ridge: y}, x: [left_w, left_e], y: [gable_n, gable_s]}
+      - {id: right_gable, roof: {mode: open_gable, eave_height: 17.5, ridge: y}, x: [right_w, right_e], y: [main_n, main_s]}
+      - {id: dining_gable, roof: {mode: open_gable, eave_height: 10, ridge: x}, x: [right_e, east_projection_e], y: [east_projection_n, east_projection_s]}
+      - {id: tower, roof: {mode: hip, eave_height: 30}, x: [stair_e, tower_e], y: [public_split, tower_s]}
 levels:
   L1:
     title: 'First Floor'
@@ -49,7 +50,7 @@ levels:
       great_room: {x: [right_w, dining_w], y: [main_n, public_split], label: GREAT/ROOM, privacy: public}
       kitchen: {x: [right_w, right_e], y: [public_split, main_s], privacy: public, label: /KITCHEN}
       pantry: {x: [pantry_w, pantry_e], y: [19, 23], privacy: service}
-      dining: {x: [dining_w, dining_e], y: [dining_n, dining_s], label: 'DINING AREA', privacy: public}
+      dining: {x: [dining_w, east_projection_e], y: [east_projection_n, east_projection_s], label: 'DINING AREA', privacy: public}
     features:
       piano: {kind: piano, within: library, at: [7.5, 19], size: [7, 5], label: PIANO, avoid_openings: true, clearance: {around: 1}, rotation: 225}
       piano_bench: {kind: rectangle, within: library, at: [10.5, 22], size: [1, 2], label: '', rotation: 45}

@@ -370,8 +370,11 @@
     } else {
       selected = { kind, level: levelFromSvg, id };
     }
+    if (selected.kind === "roof") {
+      yamlOpen = true;
+    }
     void tick().then(() => markSelectedInSvg(canvasElement, selected));
-    void tick().then(jumpToSelectedYaml);
+    void tick().then(() => jumpToSelectedYaml({ force: true }));
   }
 
   function handleCanvasPointerDown(event: PointerEvent) {
@@ -406,7 +409,7 @@
       window.addEventListener("pointermove", handleWindowPointerMove);
       window.addEventListener("pointerup", handleWindowPointerUp, { once: true });
       void tick().then(() => markSelectedInSvg(canvasElement, selected));
-      void tick().then(jumpToSelectedYaml);
+      void tick().then(() => jumpToSelectedYaml());
       return;
     }
     if (kind === "opening") {
@@ -421,7 +424,7 @@
       window.addEventListener("pointermove", handleWindowPointerMove);
       window.addEventListener("pointerup", handleWindowPointerUp, { once: true });
       void tick().then(() => markSelectedInSvg(canvasElement, selected));
-      void tick().then(jumpToSelectedYaml);
+      void tick().then(() => jumpToSelectedYaml());
       return;
     }
     if (kind === "wall") {
@@ -436,7 +439,7 @@
       window.addEventListener("pointermove", handleWindowPointerMove);
       window.addEventListener("pointerup", handleWindowPointerUp, { once: true });
       void tick().then(() => markSelectedInSvg(canvasElement, selected));
-      void tick().then(jumpToSelectedYaml);
+      void tick().then(() => jumpToSelectedYaml());
       return;
     }
     const feature = ((data.levels as AnyRecord)?.[levelFromSvg]?.features ?? {})[id] as AnyRecord | undefined;
@@ -459,7 +462,7 @@
     window.addEventListener("pointermove", handleWindowPointerMove);
     window.addEventListener("pointerup", handleWindowPointerUp, { once: true });
     void tick().then(() => markSelectedInSvg(canvasElement, selected));
-    void tick().then(jumpToSelectedYaml);
+    void tick().then(() => jumpToSelectedYaml());
   }
 
   function preventCanvasSelection(event: Event) {
@@ -801,14 +804,17 @@
   function selectObject(kind: SelectionKind, id: string, index?: number) {
     selected = { kind, level: selected.level || activeLevel, id, index };
     void tick().then(() => markSelectedInSvg(canvasElement, selected));
-    void tick().then(jumpToSelectedYaml);
+    void tick().then(() => jumpToSelectedYaml());
   }
 
-  async function jumpToSelectedYaml() {
+  async function jumpToSelectedYaml(options: { force?: boolean } = {}) {
     if (!yamlTextarea || !selected.kind || !selected.id) {
       return;
     }
     if (!yamlOpen) {
+      return;
+    }
+    if (!options.force && document.activeElement === yamlTextarea) {
       return;
     }
     const range = findYamlRangeForSelection(yamlText, selected);

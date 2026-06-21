@@ -7,6 +7,9 @@ export function findYamlRangeForSelection(
   if (selected.kind === "stair") {
     return findTopLevelMappingEntryRange(yamlText, "stairs", selected.id);
   }
+  if (selected.kind === "roof") {
+    return findTopLevelNestedListItemRange(yamlText, "masses", `id: ${selected.id}`);
+  }
   const levelOffset = yamlText.indexOf(`  ${selected.level}:\n`);
   if (levelOffset < 0) {
     return null;
@@ -57,6 +60,26 @@ function findNextTopLevelChildEntryOffset(yamlText: string, after: number, limit
   pattern.lastIndex = after;
   const match = pattern.exec(yamlText);
   return match && match.index < limit ? match.index + 1 : limit;
+}
+
+function findTopLevelNestedListItemRange(yamlText: string, section: string, token: string) {
+  const sectionStart = yamlText.indexOf(`${section}:\n`);
+  if (sectionStart < 0) {
+    return null;
+  }
+  const sectionEnd = findNextTopLevelSectionOffset(yamlText, sectionStart + 1);
+  const tokenOffset = yamlText.indexOf(token, sectionStart);
+  if (tokenOffset < 0 || tokenOffset >= sectionEnd) {
+    return null;
+  }
+  const sixSpaceItemStart = yamlText.lastIndexOf("\n      -", tokenOffset);
+  const fourSpaceItemStart = yamlText.lastIndexOf("\n    -", tokenOffset);
+  const itemStart = Math.max(sixSpaceItemStart, fourSpaceItemStart);
+  if (itemStart < sectionStart) {
+    return { start: tokenOffset, end: tokenOffset + token.length };
+  }
+  const prefix = itemStart === sixSpaceItemStart ? "      -" : "    -";
+  return { start: itemStart + 1, end: findNextEntryOffset(yamlText, itemStart + 2, sectionEnd, prefix) };
 }
 
 function findNextLevelOffset(yamlText: string, after: number): number {

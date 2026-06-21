@@ -240,8 +240,8 @@ def _compile_roofs(
             rect_levels = _rect_level_ids(rect_spec, mass_data, level_ids, level_elevations)
             if not rect_levels:
                 continue
-            render_level = _next_level_id(level_ids, rect_levels[-1])
-            if render_level is None:
+            render_level_ids = _higher_level_ids(level_ids, rect_levels[-1])
+            if not render_level_ids:
                 continue
             datums = level_datums.get(rect_levels[-1], {"x": {}, "y": {}})
             roof_options = _merged_roof_options(default_roof, _roof_options(mass_data), _roof_options(rect_spec))
@@ -251,20 +251,32 @@ def _compile_roofs(
                 continue
             rect_id = rect_spec.get("id") if isinstance(rect_spec, dict) else None
             section_id = str(rect_id or (mass_id if len(_mass_rect_specs(mass_data)) == 1 else f"{mass_id}_{index}"))
-            plan.levels[render_level].roofs.append(
-                RoofSection(
-                    id=section_id,
-                    rect=_rect_from_spec(rect_spec, datums),
-                    mode=str(roof_options.get("mode", roof_options.get("roof_mode", "hip"))),
-                    pitch=_pitch(roof_options.get("pitch", roof_options.get("roof_pitch")))
-                    if roof_options.get("pitch", roof_options.get("roof_pitch")) is not None
-                    else None,
-                    eave_height=float(roof_options["eave_height"]) if roof_options.get("eave_height") is not None else None,
-                    eave_margin=float(roof_options.get("eave_margin", 2.0)),
-                    ridge=_roof_ridge(roof_options),
-                    **_roof_end_options(roof_options),
-                )
+            roof = RoofSection(
+                id=section_id,
+                rect=_rect_from_spec(rect_spec, datums),
+                mode=str(roof_options.get("mode", roof_options.get("roof_mode", "hip"))),
+                pitch=_pitch(roof_options.get("pitch", roof_options.get("roof_pitch")))
+                if roof_options.get("pitch", roof_options.get("roof_pitch")) is not None
+                else None,
+                eave_height=float(roof_options["eave_height"]) if roof_options.get("eave_height") is not None else None,
+                eave_margin=float(roof_options.get("eave_margin", 2.0)),
+                ridge=_roof_ridge(roof_options),
+                **_roof_end_options(roof_options),
             )
+            for render_level in render_level_ids:
+                plan.levels[render_level].roofs.append(
+                    RoofSection(
+                        id=roof.id,
+                        rect=roof.rect,
+                        mode=roof.mode,
+                        pitch=roof.pitch,
+                        eave_height=roof.eave_height,
+                        eave_margin=roof.eave_margin,
+                        ridge=roof.ridge,
+                        start=roof.start,
+                        end=roof.end,
+                    )
+                )
 
 
 def _mass_level_ids(mass_data: dict[str, Any], level_ids: list[str]) -> list[str]:
@@ -317,14 +329,12 @@ def _level_elevations(data: dict[str, Any]) -> dict[str, float]:
     return elevations
 
 
-def _next_level_id(level_ids: list[str], level_id: str) -> str | None:
+def _higher_level_ids(level_ids: list[str], level_id: str) -> list[str]:
     try:
         index = level_ids.index(level_id)
     except ValueError:
-        return None
-    if index + 1 >= len(level_ids):
-        return None
-    return level_ids[index + 1]
+        return []
+    return level_ids[index + 1 :]
 
 
 def _mass_rect_specs(mass_data: dict[str, Any]) -> list[Any]:

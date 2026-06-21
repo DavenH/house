@@ -65,16 +65,16 @@ def test_intent_plan_compiles_shared_masses_and_inferred_door() -> None:
     assert plan.levels["L1"].zones[0].rect == Rect(0, 0, 10, 12)
 
 
-def test_intent_plan_renders_lower_roof_on_next_level() -> None:
+def test_intent_plan_renders_lower_roof_on_higher_levels() -> None:
     plan = intent_plan_from_dict(
         {
             "type": "intent_plan",
             "plan": "intent-roof-test",
             "story": {"floor_to_floor": 10},
-            "roof": {"pitch": "8:12"},
+            "roof": {"pitch": "8:12", "eave_margin": 2},
             "masses": {
                 "body": {
-                    "levels": ["L1", "L2"],
+                    "levels": ["L1", "L2", "L3"],
                     "rects": [
                         {"x": ["w", "e"], "y": ["n", "s"]},
                         {
@@ -92,23 +92,27 @@ def test_intent_plan_renders_lower_roof_on_next_level() -> None:
             "levels": {
                 "L1": {"spaces": {"main": {"x": ["w", "e"], "y": ["n", "s"]}}},
                 "L2": {"spaces": {"upper": {"x": ["w", "e"], "y": ["n", "s"]}}},
+                "L3": {"spaces": {"nest": {"x": ["w", "e"], "y": ["n", "s"]}}},
             },
         }
     )
 
     assert plan.levels["L1"].roofs == []
     assert len(plan.levels["L2"].roofs) == 1
+    assert len(plan.levels["L3"].roofs) == 1
     roof = plan.levels["L2"].roofs[0]
     assert roof.id == "body_2"
     assert roof.mode == "hip"
     assert roof.pitch == pytest.approx(8 / 12)
     assert roof.eave_height == pytest.approx(10)
+    assert roof.eave_margin == pytest.approx(2)
 
     svg = render_wall_plan_svg(plan)
 
     assert 'data-fp-layer="roofs"' in svg
-    assert 'class="roof-section roof-hip"' in svg
+    assert 'class="roof-section roof-hip" data-fp-kind="roof"' in svg
     assert 'class="roof-ridge"' in svg
+    assert svg.count('data-fp-id="body_2"') == 2
     assert "eave 10" not in svg
 
 
@@ -139,20 +143,109 @@ def test_wall_plan_renders_roof_modes() -> None:
     assert 'class="roof-eave-fill"' in svg
     assert 'class="roof-outline"' not in svg
     assert 'class="roof-slope-line"' in svg
+    assert 'class="roof-seam"' in svg
     assert 'class="roof-gable-end"' in svg
     assert 'class="roof-hip"' in svg
     assert "OPEN GABLE" not in svg
     assert "GABLE HIP/OPEN" not in svg
-    assert '<path class="roof-eave-fill" fill-rule="evenodd" d="M 656.000 -48.000 L 880.000 -48.000 L 880.000 272.000 L 656.000 272.000 Z M 704.000 0.000 L 832.000 0.000 L 832.000 224.000 L 704.000 224.000 Z" />' in svg
-    assert '<rect class="roof-fill" x="704.000" y="0.000" width="128.000" height="224.000" />' in svg
+    assert '<path class="roof-fill" d="' in svg
+    assert '<path class="roof-eave-fill" d="' in svg
+    assert '<path class="roof-eave-fill" fill-rule="evenodd"' not in svg
+    assert '<rect class="roof-fill"' not in svg
     assert '<line class="roof-hip" x1="656.000" y1="-48.000" x2="768.000" y2="64.000" />' in svg
     assert '<line class="roof-hip" x1="880.000" y1="-48.000" x2="768.000" y2="64.000" />' in svg
     assert '<line class="roof-hip" x1="880.000" y1="272.000" x2="768.000" y2="160.000" />' in svg
     assert '<line class="roof-hip" x1="656.000" y1="272.000" x2="768.000" y2="160.000" />' in svg
-    assert '<g class="roof-section roof-open_gable" data-fp-layer="roofs" data-fp-level="L1" data-fp-id="square_gable">' in svg
+    assert '<g class="roof-section roof-open_gable" data-fp-kind="roof" data-fp-layer="roofs" data-fp-level="L1" data-fp-id="square_gable">' in svg
     assert '<line class="roof-ridge" x1="944.000" y1="-48.000" x2="944.000" y2="208.000" />' in svg
-    assert '<g class="roof-section roof-open_gable" data-fp-layer="roofs" data-fp-level="L1" data-fp-id="tight">' in svg
-    assert '<path class="roof-eave-fill" fill-rule="evenodd" d="M 1064.000 -24.000 L 1272.000 -24.000 L 1272.000 184.000 L 1064.000 184.000 Z M 1088.000 0.000 L 1248.000 0.000 L 1248.000 160.000 L 1088.000 160.000 Z" />' in svg
+    assert '<g class="roof-section roof-open_gable" data-fp-kind="roof" data-fp-layer="roofs" data-fp-level="L1" data-fp-id="tight">' in svg
+    assert '<path class="roof-eave-fill" d="M 1064.000 -24.000' in svg
+
+
+def test_wall_plan_renders_roof_valleys_from_face_intersections() -> None:
+    plan = wall_plan_from_dict(
+        {
+            "plan": "roof-valley-test",
+            "levels": {
+                "L1": {
+                    "walls": [{"id": "north", "at": [0, 0], "dir": "E", "len": 10, "kind": "exterior"}],
+                    "roofs": [
+                        {"id": "main", "mode": "open_gable", "ridge": "x", "pitch": "8:12", "rect": [0, 0, 20, 10]},
+                        {"id": "cross", "mode": "open_gable", "ridge": "y", "pitch": "8:12", "rect": [5, -5, 10, 20]},
+                    ],
+                }
+            },
+        }
+    )
+
+    svg = render_wall_plan_svg(plan)
+
+    assert 'class="roof-valley"' in svg
+    assert svg.count('class="roof-valley"') >= 2
+
+
+def test_wall_plan_clips_roof_material_to_highest_visible_faces() -> None:
+    plan = wall_plan_from_dict(
+        {
+            "plan": "roof-visibility-test",
+            "levels": {
+                "L1": {
+                    "walls": [{"id": "north", "at": [0, 0], "dir": "E", "len": 10, "kind": "exterior"}],
+                    "roofs": [
+                        {"id": "main", "mode": "open_gable", "ridge": "x", "pitch": "8:12", "rect": [0, 0, 20, 10]},
+                        {"id": "cross", "mode": "open_gable", "ridge": "y", "pitch": "8:12", "rect": [5, -5, 10, 20]},
+                    ],
+                }
+            },
+        }
+    )
+
+    svg = render_wall_plan_svg(plan)
+
+    assert '<line class="roof-seam" x1="80.400" y1="-48.000" x2="80.400" y2="80.000" />' not in svg
+    assert '<line class="roof-seam" x1="80.400" y1="0.400" x2="80.400" y2="80.000" />' in svg
+
+
+def test_wall_plan_clips_eaves_inside_other_roof_volumes() -> None:
+    plan = wall_plan_from_dict(
+        {
+            "plan": "roof-eave-visibility-test",
+            "levels": {
+                "L1": {
+                    "walls": [{"id": "north", "at": [0, 0], "dir": "E", "len": 10, "kind": "exterior"}],
+                    "roofs": [
+                        {"id": "main", "mode": "open_gable", "ridge": "x", "pitch": "8:12", "rect": [0, 0, 20, 10]},
+                        {"id": "cross", "mode": "open_gable", "ridge": "y", "pitch": "8:12", "rect": [5, -5, 10, 20]},
+                    ],
+                }
+            },
+        }
+    )
+
+    svg = render_wall_plan_svg(plan)
+
+    assert '<path class="roof-eave-fill" d="M 32.000 -48.000 L 288.000 -48.000 L 288.000 0.000 L 32.000 0.000 Z" />' not in svg
+    assert '<path class="roof-eave-fill" d="M -48.000 -48.000 L 32.000 -48.000 L 32.000 0.000 L -48.000 0.000 Z" />' in svg
+    assert '<path class="roof-eave-fill" d="M 32.000 -128.000 L 288.000 -128.000 L 288.000 -80.000 L 32.000 -80.000 Z" />' in svg
+
+
+def test_wall_plan_roof_seams_are_symmetric_across_ridge() -> None:
+    plan = wall_plan_from_dict(
+        {
+            "plan": "roof-seam-symmetry-test",
+            "levels": {
+                "L1": {
+                    "walls": [{"id": "north", "at": [0, 0], "dir": "E", "len": 10, "kind": "exterior"}],
+                    "roofs": [{"id": "gable", "mode": "open_gable", "ridge": "x", "pitch": "8:12", "rect": [0, 0, 10, 8]}],
+                }
+            },
+        }
+    )
+
+    svg = render_wall_plan_svg(plan)
+
+    assert '<line class="roof-seam" x1="8.400" y1="-48.000" x2="8.400" y2="64.000" />' in svg
+    assert '<line class="roof-seam" x1="8.400" y1="64.000" x2="8.400" y2="176.000" />' in svg
 
 
 def test_intent_plan_derives_partition_walls_for_contained_room() -> None:

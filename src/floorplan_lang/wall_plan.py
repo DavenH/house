@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from html import escape
-from math import acos, cos, degrees, radians, sin, sqrt
+from math import acos, ceil, cos, degrees, radians, sin, sqrt
 from pathlib import Path
 from typing import Any, Literal
 
@@ -258,10 +258,17 @@ def render_wall_plan_svg(
     scale = plan.scale
     level_boxes = {level_id: _level_bbox(level).padded(padding) for level_id, level in plan.levels.items()}
     level_gap_ft = 7.5
-    total_width_ft = sum(box.w for box in level_boxes.values()) + max(0, len(level_boxes) - 1) * level_gap_ft
-    max_height_ft = max(box.h for box in level_boxes.values())
+    row_gap_ft = 7.5
+    level_rows = _level_layout_rows(list(plan.levels))
+    row_widths = [
+        sum(level_boxes[level_id].w for level_id in row) + max(0, len(row) - 1) * level_gap_ft for row in level_rows
+    ]
+    row_heights = [max(level_boxes[level_id].h for level_id in row) for row in level_rows]
+    total_width_ft = max(row_widths)
+    total_height_ft = sum(row_heights) + max(0, len(row_heights) - 1) * row_gap_ft
+    level_origins = _level_layout_origins(level_rows, level_boxes, padding, level_gap_ft, row_gap_ft)
     width = int((total_width_ft + padding * 2) * scale)
-    height = int((max_height_ft + padding * 2) * scale)
+    height = int((total_height_ft + padding * 2) * scale)
     interior_stroke = INTERIOR_WALL_STROKE_FT * scale
     exterior_opening_mask_stroke = (EXTERIOR_WALL_THICKNESS_FT + 0.2) * scale
     interior_opening_mask_stroke = (INTERIOR_WALL_STROKE_FT + 0.15) * scale
@@ -279,11 +286,11 @@ def render_wall_plan_svg(
         )
     )
     parts.extend(_render_compass(plan.compass, scale, _compass_center(plan.compass, level_boxes, padding, level_gap_ft, scale)))
-    x_cursor = padding
     for level_id, level in plan.levels.items():
         level_box = level_boxes[level_id]
-        x_offset = (x_cursor - level_box.x) * scale
-        y_offset = (padding - level_box.y) * scale
+        level_origin = level_origins[level_id]
+        x_offset = (level_origin[0] - level_box.x) * scale
+        y_offset = (level_origin[1] - level_box.y) * scale
         parts.append(
             f'<g id="{escape(level_id)}" data-fp-kind="level" data-fp-level="{escape(level_id)}" '
             f'data-fp-id="{escape(level_id)}" transform="translate({x_offset:.3f} {y_offset:.3f})">'
@@ -396,13 +403,37 @@ def render_wall_plan_svg(
             f"{escape((level.title or level.id).upper())}</text>"
         )
         parts.append("</g>")
-        x_cursor += level_box.w + level_gap_ft
     parts.append("</svg>")
     svg = "\n".join(parts) + "\n"
     if path is not None:
         Path(path).parent.mkdir(parents=True, exist_ok=True)
         Path(path).write_text(svg)
     return svg
+
+
+def _level_layout_rows(level_ids: list[str]) -> list[list[str]]:
+    if len(level_ids) <= 2:
+        return [level_ids]
+    return [level_ids[:2], level_ids[2:]]
+
+
+def _level_layout_origins(
+    rows: list[list[str]],
+    level_boxes: dict[str, Rect],
+    padding: float,
+    level_gap_ft: float,
+    row_gap_ft: float,
+) -> dict[str, tuple[float, float]]:
+    origins = {}
+    y_cursor = padding
+    for row in rows:
+        x_cursor = padding
+        row_height = max(level_boxes[level_id].h for level_id in row)
+        for level_id in row:
+            origins[level_id] = (x_cursor, y_cursor)
+            x_cursor += level_boxes[level_id].w + level_gap_ft
+        y_cursor += row_height + row_gap_ft
+    return origins
 
 
 def _render_stairs(stairs: list[Stair], level_id: str, scale: float) -> list[str]:
@@ -587,19 +618,35 @@ def _render_space_select_target(zone: Zone, level_id: str, scale: float) -> str:
 
 
 def _render_roofs(roofs: list[RoofSection], level_id: str, scale: float) -> list[str]:
-    return [_render_roof(roof, level_id, scale) for roof in roofs]
-
-
-def _render_roof(roof: RoofSection, level_id: str, scale: float) -> str:
-    eave_rect = _roof_eave_rect(roof)
-    footprint = roof.rect
+    visible_faces = _visible_roof_faces(roofs)
+    visible_eaves = _visible_roof_eaves(roofs)
     parts = [
-        f'<g class="roof-section roof-{escape(roof.mode)}" data-fp-layer="roofs" '
-        f'data-fp-level="{escape(level_id)}" data-fp-id="{escape(roof.id)}">',
-        f'<path class="roof-eave-fill" fill-rule="evenodd" d="{_rect_path(eave_rect, scale)} {_rect_path(footprint, scale)}" />',
-        f'<rect class="roof-fill" x="{footprint.x * scale:.3f}" y="{footprint.y * scale:.3f}" '
-        f'width="{footprint.w * scale:.3f}" height="{footprint.h * scale:.3f}" />',
+        _render_roof(roof, level_id, scale, visible_faces.get(roof.id, []), visible_eaves.get(roof.id, []))
+        for roof in roofs
     ]
+    parts.extend(_render_roof_intersections(roofs, scale))
+    return parts
+
+
+def _render_roof(
+    roof: RoofSection,
+    level_id: str,
+    scale: float,
+    visible_faces: list[dict[str, object]],
+    visible_eaves: list[list[Point]],
+) -> str:
+    eave_paths = [f'<path class="roof-eave-fill" d="{_path_command(points, scale)}" />' for points in visible_eaves]
+    face_paths = [
+        f'<path class="roof-fill" d="{_path_command(points, scale)}" />'
+        for points in _face_polygons(visible_faces)
+    ]
+    parts = [
+        f'<g class="roof-section roof-{escape(roof.mode)}" data-fp-kind="roof" data-fp-layer="roofs" '
+        f'data-fp-level="{escape(level_id)}" data-fp-id="{escape(roof.id)}">',
+        *eave_paths,
+        *face_paths,
+    ]
+    parts.extend(_render_roof_seams(roof, scale, visible_faces))
     parts.extend(_render_roof_lines(roof, scale))
     parts.append("</g>")
     return "".join(parts)
@@ -710,6 +757,467 @@ def _roof_line(start: Point, end: Point, scale: float, class_name: str) -> str:
         f'<line class="{class_name}" x1="{start.x * scale:.3f}" y1="{start.y * scale:.3f}" '
         f'x2="{end.x * scale:.3f}" y2="{end.y * scale:.3f}" />'
     )
+
+
+def _render_roof_seams(roof: RoofSection, scale: float, visible_faces: list[dict[str, object]] | None = None) -> list[str]:
+    return [_roof_line(start, end, scale, "roof-seam") for start, end in _roof_seam_segments(roof, visible_faces=visible_faces)]
+
+
+def _roof_seam_segments(
+    roof: RoofSection,
+    spacing: float = 1.5,
+    visible_faces: list[dict[str, object]] | None = None,
+) -> list[tuple[Point, Point]]:
+    segments: list[tuple[Point, Point]] = []
+    faces = visible_faces if visible_faces is not None else _roof_faces(roof)
+    for face in faces:
+        plane = face["plane"]
+        polygon = face["points"]
+        if not isinstance(plane, tuple) or not isinstance(polygon, list):
+            continue
+        a, b, _ = plane
+        length = (a * a + b * b) ** 0.5
+        if length <= EPSILON:
+            continue
+        direction = (a / length, b / length)
+        normal = _canonical_roof_seam_normal((-direction[1], direction[0]))
+        projections = [normal[0] * point.x + normal[1] * point.y for point in polygon]
+        start_offset = _round_up(min(projections), spacing) + spacing * 0.35
+        end_offset = max(projections)
+        offset = start_offset
+        while offset < end_offset - 0.05:
+            segment = _line_clipped_to_polygon(direction, normal, offset, polygon)
+            if segment is not None and segment[0].distance_to(segment[1]) > 0.4:
+                segments.append(segment)
+            offset += spacing
+    return segments
+
+
+def _round_up(value: float, step: float) -> float:
+    return value if step <= EPSILON else ceil(value / step) * step
+
+
+def _canonical_roof_seam_normal(normal: tuple[float, float]) -> tuple[float, float]:
+    if abs(normal[0]) >= abs(normal[1]):
+        return normal if normal[0] >= 0 else (-normal[0], -normal[1])
+    return normal if normal[1] >= 0 else (-normal[0], -normal[1])
+
+
+def _line_clipped_to_polygon(
+    direction: tuple[float, float],
+    normal: tuple[float, float],
+    offset: float,
+    polygon: list[Point],
+) -> tuple[Point, Point] | None:
+    candidates: list[Point] = []
+    for start, end in _polygon_edges(polygon):
+        start_value = normal[0] * start.x + normal[1] * start.y - offset
+        end_value = normal[0] * end.x + normal[1] * end.y - offset
+        if abs(start_value) <= 1e-5:
+            candidates.append(start)
+        if abs(end_value) <= 1e-5:
+            candidates.append(end)
+        if start_value * end_value < -EPSILON:
+            ratio = start_value / (start_value - end_value)
+            candidates.append(Point(start.x + (end.x - start.x) * ratio, start.y + (end.y - start.y) * ratio))
+    points = _unique_points(candidates)
+    if len(points) < 2:
+        return None
+    return _farthest_points(points)
+
+
+def _render_roof_intersections(roofs: list[RoofSection], scale: float) -> list[str]:
+    segments = _roof_intersection_segments(roofs)
+    return [_roof_line(segment[0], segment[1], scale, "roof-valley") for segment in segments]
+
+
+def _roof_intersection_segments(roofs: list[RoofSection]) -> list[tuple[Point, Point]]:
+    faces_by_roof = [_roof_faces(roof) for roof in roofs]
+    segments: list[tuple[Point, Point]] = []
+    for left_index, left_faces in enumerate(faces_by_roof):
+        for right_faces in faces_by_roof[left_index + 1 :]:
+            for left_face in left_faces:
+                for right_face in right_faces:
+                    segment = _face_intersection_segment(left_face, right_face)
+                    if segment is not None and not _segment_is_duplicate(segment, segments):
+                        segments.append(segment)
+    return segments
+
+
+def _visible_roof_faces(roofs: list[RoofSection]) -> dict[str, list[dict[str, object]]]:
+    faces: list[dict[str, object]] = []
+    for roof in roofs:
+        for face in _roof_faces(roof):
+            face["roof_id"] = roof.id
+            faces.append(face)
+
+    visible_by_roof: dict[str, list[dict[str, object]]] = {roof.id: [] for roof in roofs}
+    for face in faces:
+        points = face["points"]
+        plane = face["plane"]
+        roof_id = face["roof_id"]
+        if not isinstance(points, list) or not isinstance(plane, tuple) or not isinstance(roof_id, str):
+            continue
+        visible_pieces = [points]
+        for other in faces:
+            if other is face:
+                continue
+            other_points = other["points"]
+            other_plane = other["plane"]
+            if not isinstance(other_points, list) or not isinstance(other_plane, tuple):
+                continue
+            higher_region = _higher_face_region(other_points, other_plane, plane)
+            if len(higher_region) < 3:
+                continue
+            next_pieces: list[list[Point]] = []
+            for piece in visible_pieces:
+                next_pieces.extend(_subtract_convex_polygon(piece, higher_region))
+            visible_pieces = next_pieces
+            if not visible_pieces:
+                break
+        for piece in visible_pieces:
+            if _polygon_area_abs(piece) > 0.01:
+                visible_by_roof.setdefault(roof_id, []).append({"points": _dedupe_polygon(piece), "plane": plane})
+    return visible_by_roof
+
+
+def _visible_roof_eaves(roofs: list[RoofSection]) -> dict[str, list[list[Point]]]:
+    faces: list[tuple[str, dict[str, object]]] = [
+        (roof.id, face)
+        for roof in roofs
+        for face in _roof_faces(roof)
+    ]
+    footprints = {roof.id: _rect_polygon(roof.rect) for roof in roofs}
+    visible_by_roof: dict[str, list[list[Point]]] = {roof.id: [] for roof in roofs}
+
+    for roof in roofs:
+        visible_pieces = _roof_eave_band_polygons(roof)
+        for other_id, footprint in footprints.items():
+            if other_id == roof.id:
+                continue
+            visible_pieces = _subtract_polygon_from_pieces(visible_pieces, footprint)
+            if not visible_pieces:
+                break
+        for face_roof_id, face in faces:
+            if face_roof_id == roof.id:
+                continue
+            points = face["points"]
+            plane = face["plane"]
+            if not isinstance(points, list) or not isinstance(plane, tuple):
+                continue
+            higher_region = _higher_face_region(points, plane, (0.0, 0.0, 0.0))
+            if len(higher_region) < 3:
+                continue
+            visible_pieces = _subtract_polygon_from_pieces(visible_pieces, higher_region)
+            if not visible_pieces:
+                break
+        visible_by_roof[roof.id] = [piece for piece in visible_pieces if _polygon_area_abs(piece) > 0.01]
+    return visible_by_roof
+
+
+def _roof_eave_band_polygons(roof: RoofSection) -> list[list[Point]]:
+    outer = _roof_eave_rect(roof)
+    inner = roof.rect
+    bands = [
+        Rect(outer.left, outer.top, outer.w, max(inner.top - outer.top, 0)),
+        Rect(outer.left, inner.bottom, outer.w, max(outer.bottom - inner.bottom, 0)),
+        Rect(outer.left, inner.top, max(inner.left - outer.left, 0), inner.h),
+        Rect(inner.right, inner.top, max(outer.right - inner.right, 0), inner.h),
+    ]
+    return [_rect_polygon(rect) for rect in bands if rect.w > EPSILON and rect.h > EPSILON]
+
+
+def _subtract_polygon_from_pieces(pieces: list[list[Point]], polygon: list[Point]) -> list[list[Point]]:
+    next_pieces: list[list[Point]] = []
+    for piece in pieces:
+        next_pieces.extend(_subtract_convex_polygon(piece, polygon))
+    return [piece for piece in next_pieces if _polygon_area_abs(piece) > 0.01]
+
+
+def _higher_face_region(
+    other_points: list[Point],
+    other_plane: tuple[float, float, float],
+    plane: tuple[float, float, float],
+) -> list[Point]:
+    # z = ax + by + c. Keep the portion of the other face that is above this face.
+    a = other_plane[0] - plane[0]
+    b = other_plane[1] - plane[1]
+    c = other_plane[2] - plane[2]
+    if abs(a) <= EPSILON and abs(b) <= EPSILON:
+        return other_points if c > 1e-5 else []
+    return _clip_polygon_half_plane(other_points, a, b, c - 1e-5, keep_positive=True)
+
+
+def _roof_faces(roof: RoofSection) -> list[dict[str, object]]:
+    rect = _roof_eave_rect(roof)
+    pitch = roof.pitch if roof.pitch is not None else 8 / 12
+    mode = roof.mode.replace("-", "_")
+    if mode == "flat" or abs(pitch) <= EPSILON:
+        return [
+            _roof_face(
+                [Point(rect.left, rect.top), Point(rect.right, rect.top), Point(rect.right, rect.bottom), Point(rect.left, rect.bottom)],
+                (0.0, 0.0, 0.0),
+            )
+        ]
+    start = "hip" if mode == "hip" else roof.start.replace("-", "_")
+    end = "hip" if mode == "hip" else roof.end.replace("-", "_")
+    horizontal = _roof_ridge_is_horizontal(roof, rect)
+    if horizontal:
+        ridge_start = Point(rect.left if start == "open" else rect.left + rect.h / 2, rect.cy)
+        ridge_end = Point(rect.right if end == "open" else rect.right - rect.h / 2, rect.cy)
+        faces = [
+            _roof_face(
+                [Point(rect.left, rect.top), Point(rect.right, rect.top), ridge_end, ridge_start],
+                (0.0, pitch, -pitch * rect.top),
+            ),
+            _roof_face(
+                [ridge_start, ridge_end, Point(rect.right, rect.bottom), Point(rect.left, rect.bottom)],
+                (0.0, -pitch, pitch * rect.bottom),
+            ),
+        ]
+        ridge_height = pitch * (rect.cy - rect.top)
+        if start == "hip":
+            faces.append(
+                _roof_face(
+                    [Point(rect.left, rect.top), ridge_start, Point(rect.left, rect.bottom)],
+                    (ridge_height / max(ridge_start.x - rect.left, EPSILON), 0.0, -rect.left * ridge_height / max(ridge_start.x - rect.left, EPSILON)),
+                )
+            )
+        if end == "hip":
+            slope = ridge_height / max(rect.right - ridge_end.x, EPSILON)
+            faces.append(_roof_face([ridge_end, Point(rect.right, rect.top), Point(rect.right, rect.bottom)], (-slope, 0.0, slope * rect.right)))
+        return faces
+    ridge_start = Point(rect.cx, rect.top if start == "open" else rect.top + rect.w / 2)
+    ridge_end = Point(rect.cx, rect.bottom if end == "open" else rect.bottom - rect.w / 2)
+    faces = [
+        _roof_face(
+            [Point(rect.left, rect.top), ridge_start, ridge_end, Point(rect.left, rect.bottom)],
+            (pitch, 0.0, -pitch * rect.left),
+        ),
+        _roof_face(
+            [ridge_start, Point(rect.right, rect.top), Point(rect.right, rect.bottom), ridge_end],
+            (-pitch, 0.0, pitch * rect.right),
+        ),
+    ]
+    ridge_height = pitch * (rect.cx - rect.left)
+    if start == "hip":
+        slope = ridge_height / max(ridge_start.y - rect.top, EPSILON)
+        faces.append(_roof_face([Point(rect.left, rect.top), Point(rect.right, rect.top), ridge_start], (0.0, slope, -slope * rect.top)))
+    if end == "hip":
+        slope = ridge_height / max(rect.bottom - ridge_end.y, EPSILON)
+        faces.append(_roof_face([ridge_end, Point(rect.right, rect.bottom), Point(rect.left, rect.bottom)], (0.0, -slope, slope * rect.bottom)))
+    return faces
+
+
+def _roof_face(points: list[Point], plane: tuple[float, float, float]) -> dict[str, object]:
+    return {"points": _dedupe_polygon(points), "plane": plane}
+
+
+def _rect_polygon(rect: Rect) -> list[Point]:
+    return [Point(rect.left, rect.top), Point(rect.right, rect.top), Point(rect.right, rect.bottom), Point(rect.left, rect.bottom)]
+
+
+def _face_polygons(faces: list[dict[str, object]]) -> list[list[Point]]:
+    polygons: list[list[Point]] = []
+    for face in faces:
+        points = face.get("points")
+        if isinstance(points, list) and len(points) >= 3:
+            polygons.append(points)
+    return polygons
+
+
+def _dedupe_polygon(points: list[Point]) -> list[Point]:
+    deduped = _dedupe_points(points)
+    if len(deduped) > 1 and _same_point(deduped[0], deduped[-1]):
+        deduped.pop()
+    return deduped
+
+
+def _face_intersection_segment(left_face: dict[str, object], right_face: dict[str, object]) -> tuple[Point, Point] | None:
+    left_plane = left_face["plane"]
+    right_plane = right_face["plane"]
+    left_points = left_face["points"]
+    right_points = right_face["points"]
+    if not isinstance(left_plane, tuple) or not isinstance(right_plane, tuple):
+        return None
+    if not isinstance(left_points, list) or not isinstance(right_points, list):
+        return None
+    a = left_plane[0] - right_plane[0]
+    b = left_plane[1] - right_plane[1]
+    c = left_plane[2] - right_plane[2]
+    if abs(a) <= EPSILON and abs(b) <= EPSILON:
+        return None
+    points = _line_polygon_intersection_points(a, b, c, left_points, right_points)
+    if len(points) < 2:
+        return None
+    start, end = _farthest_points(points)
+    if start.distance_to(end) <= 0.25:
+        return None
+    return (start, end)
+
+
+def _line_polygon_intersection_points(
+    a: float,
+    b: float,
+    c: float,
+    left_polygon: list[Point],
+    right_polygon: list[Point],
+) -> list[Point]:
+    candidates: list[Point] = []
+    for polygon in (left_polygon, right_polygon):
+        for start, end in _polygon_edges(polygon):
+            value_start = a * start.x + b * start.y + c
+            value_end = a * end.x + b * end.y + c
+            if abs(value_start) <= 1e-5:
+                candidates.append(start)
+            if abs(value_end) <= 1e-5:
+                candidates.append(end)
+            if value_start * value_end < -EPSILON:
+                ratio = value_start / (value_start - value_end)
+                candidates.append(Point(start.x + (end.x - start.x) * ratio, start.y + (end.y - start.y) * ratio))
+    return _unique_points(
+        [
+            point
+            for point in candidates
+            if _point_in_convex_polygon(point, left_polygon) and _point_in_convex_polygon(point, right_polygon)
+        ]
+    )
+
+
+def _polygon_edges(points: list[Point]) -> list[tuple[Point, Point]]:
+    return [(point, points[(index + 1) % len(points)]) for index, point in enumerate(points)]
+
+
+def _clip_polygon_half_plane(
+    polygon: list[Point],
+    a: float,
+    b: float,
+    c: float,
+    *,
+    keep_positive: bool,
+) -> list[Point]:
+    if not polygon:
+        return []
+
+    def value(point: Point) -> float:
+        raw = a * point.x + b * point.y + c
+        return raw if keep_positive else -raw
+
+    clipped: list[Point] = []
+    previous = polygon[-1]
+    previous_value = value(previous)
+    previous_inside = previous_value >= -1e-6
+    for current in polygon:
+        current_value = value(current)
+        current_inside = current_value >= -1e-6
+        if current_inside != previous_inside:
+            denominator = previous_value - current_value
+            if abs(denominator) > EPSILON:
+                ratio = previous_value / denominator
+                clipped.append(
+                    Point(
+                        previous.x + (current.x - previous.x) * ratio,
+                        previous.y + (current.y - previous.y) * ratio,
+                    )
+                )
+        if current_inside:
+            clipped.append(current)
+        previous = current
+        previous_value = current_value
+        previous_inside = current_inside
+    return _dedupe_polygon(clipped)
+
+
+def _subtract_convex_polygon(subject: list[Point], clip: list[Point]) -> list[list[Point]]:
+    if len(subject) < 3 or len(clip) < 3:
+        return [subject]
+    remaining: list[list[Point]] = []
+    inside_pieces = [subject]
+    clip_ccw = _signed_polygon_area(clip) >= 0
+    for edge_start, edge_end in _polygon_edges(clip):
+        next_inside: list[list[Point]] = []
+        for piece in inside_pieces:
+            inside = _clip_polygon_to_edge(piece, edge_start, edge_end, keep_inside=True, clip_ccw=clip_ccw)
+            outside = _clip_polygon_to_edge(piece, edge_start, edge_end, keep_inside=False, clip_ccw=clip_ccw)
+            if _polygon_area_abs(outside) > 0.01:
+                remaining.append(outside)
+            if _polygon_area_abs(inside) > 0.01:
+                next_inside.append(inside)
+        inside_pieces = next_inside
+        if not inside_pieces:
+            break
+    return remaining or ([] if inside_pieces else [subject])
+
+
+def _clip_polygon_to_edge(
+    polygon: list[Point],
+    edge_start: Point,
+    edge_end: Point,
+    *,
+    keep_inside: bool,
+    clip_ccw: bool,
+) -> list[Point]:
+    dx = edge_end.x - edge_start.x
+    dy = edge_end.y - edge_start.y
+    a = -dy
+    b = dx
+    c = dy * edge_start.x - dx * edge_start.y
+    keep_positive = clip_ccw if keep_inside else not clip_ccw
+    return _clip_polygon_half_plane(polygon, a, b, c, keep_positive=keep_positive)
+
+
+def _signed_polygon_area(points: list[Point]) -> float:
+    return sum(start.x * end.y - end.x * start.y for start, end in _polygon_edges(points)) / 2
+
+
+def _polygon_area_abs(points: list[Point]) -> float:
+    return abs(_signed_polygon_area(points)) if len(points) >= 3 else 0
+
+
+def _point_in_convex_polygon(point: Point, polygon: list[Point], tolerance: float = 1e-5) -> bool:
+    signs = []
+    for start, end in _polygon_edges(polygon):
+        cross = (end.x - start.x) * (point.y - start.y) - (end.y - start.y) * (point.x - start.x)
+        if abs(cross) > tolerance:
+            signs.append(cross > 0)
+    return not signs or all(sign == signs[0] for sign in signs)
+
+
+def _unique_points(points: list[Point]) -> list[Point]:
+    unique: list[Point] = []
+    for point in points:
+        if not any(_same_point_close(point, existing, tolerance=1e-4) for existing in unique):
+            unique.append(point)
+    return unique
+
+
+def _farthest_points(points: list[Point]) -> tuple[Point, Point]:
+    best = (points[0], points[1])
+    best_distance = best[0].distance_to(best[1])
+    for index, start in enumerate(points):
+        for end in points[index + 1 :]:
+            distance = start.distance_to(end)
+            if distance > best_distance:
+                best = (start, end)
+                best_distance = distance
+    return best
+
+
+def _segment_is_duplicate(segment: tuple[Point, Point], segments: list[tuple[Point, Point]]) -> bool:
+    for existing in segments:
+        if (
+            _same_point_close(segment[0], existing[0], tolerance=1e-4)
+            and _same_point_close(segment[1], existing[1], tolerance=1e-4)
+        ) or (
+            _same_point_close(segment[0], existing[1], tolerance=1e-4)
+            and _same_point_close(segment[1], existing[0], tolerance=1e-4)
+        ):
+            return True
+    return False
+
+
+def _same_point_close(left: Point, right: Point, *, tolerance: float) -> bool:
+    return abs(left.x - right.x) <= tolerance and abs(left.y - right.y) <= tolerance
 
 
 def _area_dimension_label(area: AreaLabel, zones_by_id: dict[str, Zone]) -> str:
