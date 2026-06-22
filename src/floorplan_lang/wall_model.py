@@ -147,6 +147,8 @@ class RoofSection:
     pitch: float | None = None
     eave_height: float | None = None
     eave_margin: float = 2.0
+    eave_sides: tuple[str, ...] = ("north", "east", "south", "west")
+    source_level: str | None = None
     start: str = "open"
     end: str = "open"
     ridge: str | None = None

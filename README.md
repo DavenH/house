@@ -29,7 +29,22 @@ pnpm install
 
 ## Run The Editor
 
-Start the API in one terminal:
+Start the API and web editor together:
+
+```sh
+pnpm dev
+```
+
+Then open:
+
+```text
+http://localhost:5173
+```
+
+The script stops both dev servers when it exits, including when you press Ctrl-C.
+It keeps the existing dev reload behavior: Uvicorn reloads the API on Python changes, and Vite hot-reloads editor source changes.
+
+If you want separate terminals, start the API in one terminal:
 
 ```sh
 pnpm dev:api

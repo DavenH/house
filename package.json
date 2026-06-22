@@ -3,6 +3,7 @@
   "name": "ridgestone-house",
   "version": "0.1.0",
   "scripts": {
+    "dev": "bash scripts/dev.sh",
     "dev:api": "uvicorn floorplan_api.main:app --reload",
     "dev:editor": "pnpm --dir apps/editor dev",
     "test:py": "pytest",

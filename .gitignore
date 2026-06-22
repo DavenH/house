@@ -1,8 +1,10 @@
 *.blend1
+.DS_Store
 .idea
 artifacts/**/*.svg
 artifacts/**/*.png
 __pycache__/
+.venv/
 .pytest_cache/
 .ruff_cache/
 node_modules/

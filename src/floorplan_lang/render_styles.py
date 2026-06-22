@@ -28,6 +28,7 @@ def wall_plan_style(*, exterior_opening_mask_stroke: float, interior_opening_mas
         ".roof-section{pointer-events:all;cursor:pointer}",
         ".roof-fill{fill:#efe6d8;fill-opacity:.34;stroke:none}",
         ".roof-eave-fill{fill:#d8c7ad;fill-opacity:.42;stroke:none}",
+        ".roof-eave-stroke{fill:none;stroke:#d8c7ad;stroke-opacity:.42;stroke-linecap:square;stroke-linejoin:miter;pointer-events:none}",
         ".roof-seam{stroke:#b19b82;stroke-width:.55;stroke-linecap:round;opacity:.7;pointer-events:none}",
         ".roof-ridge{stroke:#6f5e4d;stroke-width:1.1;stroke-linecap:round}",
         ".roof-valley{stroke:#7d6a58;stroke-width:1.25;stroke-linecap:round;stroke-dasharray:3 2;pointer-events:none}",

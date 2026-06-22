@@ -11,6 +11,7 @@ from floorplan_lang import (
     Rect,
     Room,
     intent_plan_from_dict,
+    load_intent_plan_yaml,
     load_plan_yaml,
     render_svg,
     write_plan_yaml,
@@ -111,9 +112,58 @@ def test_intent_plan_renders_lower_roof_on_higher_levels() -> None:
 
     assert 'data-fp-layer="roofs"' in svg
     assert 'class="roof-section roof-hip" data-fp-kind="roof"' in svg
-    assert 'class="roof-ridge"' in svg
     assert svg.count('data-fp-id="body_2"') == 2
     assert "eave 10" not in svg
+
+
+def test_intent_plan_clips_promoted_lower_roof_under_higher_eave() -> None:
+    plan = intent_plan_from_dict(
+        {
+            "type": "intent_plan",
+            "plan": "promoted-lower-roof-occlusion-test",
+            "masses": {
+                "main": {
+                    "levels": ["L1", "L2", "L3"],
+                    "rects": [
+                        {
+                            "id": "upper_main",
+                            "roof": {"mode": "hip", "eave_height": 17.5},
+                            "x": ["w", "e"],
+                            "y": ["n", "s"],
+                        },
+                        {
+                            "id": "lower_bay",
+                            "roof": {"mode": "open_gable", "ridge": "x", "eave_height": 10},
+                            "x": ["e", "bay_e"],
+                            "y": ["bay_n", "bay_s"],
+                        },
+                    ],
+                }
+            },
+            "datums": {
+                "x": {"w": 0, "e": 20, "bay_e": 28},
+                "y": {"n": 0, "s": 20, "bay_n": 5, "bay_s": 15},
+            },
+            "levels": {
+                "L1": {"spaces": {"main": {"x": ["w", "e"], "y": ["n", "s"]}}},
+                "L2": {"spaces": {"upper": {"x": ["w", "e"], "y": ["n", "s"]}}},
+                "L3": {"spaces": {"nest": {"x": ["w", "e"], "y": ["n", "s"]}}},
+            },
+        }
+    )
+
+    svg = render_wall_plan_svg(plan)
+    lower_l3_group = svg[
+        svg.index('data-fp-level="L3" data-fp-id="lower_bay"') : svg.index(
+            "</g>", svg.index('data-fp-level="L3" data-fp-id="lower_bay"')
+        )
+    ]
+
+    assert 'data-fp-level="L2" data-fp-id="lower_bay"' in svg
+    assert 'data-fp-level="L3" data-fp-id="lower_bay"' in svg
+    assert 'data-fp-level="L3" data-fp-id="upper_main"' in svg
+    assert '<line class="roof-gable-end" x1="320.000"' not in lower_l3_group
+    assert '<line class="roof-gable-end" x1="496.000"' in lower_l3_group
 
 
 def test_wall_plan_renders_roof_modes() -> None:
@@ -140,7 +190,7 @@ def test_wall_plan_renders_roof_modes() -> None:
 
     assert 'class="roof-section roof-flat"' in svg
     assert 'class="roof-section roof-open_gable"' in svg
-    assert 'class="roof-eave-fill"' in svg
+    assert 'class="roof-eave-stroke roof-eave-fill"' in svg
     assert 'class="roof-outline"' not in svg
     assert 'class="roof-slope-line"' in svg
     assert 'class="roof-seam"' in svg
@@ -149,17 +199,14 @@ def test_wall_plan_renders_roof_modes() -> None:
     assert "OPEN GABLE" not in svg
     assert "GABLE HIP/OPEN" not in svg
     assert '<path class="roof-fill" d="' in svg
-    assert '<path class="roof-eave-fill" d="' in svg
+    assert '<path class="roof-eave-stroke roof-eave-fill" d="' in svg
     assert '<path class="roof-eave-fill" fill-rule="evenodd"' not in svg
     assert '<rect class="roof-fill"' not in svg
-    assert '<line class="roof-hip" x1="656.000" y1="-48.000" x2="768.000" y2="64.000" />' in svg
-    assert '<line class="roof-hip" x1="880.000" y1="-48.000" x2="768.000" y2="64.000" />' in svg
-    assert '<line class="roof-hip" x1="880.000" y1="272.000" x2="768.000" y2="160.000" />' in svg
-    assert '<line class="roof-hip" x1="656.000" y1="272.000" x2="768.000" y2="160.000" />' in svg
+    assert svg.count('class="roof-hip"') >= 4
     assert '<g class="roof-section roof-open_gable" data-fp-kind="roof" data-fp-layer="roofs" data-fp-level="L1" data-fp-id="square_gable">' in svg
     assert '<line class="roof-ridge" x1="944.000" y1="-48.000" x2="944.000" y2="208.000" />' in svg
     assert '<g class="roof-section roof-open_gable" data-fp-kind="roof" data-fp-layer="roofs" data-fp-level="L1" data-fp-id="tight">' in svg
-    assert '<path class="roof-eave-fill" d="M 1064.000 -24.000' in svg
+    assert '<path class="roof-eave-stroke roof-eave-fill" d="M 1248.000 160.000 L 1088.000 160.000 L 1088.000 0.000 L 1248.000 0.000 L 1248.000 160.000" stroke-width="48.000" clip-path=' in svg
 
 
 def test_wall_plan_renders_roof_valleys_from_face_intersections() -> None:
@@ -224,9 +271,205 @@ def test_wall_plan_clips_eaves_inside_other_roof_volumes() -> None:
 
     svg = render_wall_plan_svg(plan)
 
-    assert '<path class="roof-eave-fill" d="M 32.000 -48.000 L 288.000 -48.000 L 288.000 0.000 L 32.000 0.000 Z" />' not in svg
-    assert '<path class="roof-eave-fill" d="M -48.000 -48.000 L 32.000 -48.000 L 32.000 0.000 L -48.000 0.000 Z" />' in svg
-    assert '<path class="roof-eave-fill" d="M 32.000 -128.000 L 288.000 -128.000 L 288.000 -80.000 L 32.000 -80.000 Z" />' in svg
+    assert '<path class="roof-eave-fill" d="' not in svg
+    assert '<clipPath id="roof-eave-clip-eaves__cross__main">' in svg
+    assert '<path class="roof-eave-stroke roof-eave-fill" d="M 80.000 160.000 L 0.000 160.000 L 0.000 0.000 L 80.000 0.000 L 80.000 -80.000 L 240.000 -80.000 L 240.000 0.000 L 320.000 0.000 L 320.000 160.000 L 240.000 160.000 L 240.000 240.000 L 80.000 240.000 L 80.000 160.000" stroke-width="96.000" clip-path=' in svg
+
+
+def test_wall_plan_can_omit_roof_eave_sides() -> None:
+    plan = wall_plan_from_dict(
+        {
+            "plan": "roof-eave-side-test",
+            "levels": {
+                "L1": {
+                    "walls": [{"id": "north", "at": [0, 0], "dir": "E", "len": 10, "kind": "exterior"}],
+                    "roofs": [
+                        {
+                            "id": "attached_gable",
+                            "mode": "open_gable",
+                            "ridge": "y",
+                            "pitch": "8:12",
+                            "eaves": ["east", "south", "west"],
+                            "rect": [0, 0, 10, 8],
+                        },
+                    ],
+                }
+            },
+        }
+    )
+
+    roof = plan.levels["L1"].roofs[0]
+    svg = render_wall_plan_svg(plan)
+
+    assert roof.eave_sides == ("east", "south", "west")
+    assert '<path class="roof-eave-stroke roof-eave-fill" d="M 0.000 0.000 L 160.000 0.000' not in svg
+    assert '<line class="roof-gable-end" x1="-48.000" y1="0.000" x2="208.000" y2="0.000" />' in svg
+    assert '<path class="roof-eave-stroke roof-eave-fill" d="M 160.000 0.000 L 160.000 128.000 L 0.000 128.000 L 0.000 0.000" stroke-width="96.000" clip-path=' in svg
+
+
+def test_wall_plan_can_omit_attached_west_roof_eave() -> None:
+    plan = wall_plan_from_dict(
+        {
+            "plan": "roof-attached-west-eave-test",
+            "levels": {
+                "L1": {
+                    "walls": [{"id": "north", "at": [0, 0], "dir": "E", "len": 10, "kind": "exterior"}],
+                    "roofs": [
+                        {
+                            "id": "attached_bay",
+                            "mode": "open_gable",
+                            "ridge": "x",
+                            "pitch": "8:12",
+                            "eaves": ["north", "east", "south"],
+                            "rect": [10, 0, 8, 10],
+                        },
+                    ],
+                }
+            },
+        }
+    )
+
+    roof = plan.levels["L1"].roofs[0]
+    svg = render_wall_plan_svg(plan)
+
+    assert roof.eave_sides == ("north", "east", "south")
+    assert '<line class="roof-gable-end" x1="112.000"' not in svg
+    assert '<line class="roof-gable-end" x1="160.000" y1="-48.000" x2="160.000" y2="208.000" />' in svg
+    assert '<line class="roof-gable-end" x1="336.000" y1="-48.000" x2="336.000" y2="208.000" />' in svg
+    assert '<path class="roof-eave-stroke roof-eave-fill" d="M 160.000 0.000 L 288.000 0.000 L 288.000 160.000 L 160.000 160.000" stroke-width="96.000" clip-path=' in svg
+
+
+def test_wall_plan_uses_eave_height_for_roof_visibility() -> None:
+    plan = wall_plan_from_dict(
+        {
+            "plan": "roof-depth-test",
+            "levels": {
+                "L1": {
+                    "walls": [{"id": "north", "at": [0, 0], "dir": "E", "len": 10, "kind": "exterior"}],
+                    "roofs": [
+                        {
+                            "id": "high",
+                            "mode": "open_gable",
+                            "ridge": "x",
+                            "pitch": "8:12",
+                            "eave_height": 20,
+                            "rect": [0, 0, 20, 10],
+                        },
+                        {
+                            "id": "low",
+                            "mode": "open_gable",
+                            "ridge": "y",
+                            "pitch": "8:12",
+                            "eave_height": 10,
+                            "rect": [10, 0, 10, 20],
+                        },
+                    ],
+                }
+            },
+        }
+    )
+
+    svg = render_wall_plan_svg(plan)
+    low_group = svg[svg.index('data-fp-id="low"') : svg.index("</g>", svg.index('data-fp-id="low"'))]
+
+    assert '<line class="roof-gable-end" x1="112.000" y1="208.000" x2="368.000" y2="208.000" />' not in low_group
+    assert '<line class="roof-gable-end" x1="112.000" y1="368.000" x2="368.000" y2="368.000" />' in low_group
+
+
+def test_wall_plan_higher_eave_occludes_lower_roof_faces() -> None:
+    plan = wall_plan_from_dict(
+        {
+            "plan": "roof-eave-depth-test",
+            "levels": {
+                "L1": {
+                    "walls": [{"id": "north", "at": [0, 0], "dir": "E", "len": 10, "kind": "exterior"}],
+                    "roofs": [
+                        {
+                            "id": "high",
+                            "mode": "hip",
+                            "pitch": "8:12",
+                            "eave_height": 20,
+                            "rect": [0, 0, 20, 20],
+                        },
+                        {
+                            "id": "low",
+                            "mode": "open_gable",
+                            "ridge": "x",
+                            "pitch": "8:12",
+                            "eave_height": 10,
+                            "rect": [10, 10, 20, 10],
+                        },
+                    ],
+                }
+            },
+        }
+    )
+
+    svg = render_wall_plan_svg(plan)
+    low_group = svg[svg.index('data-fp-id="low"') : svg.index("</g>", svg.index('data-fp-id="low"'))]
+
+    assert '<path class="roof-fill" d="M 112.000 112.000' not in low_group
+    assert '<path class="roof-fill" d="M 368.000 112.000 L 528.000 112.000 L 528.000 240.000 L 368.000 240.000 Z" />' in low_group
+    assert 'class="roof-valley"' not in svg
+
+
+def test_wall_plan_larger_coplanar_roof_face_wins_overlap() -> None:
+    plan = wall_plan_from_dict(
+        {
+            "plan": "roof-coplanar-depth-test",
+            "levels": {
+                "L1": {
+                    "walls": [{"id": "north", "at": [0, 0], "dir": "E", "len": 10, "kind": "exterior"}],
+                    "roofs": [
+                        {
+                            "id": "large",
+                            "mode": "open_gable",
+                            "ridge": "x",
+                            "pitch": "8:12",
+                            "eave_height": 17.5,
+                            "rect": [0, 0, 20, 10],
+                        },
+                        {
+                            "id": "small",
+                            "mode": "open_gable",
+                            "ridge": "x",
+                            "pitch": "8:12",
+                            "eave_height": 17.5,
+                            "rect": [5, 0, 6, 10],
+                        },
+                    ],
+                }
+            },
+        }
+    )
+
+    svg = render_wall_plan_svg(plan)
+    small_group = svg[svg.index('data-fp-id="small"') : svg.index("</g>", svg.index('data-fp-id="small"'))]
+
+    assert '<path class="roof-fill"' not in small_group
+    assert 'class="roof-ridge"' not in small_group
+    assert 'class="roof-seam"' in small_group
+
+
+def test_ridgestone_coplanar_right_gable_face_clips_internal_ridge() -> None:
+    plan = load_intent_plan_yaml("artifacts/floorplans/ridgestone-intent-studio-wing-master-south.yaml")
+
+    svg = render_wall_plan_svg(plan)
+    right_gable = svg[
+        svg.index('data-fp-level="L3" data-fp-id="right_gable"') : svg.index(
+            "</g>", svg.index('data-fp-level="L3" data-fp-id="right_gable"')
+        )
+    ]
+    main_gable = svg[
+        svg.index('data-fp-level="L3" data-fp-id="main_gable"') : svg.index(
+            "</g>", svg.index('data-fp-level="L3" data-fp-id="main_gable"')
+        )
+    ]
+
+    assert 'class="roof-ridge" x1="736.000" y1="288.000"' not in right_gable
+    assert 'class="roof-ridge" x1="736.000" y1="320.000" x2="736.000" y2="632.000"' in right_gable
+    assert 'class="roof-gable-end" x1="736.000" y1="288.000"' not in right_gable
+    assert 'class="roof-ridge" x1="-24.000" y1="288.000" x2="704.000" y2="288.000"' in main_gable
 
 
 def test_wall_plan_roof_seams_are_symmetric_across_ridge() -> None:

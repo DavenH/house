@@ -451,10 +451,11 @@ function updateSpacesAlongExteriorWall(
   touchedDatums: Set<string>,
   movedEdges: Set<string>
 ) {
-  const levels = (data.levels ?? {}) as AnyRecord;
+  const sourceData = wallDrag.snapshot ?? data;
+  const levels = (sourceData.levels ?? {}) as AnyRecord;
   for (const [levelId, levelData] of Object.entries(levels)) {
     for (const [spaceId] of Object.entries((levelData as AnyRecord).spaces ?? {})) {
-      const rect = resolveSpaceRect(data, levelId, spaceId);
+      const rect = resolveSpaceRect(sourceData, levelId, spaceId);
       if (!rect) {
         continue;
       }
@@ -467,9 +468,11 @@ function updateSpacesAlongExteriorWall(
         }
         if (Math.abs(rect.left - x) < 0.01) {
           moveSpaceEdgeAndStackedMembers(data, levelId, spaceId, "left", delta, touchedDatums, movedEdges);
+          moveAdjacentEdges(data, levelId, spaceId, rect, "left", delta, touchedDatums, movedEdges);
         }
         if (Math.abs(rect.right - x) < 0.01) {
           moveSpaceEdgeAndStackedMembers(data, levelId, spaceId, "right", delta, touchedDatums, movedEdges);
+          moveAdjacentEdges(data, levelId, spaceId, rect, "right", delta, touchedDatums, movedEdges);
         }
       } else {
         const y = wallDrag.line.y1;
@@ -480,9 +483,11 @@ function updateSpacesAlongExteriorWall(
         }
         if (Math.abs(rect.top - y) < 0.01) {
           moveSpaceEdgeAndStackedMembers(data, levelId, spaceId, "top", delta, touchedDatums, movedEdges);
+          moveAdjacentEdges(data, levelId, spaceId, rect, "top", delta, touchedDatums, movedEdges);
         }
         if (Math.abs(rect.bottom - y) < 0.01) {
           moveSpaceEdgeAndStackedMembers(data, levelId, spaceId, "bottom", delta, touchedDatums, movedEdges);
+          moveAdjacentEdges(data, levelId, spaceId, rect, "bottom", delta, touchedDatums, movedEdges);
         }
       }
     }

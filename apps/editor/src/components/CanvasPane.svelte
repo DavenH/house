@@ -1,7 +1,13 @@
 <script lang="ts">
-  import { tick } from "svelte";
+  import { onMount, tick } from "svelte";
   import type { PlanDocument, PlanSummary } from "../lib/api";
   import { serializeCanvasSvgForExport, serializePrintableFloorPages } from "../lib/canvasSvg";
+
+  type WebKitGestureEvent = Event & {
+    clientX: number;
+    clientY: number;
+    scale: number;
+  };
 
   export let document: PlanDocument | null = null;
   export let plans: PlanSummary[] = [];
@@ -22,6 +28,7 @@
   let canvasPadX = 0;
   let canvasPadY = 0;
   let lastPositionedPlan = "";
+  let gestureStartZoom = canvasZoom;
   const layerOptions = [
     { id: "dimensions", label: "Dimensions", selectors: [".dimension", ".dimension-projection", ".dimension-label"] },
     { id: "compass", label: "Compass", selectors: [".compass"] },
@@ -46,6 +53,23 @@
   $: void applySvgZoom(svg, canvasZoom, canvasElement);
   $: void detectAvailableLayers(svg, canvasElement);
   $: void applyLayerVisibility(svg, layerVisibility, canvasElement);
+
+  onMount(() => {
+    const frame = canvasFrame;
+    if (!frame) {
+      return;
+    }
+    const gestureStartListener: EventListener = (event) => handleGestureStart(event as WebKitGestureEvent);
+    const gestureChangeListener: EventListener = (event) => {
+      void handleGestureChange(event as WebKitGestureEvent);
+    };
+    frame.addEventListener("gesturestart", gestureStartListener, { passive: false });
+    frame.addEventListener("gesturechange", gestureChangeListener, { passive: false });
+    return () => {
+      frame.removeEventListener("gesturestart", gestureStartListener);
+      frame.removeEventListener("gesturechange", gestureChangeListener);
+    };
+  });
 
   async function copyError() {
     if (!error) {
@@ -173,15 +197,43 @@
     if (!canvasFrame || !canvasElement) {
       return;
     }
-    event.preventDefault();
-    const currentZoom = canvasZoom;
-    const nextZoom = Math.min(2.4, Math.max(0.35, currentZoom * (event.deltaY < 0 ? 1.1 : 0.9)));
-    if (Math.abs(nextZoom - currentZoom) < 0.001) {
+    if (!event.ctrlKey && !event.metaKey) {
       return;
     }
+    event.preventDefault();
+    const currentZoom = canvasZoom;
+    const deltaY = normalizedWheelDeltaY(event);
+    const nextZoom = Math.min(2.4, Math.max(0.35, currentZoom * Math.exp(-deltaY * 0.0015)));
     const frameRect = canvasFrame.getBoundingClientRect();
-    const anchorX = event.clientX - frameRect.left;
-    const anchorY = event.clientY - frameRect.top;
+    await zoomCanvasAt(nextZoom, event.clientX - frameRect.left, event.clientY - frameRect.top);
+  }
+
+  function handleGestureStart(event: WebKitGestureEvent) {
+    if (!canvasFrame || !canvasElement) {
+      return;
+    }
+    event.preventDefault();
+    gestureStartZoom = canvasZoom;
+  }
+
+  async function handleGestureChange(event: WebKitGestureEvent) {
+    if (!canvasFrame || !canvasElement) {
+      return;
+    }
+    event.preventDefault();
+    const frameRect = canvasFrame.getBoundingClientRect();
+    await zoomCanvasAt(
+      Math.min(2.4, Math.max(0.35, gestureStartZoom * event.scale)),
+      event.clientX - frameRect.left,
+      event.clientY - frameRect.top
+    );
+  }
+
+  async function zoomCanvasAt(nextZoom: number, anchorX: number, anchorY: number) {
+    const currentZoom = canvasZoom;
+    if (!canvasFrame || !canvasElement || Math.abs(nextZoom - currentZoom) < 0.001) {
+      return;
+    }
     const contentX = canvasFrame.scrollLeft + anchorX - canvasPadX;
     const contentY = canvasFrame.scrollTop + anchorY - canvasPadY;
     const ratio = nextZoom / currentZoom;
@@ -189,6 +241,16 @@
     await applySvgZoom(svg, nextZoom, canvasElement);
     canvasFrame.scrollLeft = contentX * ratio + canvasPadX - anchorX;
     canvasFrame.scrollTop = contentY * ratio + canvasPadY - anchorY;
+  }
+
+  function normalizedWheelDeltaY(event: WheelEvent) {
+    if (event.deltaMode === WheelEvent.DOM_DELTA_LINE) {
+      return event.deltaY * 16;
+    }
+    if (event.deltaMode === WheelEvent.DOM_DELTA_PAGE) {
+      return event.deltaY * (canvasFrame?.clientHeight ?? 800);
+    }
+    return event.deltaY;
   }
 </script>
 

@@ -240,6 +240,8 @@ def _roof_sections_from_dict(data: Any) -> list[RoofSection]:
                 pitch=_pitch(item_data.get("pitch")) if item_data.get("pitch") is not None else None,
                 eave_height=float(item_data["eave_height"]) if item_data.get("eave_height") is not None else None,
                 eave_margin=float(item_data.get("eave_margin", 2.0)),
+                eave_sides=_roof_eave_sides(item_data),
+                source_level=str(item_data["source_level"]) if item_data.get("source_level") is not None else None,
                 ridge=_roof_ridge(item_data),
                 **_roof_end_options(item_data),
             )
@@ -619,13 +621,188 @@ def _render_space_select_target(zone: Zone, level_id: str, scale: float) -> str:
 
 def _render_roofs(roofs: list[RoofSection], level_id: str, scale: float) -> list[str]:
     visible_faces = _visible_roof_faces(roofs)
-    visible_eaves = _visible_roof_eaves(roofs)
-    parts = [
-        _render_roof(roof, level_id, scale, visible_faces.get(roof.id, []), visible_eaves.get(roof.id, []))
-        for roof in roofs
-    ]
-    parts.extend(_render_roof_intersections(roofs, scale))
+    seam_faces = _visible_roof_faces(roofs, resolve_coplanar=False)
+    raw_faces = _roof_faces_by_roof(roofs)
+    parts = []
+    for group in _roof_eave_groups(roofs):
+        parts.extend(
+            _render_roof(
+                roof,
+                level_id,
+                scale,
+                visible_faces.get(roof.id, []),
+                seam_faces.get(roof.id, []),
+                raw_faces,
+            )
+            for roof in group
+        )
+        parts.extend(_render_roof_eave_group(group, level_id, scale))
+    parts.extend(_render_roof_intersections(roofs, scale, visible_faces))
     return parts
+
+
+def _roof_faces_by_roof(roofs: list[RoofSection]) -> dict[str, list[dict[str, object]]]:
+    return {roof.id: _roof_faces(roof) for roof in roofs}
+
+
+def _roof_render_order(roof: RoofSection) -> tuple[float, str]:
+    return (roof.eave_height or 0.0, roof.id)
+
+
+def _roof_eave_groups(roofs: list[RoofSection]) -> list[list[RoofSection]]:
+    groups: dict[tuple[float, float], list[RoofSection]] = {}
+    for roof in roofs:
+        key = (round(roof.eave_height or 0.0, 4), round(roof.eave_margin, 4))
+        groups.setdefault(key, []).append(roof)
+    return [
+        sorted(group, key=lambda roof: roof.id)
+        for _, group in sorted(groups.items(), key=lambda item: (item[0][0], item[0][1]))
+    ]
+
+
+def _render_roof_eave_group(roofs: list[RoofSection], level_id: str, scale: float) -> list[str]:
+    if not roofs:
+        return []
+    overhang = EXTERIOR_WALL_THICKNESS_FT + roofs[0].eave_margin
+    if overhang <= EPSILON:
+        return []
+    parts = [
+        f'<g class="roof-eave-group" data-fp-kind="roof-eave" data-fp-layer="roofs" '
+        f'data-fp-level="{escape(level_id)}" data-fp-id="{escape(_roof_eave_group_id(roofs))}">'
+    ]
+    clip_id = _svg_id(_roof_eave_group_id(roofs), "roof-eave-clip")
+    clip_path = _roof_eave_clip_path(roofs, scale)
+    if clip_path:
+        parts.append(f'<clipPath id="{escape(clip_id)}"><path clip-rule="evenodd" d="{clip_path}" /></clipPath>')
+    stroke_width = overhang * 2 * scale
+    for points in _roof_eave_group_paths(roofs):
+        command = _polyline_command(points, scale)
+        clip_attr = f' clip-path="url(#{escape(clip_id)})"' if clip_path else ""
+        parts.append(f'<path class="roof-eave-stroke roof-eave-fill" d="{command}" stroke-width="{stroke_width:.3f}"{clip_attr} />')
+    parts.append("</g>")
+    return parts
+
+
+def _roof_eave_group_id(roofs: list[RoofSection]) -> str:
+    if len(roofs) == 1:
+        return f"eaves__{roofs[0].id}"
+    return "eaves__" + "__".join(roof.id for roof in roofs)
+
+
+def _roof_eave_group_paths(roofs: list[RoofSection]) -> list[list[Point]]:
+    boundary_walls = [
+        wall
+        for wall in _rect_union_boundary_walls([roof.rect for roof in roofs], "roof_eave")
+        if _roof_boundary_wall_has_eave(wall, roofs)
+    ]
+    return [
+        points
+        for points in _connected_wall_paths(boundary_walls)
+        if len(points) >= 2
+    ]
+
+
+def _roof_eave_clip_path(roofs: list[RoofSection], scale: float) -> str:
+    outer_paths = _rect_union_paths([_roof_eave_rect(roof) for roof in roofs])
+    inner_paths = _roof_body_group_paths(roofs)
+    commands = [_path_command(points, scale) for points in outer_paths if len(points) >= 4]
+    commands.extend(_path_command(list(reversed(points)), scale) for points in inner_paths if len(points) >= 4)
+    return " ".join(commands)
+
+
+def _rect_union_paths(rects: list[Rect]) -> list[list[Point]]:
+    return [
+        points
+        for points in _connected_wall_paths(_rect_union_boundary_walls(rects, "rect_union"))
+        if len(points) >= 4 and _same_point(points[0], points[-1])
+    ]
+
+
+def _roof_body_group_paths(roofs: list[RoofSection]) -> list[list[Point]]:
+    return [
+        points
+        for points in _connected_wall_paths(_rect_union_boundary_walls([roof.rect for roof in roofs], "roof_body"))
+        if len(points) >= 4 and _same_point(points[0], points[-1])
+    ]
+
+
+def _rect_union_boundary_walls(rects: list[Rect], prefix: str) -> list[WallSegment]:
+    if not rects:
+        return []
+    xs = sorted({coord for rect in rects for coord in (rect.left, rect.right)})
+    ys = sorted({coord for rect in rects for coord in (rect.top, rect.bottom)})
+    covered = set()
+    for xi, (left, right) in enumerate(zip(xs, xs[1:])):
+        for yi, (top, bottom) in enumerate(zip(ys, ys[1:])):
+            center = Point((left + right) / 2, (top + bottom) / 2)
+            if any(rect.contains_point(center) for rect in rects):
+                covered.add((xi, yi))
+
+    edges: dict[tuple[str, float, Direction], list[tuple[float, float]]] = {}
+    for xi, yi in covered:
+        left, right = xs[xi], xs[xi + 1]
+        top, bottom = ys[yi], ys[yi + 1]
+        if (xi, yi - 1) not in covered:
+            edges.setdefault(("h", top, "E"), []).append((left, right))
+        if (xi + 1, yi) not in covered:
+            edges.setdefault(("v", right, "S"), []).append((top, bottom))
+        if (xi, yi + 1) not in covered:
+            edges.setdefault(("h", bottom, "W"), []).append((left, right))
+        if (xi - 1, yi) not in covered:
+            edges.setdefault(("v", left, "N"), []).append((top, bottom))
+
+    walls = []
+    index = 0
+    for (orientation, const, direction), intervals in sorted(edges.items(), key=lambda item: str(item[0])):
+        for start, end in _merge_intervals(intervals):
+            index += 1
+            if orientation == "h" and direction == "E":
+                at = Point(start, const)
+            elif orientation == "h":
+                at = Point(end, const)
+            elif direction == "S":
+                at = Point(const, start)
+            else:
+                at = Point(const, end)
+            walls.append(WallSegment(id=f"{prefix}_{index}", at=at, direction=direction, length=end - start, kind="exterior"))
+    return walls
+
+
+def _roof_boundary_wall_has_eave(wall: WallSegment, roofs: list[RoofSection]) -> bool:
+    side = _roof_boundary_side(wall)
+    if side is None:
+        return False
+    midpoint = wall.point_at(wall.length / 2)
+    for roof in roofs:
+        if side not in roof.eave_sides:
+            continue
+        rect = roof.rect
+        if side == "north" and abs(midpoint.y - rect.top) <= EPSILON and rect.left - EPSILON <= midpoint.x <= rect.right + EPSILON:
+            return True
+        if side == "east" and abs(midpoint.x - rect.right) <= EPSILON and rect.top - EPSILON <= midpoint.y <= rect.bottom + EPSILON:
+            return True
+        if side == "south" and abs(midpoint.y - rect.bottom) <= EPSILON and rect.left - EPSILON <= midpoint.x <= rect.right + EPSILON:
+            return True
+        if side == "west" and abs(midpoint.x - rect.left) <= EPSILON and rect.top - EPSILON <= midpoint.y <= rect.bottom + EPSILON:
+            return True
+    return False
+
+
+def _roof_boundary_side(wall: WallSegment) -> str | None:
+    if wall.direction == "E":
+        return "north"
+    if wall.direction == "S":
+        return "east"
+    if wall.direction == "W":
+        return "south"
+    if wall.direction == "N":
+        return "west"
+    return None
+
+
+def _svg_id(value: str, prefix: str) -> str:
+    safe = "".join(char if char.isalnum() or char in "-_" else "_" for char in value)
+    return f"{prefix}-{safe}"
 
 
 def _render_roof(
@@ -633,9 +810,9 @@ def _render_roof(
     level_id: str,
     scale: float,
     visible_faces: list[dict[str, object]],
-    visible_eaves: list[list[Point]],
+    seam_faces: list[dict[str, object]],
+    all_visible_faces: dict[str, list[dict[str, object]]] | None = None,
 ) -> str:
-    eave_paths = [f'<path class="roof-eave-fill" d="{_path_command(points, scale)}" />' for points in visible_eaves]
     face_paths = [
         f'<path class="roof-fill" d="{_path_command(points, scale)}" />'
         for points in _face_polygons(visible_faces)
@@ -643,23 +820,24 @@ def _render_roof(
     parts = [
         f'<g class="roof-section roof-{escape(roof.mode)}" data-fp-kind="roof" data-fp-layer="roofs" '
         f'data-fp-level="{escape(level_id)}" data-fp-id="{escape(roof.id)}">',
-        *eave_paths,
         *face_paths,
     ]
-    parts.extend(_render_roof_seams(roof, scale, visible_faces))
-    parts.extend(_render_roof_lines(roof, scale))
+    parts.extend(_render_roof_seams(roof, scale, seam_faces))
+    parts.extend(_render_roof_lines(roof, scale, visible_faces, all_visible_faces or {}))
     parts.append("</g>")
     return "".join(parts)
 
 
-def _render_roof_lines(roof: RoofSection, scale: float) -> list[str]:
+def _render_roof_lines(
+    roof: RoofSection,
+    scale: float,
+    visible_faces: list[dict[str, object]],
+    all_visible_faces: dict[str, list[dict[str, object]]] | None = None,
+) -> list[str]:
     rect = _roof_eave_rect(roof)
     mode = roof.mode.replace("-", "_")
     if mode == "flat":
-        return [
-            f'<line class="roof-slope-line" x1="{rect.left * scale:.3f}" y1="{rect.top * scale:.3f}" '
-            f'x2="{rect.right * scale:.3f}" y2="{rect.bottom * scale:.3f}" />'
-        ]
+        return _visible_roof_lines([(Point(rect.left, rect.top), Point(rect.right, rect.bottom), "roof-slope-line")], visible_faces, scale)
     start = "hip" if mode == "hip" else roof.start.replace("-", "_")
     end = "hip" if mode == "hip" else roof.end.replace("-", "_")
     if _roof_ridge_is_horizontal(roof, rect):
@@ -668,46 +846,53 @@ def _render_roof_lines(roof: RoofSection, scale: float) -> list[str]:
     else:
         ridge_start = Point(rect.cx, rect.top if start == "open" else rect.top + rect.w / 2)
         ridge_end = Point(rect.cx, rect.bottom if end == "open" else rect.bottom - rect.w / 2)
-    lines = [_roof_line(ridge_start, ridge_end, scale, "roof-ridge")]
+    lines = [(ridge_start, ridge_end, "roof-ridge")]
     if _roof_ridge_is_horizontal(roof, rect):
         if start == "hip":
             lines.extend(
                 [
-                    _roof_line(Point(rect.left, rect.top), ridge_start, scale, "roof-hip"),
-                    _roof_line(Point(rect.left, rect.bottom), ridge_start, scale, "roof-hip"),
+                    (Point(rect.left, rect.top), ridge_start, "roof-hip"),
+                    (Point(rect.left, rect.bottom), ridge_start, "roof-hip"),
                 ]
             )
         else:
-            lines.append(_roof_line(Point(rect.left, rect.top), Point(rect.left, rect.bottom), scale, "roof-gable-end"))
+            lines.append((Point(rect.left, rect.top), Point(rect.left, rect.bottom), "roof-gable-end"))
         if end == "hip":
             lines.extend(
                 [
-                    _roof_line(Point(rect.right, rect.top), ridge_end, scale, "roof-hip"),
-                    _roof_line(Point(rect.right, rect.bottom), ridge_end, scale, "roof-hip"),
+                    (Point(rect.right, rect.top), ridge_end, "roof-hip"),
+                    (Point(rect.right, rect.bottom), ridge_end, "roof-hip"),
                 ]
             )
         else:
-            lines.append(_roof_line(Point(rect.right, rect.top), Point(rect.right, rect.bottom), scale, "roof-gable-end"))
+            lines.append((Point(rect.right, rect.top), Point(rect.right, rect.bottom), "roof-gable-end"))
     else:
         if start == "hip":
             lines.extend(
                 [
-                    _roof_line(Point(rect.left, rect.top), ridge_start, scale, "roof-hip"),
-                    _roof_line(Point(rect.right, rect.top), ridge_start, scale, "roof-hip"),
+                    (Point(rect.left, rect.top), ridge_start, "roof-hip"),
+                    (Point(rect.right, rect.top), ridge_start, "roof-hip"),
                 ]
             )
         else:
-            lines.append(_roof_line(Point(rect.left, rect.top), Point(rect.right, rect.top), scale, "roof-gable-end"))
+            lines.append((Point(rect.left, rect.top), Point(rect.right, rect.top), "roof-gable-end"))
         if end == "hip":
             lines.extend(
                 [
-                    _roof_line(Point(rect.right, rect.bottom), ridge_end, scale, "roof-hip"),
-                    _roof_line(Point(rect.left, rect.bottom), ridge_end, scale, "roof-hip"),
+                    (Point(rect.right, rect.bottom), ridge_end, "roof-hip"),
+                    (Point(rect.left, rect.bottom), ridge_end, "roof-hip"),
                 ]
             )
         else:
-            lines.append(_roof_line(Point(rect.left, rect.bottom), Point(rect.right, rect.bottom), scale, "roof-gable-end"))
-    return lines
+            lines.append((Point(rect.left, rect.bottom), Point(rect.right, rect.bottom), "roof-gable-end"))
+    raw_faces = all_visible_faces or {}
+    hidden_intervals = [
+        _roof_line_merged_intervals(roof, visible_faces, raw_faces, line_start, line_end)
+        if class_name in {"roof-ridge", "roof-gable-end"}
+        else []
+        for line_start, line_end, class_name in lines
+    ]
+    return _visible_roof_lines(lines, visible_faces, scale, hidden_intervals=hidden_intervals)
 
 
 def _roof_end_options(data: dict[str, Any]) -> dict[str, str]:
@@ -738,7 +923,29 @@ def _roof_ridge(data: dict[str, Any]) -> str | None:
 
 def _roof_eave_rect(roof: RoofSection) -> Rect:
     overhang = EXTERIOR_WALL_THICKNESS_FT + roof.eave_margin
-    return roof.rect.padded(overhang)
+    north = overhang if "north" in roof.eave_sides else 0
+    east = overhang if "east" in roof.eave_sides else 0
+    south = overhang if "south" in roof.eave_sides else 0
+    west = overhang if "west" in roof.eave_sides else 0
+    return Rect(
+        roof.rect.left - west,
+        roof.rect.top - north,
+        roof.rect.w + west + east,
+        roof.rect.h + north + south,
+    )
+
+
+def _roof_eave_sides(data: dict[str, Any]) -> tuple[str, ...]:
+    sides = data.get("eave_sides", data.get("eaves"))
+    if sides is None:
+        return ("north", "east", "south", "west")
+    if isinstance(sides, dict):
+        return tuple(
+            side
+            for side in ("north", "east", "south", "west")
+            if sides.get(side, True) is not False
+        )
+    return tuple(str(side).lower() for side in sides)
 
 
 def _roof_ridge_is_horizontal(roof: RoofSection, rect: Rect) -> bool:
@@ -752,11 +959,192 @@ def _roof_ridge_is_horizontal(roof: RoofSection, rect: Rect) -> bool:
     return rect.w >= rect.h
 
 
+def _roof_line_merged_intervals(
+    roof: RoofSection,
+    visible_faces: list[dict[str, object]],
+    all_visible_faces: dict[str, list[dict[str, object]]],
+    line_start: Point,
+    line_end: Point,
+) -> list[tuple[float, float]]:
+    intervals: list[tuple[float, float]] = []
+    for face in visible_faces:
+        plane = face.get("plane")
+        points = face.get("points")
+        if not isinstance(plane, tuple) or not isinstance(points, list):
+            continue
+        if _polygon_area_abs(points) <= 0.01:
+            continue
+        for other_roof_id, other_faces in all_visible_faces.items():
+            if other_roof_id == roof.id:
+                continue
+            for other in other_faces:
+                other_plane = other.get("plane")
+                other_points = other.get("points")
+                if not isinstance(other_plane, tuple) or not isinstance(other_points, list):
+                    continue
+                if not _planes_are_coplanar(plane, other_plane):
+                    continue
+                intersection = _convex_polygon_intersection(points, other_points)
+                if _polygon_area_abs(intersection) > 0.01:
+                    intervals.extend(_segment_polygon_boundary_overlap_intervals(line_start, line_end, intersection))
+                    break
+    return _merge_intervals(intervals)
+
+
+def _segment_polygon_boundary_overlap_intervals(
+    start: Point,
+    end: Point,
+    polygon: list[Point],
+    min_length: float = 0.25,
+) -> list[tuple[float, float]]:
+    intervals: list[tuple[float, float]] = []
+    for edge_start, edge_end in _polygon_edges(polygon):
+        overlap = _collinear_segment_overlap_interval(start, end, edge_start, edge_end)
+        if overlap is not None and overlap[0].distance_to(overlap[1]) > min_length:
+            intervals.append((overlap[2], overlap[3]))
+    return _merge_intervals(intervals)
+
+
+def _collinear_segment_overlap_interval(
+    first_start: Point,
+    first_end: Point,
+    second_start: Point,
+    second_end: Point,
+) -> tuple[Point, Point, float, float] | None:
+    dx = first_end.x - first_start.x
+    dy = first_end.y - first_start.y
+    length_sq = dx * dx + dy * dy
+    if length_sq <= EPSILON:
+        return None
+    cross_start = dx * (second_start.y - first_start.y) - dy * (second_start.x - first_start.x)
+    cross_end = dx * (second_end.y - first_start.y) - dy * (second_end.x - first_start.x)
+    if abs(cross_start) > 1e-5 or abs(cross_end) > 1e-5:
+        return None
+    first_min, first_max = 0.0, 1.0
+    second_a = ((second_start.x - first_start.x) * dx + (second_start.y - first_start.y) * dy) / length_sq
+    second_b = ((second_end.x - first_start.x) * dx + (second_end.y - first_start.y) * dy) / length_sq
+    overlap_start = max(first_min, min(second_a, second_b))
+    overlap_end = min(first_max, max(second_a, second_b))
+    if overlap_end <= overlap_start + 1e-6:
+        return None
+    return (
+        Point(first_start.x + dx * overlap_start, first_start.y + dy * overlap_start),
+        Point(first_start.x + dx * overlap_end, first_start.y + dy * overlap_end),
+        overlap_start,
+        overlap_end,
+    )
+
+
 def _roof_line(start: Point, end: Point, scale: float, class_name: str) -> str:
     return (
         f'<line class="{class_name}" x1="{start.x * scale:.3f}" y1="{start.y * scale:.3f}" '
         f'x2="{end.x * scale:.3f}" y2="{end.y * scale:.3f}" />'
     )
+
+
+def _visible_roof_lines(
+    lines: list[tuple[Point, Point, str]],
+    visible_faces: list[dict[str, object]],
+    scale: float,
+    hidden_intervals: list[list[tuple[float, float]]] | None = None,
+) -> list[str]:
+    visible_polygons = [
+        face["points"]
+        for face in visible_faces
+        if isinstance(face.get("points"), list) and len(face["points"]) >= 3
+    ]
+    if not visible_polygons:
+        return []
+    rendered = []
+    for index, (start, end, class_name) in enumerate(lines):
+        intervals: list[tuple[float, float]] = []
+        for polygon in visible_polygons:
+            intervals.extend(_segment_intervals_inside_polygon(start, end, polygon))
+        hidden = hidden_intervals[index] if hidden_intervals is not None and index < len(hidden_intervals) else []
+        intervals = _subtract_intervals(_merge_intervals(intervals), hidden)
+        dx = end.x - start.x
+        dy = end.y - start.y
+        for first, second in intervals:
+            clipped_start = Point(start.x + dx * first, start.y + dy * first)
+            clipped_end = Point(start.x + dx * second, start.y + dy * second)
+            if clipped_start.distance_to(clipped_end) > 0.05:
+                rendered.append(_roof_line(clipped_start, clipped_end, scale, class_name))
+    return rendered
+
+
+def _segment_intervals_inside_polygon(start: Point, end: Point, polygon: list[Point]) -> list[tuple[float, float]]:
+    dx = end.x - start.x
+    dy = end.y - start.y
+    length_sq = dx * dx + dy * dy
+    if length_sq <= EPSILON:
+        return []
+    values = [0.0, 1.0]
+    for edge_start, edge_end in _polygon_edges(polygon):
+        intersection = _segment_intersection_parameter(start, end, edge_start, edge_end)
+        if intersection is not None:
+            values.append(intersection)
+    ts = sorted({round(max(0.0, min(1.0, value)), 8) for value in values})
+    intervals = []
+    for first, second in zip(ts, ts[1:]):
+        if second - first <= 1e-6:
+            continue
+        mid = (first + second) / 2
+        mid_point = Point(start.x + dx * mid, start.y + dy * mid)
+        if _point_in_convex_polygon(mid_point, polygon, tolerance=1e-4):
+            intervals.append((first, second))
+    return intervals
+
+
+def _merge_intervals(intervals: list[tuple[float, float]]) -> list[tuple[float, float]]:
+    if not intervals:
+        return []
+    merged = []
+    for start, end in sorted(intervals):
+        if end - start <= 1e-6:
+            continue
+        if merged and start <= merged[-1][1] + 1e-6:
+            merged[-1] = (merged[-1][0], max(merged[-1][1], end))
+        else:
+            merged.append((start, end))
+    return merged
+
+
+def _subtract_intervals(
+    intervals: list[tuple[float, float]],
+    hidden: list[tuple[float, float]],
+) -> list[tuple[float, float]]:
+    pieces = intervals
+    for hidden_start, hidden_end in hidden:
+        next_pieces: list[tuple[float, float]] = []
+        for start, end in pieces:
+            if hidden_end <= start + 1e-6 or hidden_start >= end - 1e-6:
+                next_pieces.append((start, end))
+                continue
+            if hidden_start > start + 1e-6:
+                next_pieces.append((start, min(hidden_start, end)))
+            if hidden_end < end - 1e-6:
+                next_pieces.append((max(hidden_end, start), end))
+        pieces = next_pieces
+        if not pieces:
+            break
+    return pieces
+
+
+def _segment_intersection_parameter(start: Point, end: Point, edge_start: Point, edge_end: Point) -> float | None:
+    rx = end.x - start.x
+    ry = end.y - start.y
+    sx = edge_end.x - edge_start.x
+    sy = edge_end.y - edge_start.y
+    denominator = rx * sy - ry * sx
+    if abs(denominator) <= EPSILON:
+        return None
+    qpx = edge_start.x - start.x
+    qpy = edge_start.y - start.y
+    t = (qpx * sy - qpy * sx) / denominator
+    u = (qpx * ry - qpy * rx) / denominator
+    if -1e-6 <= t <= 1 + 1e-6 and -1e-6 <= u <= 1 + 1e-6:
+        return t
+    return None
 
 
 def _render_roof_seams(roof: RoofSection, scale: float, visible_faces: list[dict[str, object]] | None = None) -> list[str]:
@@ -826,13 +1214,16 @@ def _line_clipped_to_polygon(
     return _farthest_points(points)
 
 
-def _render_roof_intersections(roofs: list[RoofSection], scale: float) -> list[str]:
-    segments = _roof_intersection_segments(roofs)
+def _render_roof_intersections(roofs: list[RoofSection], scale: float, visible_faces: dict[str, list[dict[str, object]]]) -> list[str]:
+    segments = _roof_intersection_segments(roofs, visible_faces)
     return [_roof_line(segment[0], segment[1], scale, "roof-valley") for segment in segments]
 
 
-def _roof_intersection_segments(roofs: list[RoofSection]) -> list[tuple[Point, Point]]:
-    faces_by_roof = [_roof_faces(roof) for roof in roofs]
+def _roof_intersection_segments(
+    roofs: list[RoofSection],
+    visible_faces: dict[str, list[dict[str, object]]] | None = None,
+) -> list[tuple[Point, Point]]:
+    faces_by_roof = [visible_faces.get(roof.id, []) if visible_faces is not None else _roof_faces(roof) for roof in roofs]
     segments: list[tuple[Point, Point]] = []
     for left_index, left_faces in enumerate(faces_by_roof):
         for right_faces in faces_by_roof[left_index + 1 :]:
@@ -844,12 +1235,13 @@ def _roof_intersection_segments(roofs: list[RoofSection]) -> list[tuple[Point, P
     return segments
 
 
-def _visible_roof_faces(roofs: list[RoofSection]) -> dict[str, list[dict[str, object]]]:
+def _visible_roof_faces(roofs: list[RoofSection], *, resolve_coplanar: bool = True) -> dict[str, list[dict[str, object]]]:
     faces: list[dict[str, object]] = []
     for roof in roofs:
         for face in _roof_faces(roof):
             face["roof_id"] = roof.id
             faces.append(face)
+    occluding_faces = [*faces, *_roof_eave_faces(roofs)]
 
     visible_by_roof: dict[str, list[dict[str, object]]] = {roof.id: [] for roof in roofs}
     for face in faces:
@@ -859,14 +1251,20 @@ def _visible_roof_faces(roofs: list[RoofSection]) -> dict[str, list[dict[str, ob
         if not isinstance(points, list) or not isinstance(plane, tuple) or not isinstance(roof_id, str):
             continue
         visible_pieces = [points]
-        for other in faces:
+        for other in occluding_faces:
             if other is face:
+                continue
+            other_roof_id = other.get("roof_id")
+            if other_roof_id == roof_id:
                 continue
             other_points = other["points"]
             other_plane = other["plane"]
             if not isinstance(other_points, list) or not isinstance(other_plane, tuple):
                 continue
-            higher_region = _higher_face_region(other_points, other_plane, plane)
+            if resolve_coplanar and _coplanar_face_wins(other, face):
+                higher_region = other_points
+            else:
+                higher_region = _higher_face_region(other_points, other_plane, plane)
             if len(higher_region) < 3:
                 continue
             next_pieces: list[list[Point]] = []
@@ -882,30 +1280,27 @@ def _visible_roof_faces(roofs: list[RoofSection]) -> dict[str, list[dict[str, ob
 
 
 def _visible_roof_eaves(roofs: list[RoofSection]) -> dict[str, list[list[Point]]]:
-    faces: list[tuple[str, dict[str, object]]] = [
-        (roof.id, face)
-        for roof in roofs
-        for face in _roof_faces(roof)
-    ]
-    footprints = {roof.id: _rect_polygon(roof.rect) for roof in roofs}
+    occluding_faces: list[tuple[str, dict[str, object]]] = []
+    for roof in roofs:
+        for face in _roof_faces(roof):
+            occluding_faces.append((roof.id, face))
+    for face in _roof_eave_faces(roofs):
+        roof_id = face.get("roof_id")
+        if isinstance(roof_id, str):
+            occluding_faces.append((roof_id, face))
     visible_by_roof: dict[str, list[list[Point]]] = {roof.id: [] for roof in roofs}
 
     for roof in roofs:
         visible_pieces = _roof_eave_band_polygons(roof)
-        for other_id, footprint in footprints.items():
-            if other_id == roof.id:
-                continue
-            visible_pieces = _subtract_polygon_from_pieces(visible_pieces, footprint)
-            if not visible_pieces:
-                break
-        for face_roof_id, face in faces:
+        eave_plane = _roof_eave_plane(roof)
+        for face_roof_id, face in occluding_faces:
             if face_roof_id == roof.id:
                 continue
             points = face["points"]
             plane = face["plane"]
             if not isinstance(points, list) or not isinstance(plane, tuple):
                 continue
-            higher_region = _higher_face_region(points, plane, (0.0, 0.0, 0.0))
+            higher_region = _higher_face_region(points, plane, eave_plane)
             if len(higher_region) < 3:
                 continue
             visible_pieces = _subtract_polygon_from_pieces(visible_pieces, higher_region)
@@ -918,13 +1313,24 @@ def _visible_roof_eaves(roofs: list[RoofSection]) -> dict[str, list[list[Point]]
 def _roof_eave_band_polygons(roof: RoofSection) -> list[list[Point]]:
     outer = _roof_eave_rect(roof)
     inner = roof.rect
-    bands = [
-        Rect(outer.left, outer.top, outer.w, max(inner.top - outer.top, 0)),
-        Rect(outer.left, inner.bottom, outer.w, max(outer.bottom - inner.bottom, 0)),
-        Rect(outer.left, inner.top, max(inner.left - outer.left, 0), inner.h),
-        Rect(inner.right, inner.top, max(outer.right - inner.right, 0), inner.h),
-    ]
-    return [_rect_polygon(rect) for rect in bands if rect.w > EPSILON and rect.h > EPSILON]
+    if outer.w - inner.w <= EPSILON and outer.h - inner.h <= EPSILON:
+        return []
+    return _subtract_convex_polygon(_rect_polygon(outer), _rect_polygon(inner))
+
+
+def _roof_eave_faces(roofs: list[RoofSection]) -> list[dict[str, object]]:
+    faces: list[dict[str, object]] = []
+    for roof in roofs:
+        for polygon in _roof_eave_band_polygons(roof):
+            if _polygon_area_abs(polygon) > 0.01:
+                faces.append({"points": polygon, "plane": _roof_eave_plane(roof), "roof_id": roof.id})
+    return faces
+
+
+def _roof_eave_plane(roof: RoofSection) -> tuple[float, float, float]:
+    # Draw eave surfaces just proud of the sloped roof surface so they occlude
+    # lower roofs at roof-to-roof overlaps without plan-specific height tweaks.
+    return (0.0, 0.0, (roof.eave_height or 0.0) + 0.01)
 
 
 def _subtract_polygon_from_pieces(pieces: list[list[Point]], polygon: list[Point]) -> list[list[Point]]:
@@ -948,15 +1354,44 @@ def _higher_face_region(
     return _clip_polygon_half_plane(other_points, a, b, c - 1e-5, keep_positive=True)
 
 
+def _coplanar_face_wins(other: dict[str, object], face: dict[str, object]) -> bool:
+    other_plane = other.get("plane")
+    plane = face.get("plane")
+    other_points = other.get("points")
+    points = face.get("points")
+    if not isinstance(other_plane, tuple) or not isinstance(plane, tuple):
+        return False
+    if not isinstance(other_points, list) or not isinstance(points, list):
+        return False
+    if not _planes_are_coplanar(other_plane, plane):
+        return False
+    other_area = _polygon_area_abs(other_points)
+    area = _polygon_area_abs(points)
+    if other_area > area + 0.01:
+        return True
+    if area > other_area + 0.01:
+        return False
+    return str(other.get("roof_id", "")) < str(face.get("roof_id", ""))
+
+
+def _planes_are_coplanar(left: tuple[float, float, float], right: tuple[float, float, float]) -> bool:
+    return (
+        abs(left[0] - right[0]) <= 1e-5
+        and abs(left[1] - right[1]) <= 1e-5
+        and abs(left[2] - right[2]) <= 1e-5
+    )
+
+
 def _roof_faces(roof: RoofSection) -> list[dict[str, object]]:
     rect = _roof_eave_rect(roof)
     pitch = roof.pitch if roof.pitch is not None else 8 / 12
     mode = roof.mode.replace("-", "_")
+    base_height = roof.eave_height or 0.0
     if mode == "flat" or abs(pitch) <= EPSILON:
         return [
             _roof_face(
                 [Point(rect.left, rect.top), Point(rect.right, rect.top), Point(rect.right, rect.bottom), Point(rect.left, rect.bottom)],
-                (0.0, 0.0, 0.0),
+                (0.0, 0.0, base_height),
             )
         ]
     start = "hip" if mode == "hip" else roof.start.replace("-", "_")
@@ -968,11 +1403,11 @@ def _roof_faces(roof: RoofSection) -> list[dict[str, object]]:
         faces = [
             _roof_face(
                 [Point(rect.left, rect.top), Point(rect.right, rect.top), ridge_end, ridge_start],
-                (0.0, pitch, -pitch * rect.top),
+                (0.0, pitch, base_height - pitch * rect.top),
             ),
             _roof_face(
                 [ridge_start, ridge_end, Point(rect.right, rect.bottom), Point(rect.left, rect.bottom)],
-                (0.0, -pitch, pitch * rect.bottom),
+                (0.0, -pitch, base_height + pitch * rect.bottom),
             ),
         ]
         ridge_height = pitch * (rect.cy - rect.top)
@@ -980,32 +1415,36 @@ def _roof_faces(roof: RoofSection) -> list[dict[str, object]]:
             faces.append(
                 _roof_face(
                     [Point(rect.left, rect.top), ridge_start, Point(rect.left, rect.bottom)],
-                    (ridge_height / max(ridge_start.x - rect.left, EPSILON), 0.0, -rect.left * ridge_height / max(ridge_start.x - rect.left, EPSILON)),
+                    (
+                        ridge_height / max(ridge_start.x - rect.left, EPSILON),
+                        0.0,
+                        base_height - rect.left * ridge_height / max(ridge_start.x - rect.left, EPSILON),
+                    ),
                 )
             )
         if end == "hip":
             slope = ridge_height / max(rect.right - ridge_end.x, EPSILON)
-            faces.append(_roof_face([ridge_end, Point(rect.right, rect.top), Point(rect.right, rect.bottom)], (-slope, 0.0, slope * rect.right)))
+            faces.append(_roof_face([ridge_end, Point(rect.right, rect.top), Point(rect.right, rect.bottom)], (-slope, 0.0, base_height + slope * rect.right)))
         return faces
     ridge_start = Point(rect.cx, rect.top if start == "open" else rect.top + rect.w / 2)
     ridge_end = Point(rect.cx, rect.bottom if end == "open" else rect.bottom - rect.w / 2)
     faces = [
         _roof_face(
             [Point(rect.left, rect.top), ridge_start, ridge_end, Point(rect.left, rect.bottom)],
-            (pitch, 0.0, -pitch * rect.left),
+            (pitch, 0.0, base_height - pitch * rect.left),
         ),
         _roof_face(
             [ridge_start, Point(rect.right, rect.top), Point(rect.right, rect.bottom), ridge_end],
-            (-pitch, 0.0, pitch * rect.right),
+            (-pitch, 0.0, base_height + pitch * rect.right),
         ),
     ]
     ridge_height = pitch * (rect.cx - rect.left)
     if start == "hip":
         slope = ridge_height / max(ridge_start.y - rect.top, EPSILON)
-        faces.append(_roof_face([Point(rect.left, rect.top), Point(rect.right, rect.top), ridge_start], (0.0, slope, -slope * rect.top)))
+        faces.append(_roof_face([Point(rect.left, rect.top), Point(rect.right, rect.top), ridge_start], (0.0, slope, base_height - slope * rect.top)))
     if end == "hip":
         slope = ridge_height / max(rect.bottom - ridge_end.y, EPSILON)
-        faces.append(_roof_face([ridge_end, Point(rect.right, rect.bottom), Point(rect.left, rect.bottom)], (0.0, -slope, slope * rect.bottom)))
+        faces.append(_roof_face([ridge_end, Point(rect.right, rect.bottom), Point(rect.left, rect.bottom)], (0.0, -slope, base_height + slope * rect.bottom)))
     return faces
 
 
@@ -1147,6 +1586,18 @@ def _subtract_convex_polygon(subject: list[Point], clip: list[Point]) -> list[li
         if not inside_pieces:
             break
     return remaining or ([] if inside_pieces else [subject])
+
+
+def _convex_polygon_intersection(subject: list[Point], clip: list[Point]) -> list[Point]:
+    if len(subject) < 3 or len(clip) < 3:
+        return []
+    clipped = subject
+    clip_ccw = _signed_polygon_area(clip) >= 0
+    for edge_start, edge_end in _polygon_edges(clip):
+        clipped = _clip_polygon_to_edge(clipped, edge_start, edge_end, keep_inside=True, clip_ccw=clip_ccw)
+        if _polygon_area_abs(clipped) <= 0.01:
+            return []
+    return clipped
 
 
 def _clip_polygon_to_edge(

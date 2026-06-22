@@ -1,6 +1,13 @@
 import { describe, expect, it } from "vitest";
-import { moveOpening, moveOverlay, moveSharedWall, resolveSpaceRect, spaceSideOpeningOffsetBounds } from "./geometry";
-import type { AnyRecord, OpeningDrag, OverlayDrag, SharedWallDrag, SpaceRect } from "./types";
+import {
+  moveExteriorWall,
+  moveOpening,
+  moveOverlay,
+  moveSharedWall,
+  resolveSpaceRect,
+  spaceSideOpeningOffsetBounds
+} from "./geometry";
+import type { AnyRecord, ExteriorWallDrag, OpeningDrag, OverlayDrag, SharedWallDrag, SpaceRect } from "./types";
 
 function rect(left: number, top: number, right: number, bottom: number): SpaceRect {
   return { left, top, right, bottom, width: right - left, height: bottom - top };
@@ -85,6 +92,48 @@ describe("moveSharedWall", () => {
     expect(resolveSpaceRect(data, "L1", "bathroom")?.bottom).toBe(14);
     expect(resolveSpaceRect(data, "L1", "library")?.top).toBe(14);
     expect(resolveSpaceRect(data, "L1", "laundry")?.bottom).toBe(14);
+  });
+});
+
+describe("moveExteriorWall", () => {
+  it("keeps adjacent spaces synchronized when only one side lies along the dragged exterior segment", () => {
+    const data: AnyRecord = {
+      datums: {
+        x: { right_w: 38, right_e: 54, dining_w: 54, east_projection_e: 63.5 },
+        y: { east_projection_n: 17.5, public_split: 22.5, east_projection_s: 28, main_s: 37 }
+      },
+      masses: {
+        main: {
+          levels: ["L1"],
+          rects: [{ id: "main_gable", x: ["right_w", "right_e"], y: ["public_split", "main_s"] }]
+        }
+      },
+      levels: {
+        L1: {
+          spaces: {
+            kitchen: { x: ["right_w", "right_e"], y: ["public_split", "main_s"] },
+            dining: { x: ["dining_w", "east_projection_e"], y: ["east_projection_n", "east_projection_s"] }
+          }
+        }
+      }
+    };
+    const drag: ExteriorWallDrag = {
+      type: "exterior-wall",
+      id: "exterior_17",
+      level: "L1",
+      startPoint: { x: 0, y: 0 },
+      orientation: "vertical",
+      edgeRefs: [{ massId: "main", rectIndex: 0, edge: "right" }],
+      line: { x1: 54, y1: 28, x2: 54, y2: 37 },
+      snapshot: structuredClone(data)
+    };
+
+    moveExteriorWall(data, drag, 1);
+
+    expect(data.datums.x.right_e).toBe(55);
+    expect(data.datums.x.dining_w).toBe(55);
+    expect(resolveSpaceRect(data, "L1", "kitchen")?.right).toBe(55);
+    expect(resolveSpaceRect(data, "L1", "dining")?.left).toBe(55);
   });
 });
 

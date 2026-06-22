@@ -35,6 +35,7 @@ datums:
     public_split: 22
     lower_storage_n: 24
     entry_s: 28
+    main_ridge: 17.5
     tower_s: 30
     gable_s: 32
     main_s: 35
@@ -52,8 +53,8 @@ masses:
     rects:
       - {id: main_gable, roof: {mode: open_gable, eave_height: 17.5, ridge: x, ends: [open, hip]}, x: [west, right_e], y: [main_n, entry_s]}
       - {id: left_gable, roof: {mode: open_gable, eave_height: 17.5, ridge: y}, x: [left_w, left_e], y: [gable_n, gable_s]}
-      - {id: right_gable, roof: {mode: open_gable, eave_height: 17.5, ridge: y}, x: [right_w, right_e], y: [main_n, main_s]}
-      - {id: dining_gable, roof: {mode: open_gable, eave_height: 10, ridge: x}, x: [right_e, east_projection_e], y: [bath_s, entry_s]}
+      - {id: right_gable, roof: {mode: open_gable, eave_height: 17.5, ridge: y, eaves: [east, south, west]}, x: [right_w, right_e], y: [main_ridge, main_s]}
+      - {id: dining_gable, roof: {mode: open_gable, eave_height: 10, ridge: x, eaves: [north, east, south]}, x: [right_e, east_projection_e], y: [bath_s, entry_s]}
       - {id: tower, roof: {mode: hip, eave_height: 30}, x: [stair_e, tower_e], y: [public_split, tower_s]}
 levels:
   L1:
