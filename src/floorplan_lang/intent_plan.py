@@ -260,6 +260,8 @@ def _compile_roofs(
                 else None,
                 eave_height=float(roof_options["eave_height"]) if roof_options.get("eave_height") is not None else None,
                 eave_margin=float(roof_options.get("eave_margin", 2.0)),
+                eave_sides=_roof_eave_sides(roof_options),
+                source_level=rect_levels[-1],
                 ridge=_roof_ridge(roof_options),
                 **_roof_end_options(roof_options),
             )
@@ -272,6 +274,8 @@ def _compile_roofs(
                         pitch=roof.pitch,
                         eave_height=roof.eave_height,
                         eave_margin=roof.eave_margin,
+                        eave_sides=roof.eave_sides,
+                        source_level=roof.source_level,
                         ridge=roof.ridge,
                         start=roof.start,
                         end=roof.end,
@@ -355,6 +359,8 @@ def _roof_options(data: Any) -> dict[str, Any]:
         "roof_pitch",
         "eave_height",
         "eave_margin",
+        "eave_sides",
+        "eaves",
         "enabled",
         "ridge",
         "ridge_axis",
@@ -371,6 +377,19 @@ def _roof_options(data: Any) -> dict[str, Any]:
 def _roof_ridge(options: dict[str, Any]) -> str | None:
     ridge = options.get("ridge", options.get("ridge_axis"))
     return str(ridge) if ridge is not None else None
+
+
+def _roof_eave_sides(options: dict[str, Any]) -> tuple[str, ...]:
+    sides = options.get("eave_sides", options.get("eaves"))
+    if sides is None:
+        return ("north", "east", "south", "west")
+    if isinstance(sides, dict):
+        return tuple(
+            side
+            for side in ("north", "east", "south", "west")
+            if sides.get(side, True) is not False
+        )
+    return tuple(str(side).lower() for side in sides)
 
 
 def _roof_end_options(options: dict[str, Any]) -> dict[str, str]:

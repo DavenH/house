@@ -20,7 +20,7 @@ notes:
   - 'The second-floor tower is treated as stair circulation up to the nest, not as storage.'
 datums:
   x: {west: 1, storage_e: 8, left_w: 8, closet_w: 15, gallery_w: 15, left_e: 21, stair_e: 31, piano_w: 29.5, tower_e: 38, right_w: 38, pantry_w: 43.5, room_split: 42, pantry_e: 49.5, dining_w: 54, right_e: 54, east_projection_e: 63}
-  y: {gable_n: 2, main_n: 8, ensuite_s: 10, bath_s: 13, stair_s: 18, east_projection_n: 17.5, closet_s: 18.5, public_split: 23, lower_storage_n: 24, entry_s: 28, east_projection_s: 28, tower_s: 30, gable_s: 32, main_s: 37}
+  y: {gable_n: 2, main_n: 8, ensuite_s: 10, bath_s: 13, stair_s: 18, east_projection_n: 17.5, closet_s: 18.5, public_split: 23, lower_storage_n: 24, entry_s: 28, main_ridge: 18, east_projection_s: 28, tower_s: 30, gable_s: 32, main_s: 37}
 catalog:
   counter: {label: COUNTER}
 masses:
@@ -31,8 +31,8 @@ masses:
     rects:
       - {id: main_gable, roof: {mode: open_gable, eave_height: 17.5, ridge: x, ends: [open, hip]}, x: [west, right_e], y: [main_n, entry_s]}
       - {id: left_gable, roof: {mode: open_gable, eave_height: 17.5, ridge: y}, x: [left_w, left_e], y: [gable_n, gable_s]}
-      - {id: right_gable, roof: {mode: open_gable, eave_height: 17.5, ridge: y}, x: [right_w, right_e], y: [main_n, main_s]}
-      - {id: dining_gable, roof: {mode: open_gable, eave_height: 10, ridge: x}, x: [right_e, east_projection_e], y: [east_projection_n, east_projection_s]}
+      - {id: right_gable, roof: {mode: open_gable, eave_height: 17.5, ridge: y, eaves: [east, south, west]}, x: [right_w, right_e], y: [main_ridge, main_s]}
+      - {id: dining_gable, roof: {mode: open_gable, eave_height: 10, ridge: x, eaves: [north, east, south]}, x: [right_e, east_projection_e], y: [east_projection_n, east_projection_s]}
       - {id: tower, roof: {mode: hip, eave_height: 30}, x: [stair_e, tower_e], y: [public_split, tower_s]}
 levels:
   L1:
