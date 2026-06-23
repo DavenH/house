@@ -19,6 +19,10 @@
   export let canvasElement: HTMLDivElement;
   export let selectPlan: (name: string) => void | Promise<void>;
   export let saveCurrentPlan: () => void | Promise<void>;
+  export let canUndo = false;
+  export let canRedo = false;
+  export let undo: () => void;
+  export let redo: () => void;
   export let handleCanvasPointerDown: (event: PointerEvent) => void;
   export let preventCanvasSelection: (event: Event) => void;
   export let handleCanvasClick: (event: MouseEvent) => void;
@@ -299,6 +303,8 @@
         <div class="toolbar-group file-group">
           <span class="toolbar-label">File</span>
           <div class="file-actions">
+            <button type="button" disabled={!canUndo} aria-label="Undo" title="Undo" on:click={() => undo()}>↶</button>
+            <button type="button" disabled={!canRedo} aria-label="Redo" title="Redo" on:click={() => redo()}>↷</button>
             <button type="button" disabled={!svg} on:click={exportSvg}>Export SVG</button>
             <button type="button" disabled={!svg} on:click={exportPrintPages}>Print pages</button>
             <button type="button" class="primary" disabled={!dirty} on:click={() => saveCurrentPlan()}>Save</button>

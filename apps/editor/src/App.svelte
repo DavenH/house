@@ -87,6 +87,9 @@
   let error = "";
   let status = "Loading";
   let dirty = false;
+  let savedYamlText = "";
+  let undoStack: string[] = [];
+  let redoStack: string[] = [];
   let activeLevel = "L1";
   let selected: Selection = { kind: "", level: "", id: "" };
   let canvasElement: HTMLDivElement;
@@ -98,6 +101,7 @@
   let renderGeneration = 0;
   let canvasPointerActive = false;
   let drag: DragState = null;
+  let dragStartYamlText: string | null = null;
   let canvasZoom = 0.7;
   let yamlOpen = false;
   let inspectorOpen = true;
@@ -124,6 +128,8 @@
     data && selected.kind === "wall" && selected.level && selectedWallLine
       ? massEdgeRefsForWall(selected.level, selectedWallLine)
       : [];
+  $: canUndo = undoStack.length > 0;
+  $: canRedo = redoStack.length > 0;
 
   onMount(() => {
     document.addEventListener("keydown", handleGlobalKeydown);
@@ -155,6 +161,20 @@
     if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === "s") {
       event.preventDefault();
       void saveCurrentPlan();
+      return;
+    }
+    if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === "z") {
+      event.preventDefault();
+      if (event.shiftKey) {
+        redo();
+      } else {
+        undo();
+      }
+      return;
+    }
+    if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === "y") {
+      event.preventDefault();
+      redo();
     }
   }
 
@@ -234,7 +254,7 @@
       yamlText = planDocument.yaml_text;
       data = planDocument.data;
       activeLevel = Object.keys((data.levels as AnyRecord | undefined) ?? {})[0] ?? "L1";
-      dirty = false;
+      resetHistoryForLoadedYaml();
       await renderCurrentYaml();
       status = "Saved";
     } catch (err) {
@@ -243,8 +263,8 @@
   }
 
   function onYamlInput(event: Event) {
-    yamlText = (event.currentTarget as HTMLTextAreaElement).value;
-    dirty = true;
+    const nextYaml = (event.currentTarget as HTMLTextAreaElement).value;
+    commitYamlText(nextYaml, { render: false });
     scheduleRender();
   }
 
@@ -328,14 +348,15 @@
   }
 
   async function saveCurrentPlan() {
-    if (!selectedPlan) {
+    if (!selectedPlan || drag) {
       return;
     }
     status = "Saving";
     try {
       planDocument = await savePlan(selectedPlan, yamlText);
       data = planDocument.data;
-      dirty = false;
+      savedYamlText = yamlText;
+      updateDirtyFromYaml();
       status = "Saved";
     } catch (err) {
       setError(err);
@@ -405,6 +426,7 @@
       selected = { kind: "overlay", level: levelFromSvg, id, index: overlayDrag.index };
       activeLevel = levelFromSvg;
       drag = overlayDrag;
+      dragStartYamlText = yamlText;
       setDragCursor("move");
       window.addEventListener("pointermove", handleWindowPointerMove);
       window.addEventListener("pointerup", handleWindowPointerUp, { once: true });
@@ -420,6 +442,7 @@
       selected = { kind: openingDrag.source === "connection" ? "connection" : "opening", level: openingDrag.level, id, index: openingDrag.index };
       activeLevel = openingDrag.level;
       drag = openingDrag;
+      dragStartYamlText = yamlText;
       setDragCursor(openingDrag.orientation === "vertical" ? "ns" : "ew");
       window.addEventListener("pointermove", handleWindowPointerMove);
       window.addEventListener("pointerup", handleWindowPointerUp, { once: true });
@@ -435,6 +458,7 @@
       selected = { kind: "wall", level: levelFromSvg, id };
       activeLevel = levelFromSvg;
       drag = wallDrag;
+      dragStartYamlText = yamlText;
       setDragCursor(wallDrag.orientation === "vertical" ? "ew" : "ns");
       window.addEventListener("pointermove", handleWindowPointerMove);
       window.addEventListener("pointerup", handleWindowPointerUp, { once: true });
@@ -458,6 +482,7 @@
       target: element,
       snapshot: structuredClone(data)
     };
+    dragStartYamlText = yamlText;
     setDragCursor("move");
     window.addEventListener("pointermove", handleWindowPointerMove);
     window.addEventListener("pointerup", handleWindowPointerUp, { once: true });
@@ -493,7 +518,6 @@
         previewExteriorWallSvg(canvasElement, drag.level, drag.id, drag.line, drag.orientation, snapToGrid(delta), scale);
       }
       yamlText = dumpPlanYaml(data);
-      dirty = true;
       status = "Dragging";
       return;
     }
@@ -504,7 +528,6 @@
       moveOpening(data, drag, nextOffset);
       previewOpeningSvg(canvasElement, data, drag, nextOffset - drag.startOffset);
       yamlText = dumpPlanYaml(data);
-      dirty = true;
       status = "Dragging";
       return;
     }
@@ -520,7 +543,6 @@
         previewOverlaySvg(canvasElement, drag.level, drag.id, overlay.points as Array<[number, number]>, scale);
       }
       yamlText = dumpPlanYaml(data);
-      dirty = true;
       status = "Dragging";
       return;
     }
@@ -532,21 +554,28 @@
     setFeatureAt(data, drag.level, drag.id, nextAt);
     moveFeatureSvg(canvasElement, data, drag.level, drag.id, nextAt);
     yamlText = dumpPlanYaml(data);
-    dirty = true;
-    status = "Unsaved";
+    status = "Dragging";
   }
 
   function handleWindowPointerUp(event: PointerEvent) {
     const rollbackData = drag?.type ? structuredClone(drag.snapshot) : null;
+    const previousYaml = dragStartYamlText;
+    const nextYaml = yamlText;
     window.removeEventListener("pointermove", handleWindowPointerMove);
     if (canvasElement?.hasPointerCapture?.(event.pointerId)) {
       canvasElement.releasePointerCapture(event.pointerId);
     }
     drag = null;
+    dragStartYamlText = null;
     removeWallDragPreview(canvasElement);
     clearDragCursor();
     stopCanvasSelectionSuppression();
     cancelScheduledRender();
+    if (previousYaml !== null && nextYaml !== previousYaml) {
+      recordUndo(previousYaml);
+      redoStack = [];
+      updateDirtyFromYaml();
+    }
     void renderCurrentYaml({ rollbackData });
   }
 
@@ -852,8 +881,7 @@
   }
 
   function syncDataToYaml() {
-    yamlText = dumpPlanYaml(data);
-    dirty = true;
+    commitYamlText(dumpPlanYaml(data), { render: false });
     scheduleRender();
   }
 
@@ -887,6 +915,62 @@
   function setError(err: unknown) {
     error = err instanceof Error ? err.message : String(err);
   }
+
+  function resetHistoryForLoadedYaml() {
+    savedYamlText = yamlText;
+    undoStack = [];
+    redoStack = [];
+    updateDirtyFromYaml();
+  }
+
+  function updateDirtyFromYaml() {
+    dirty = yamlText !== savedYamlText;
+  }
+
+  function commitYamlText(nextYaml: string, options: { render?: boolean } = {}) {
+    if (nextYaml === yamlText) {
+      return;
+    }
+    recordUndo(yamlText);
+    redoStack = [];
+    yamlText = nextYaml;
+    updateDirtyFromYaml();
+    status = dirty ? "Unsaved" : "Saved";
+    if (options.render !== false) {
+      scheduleRender();
+    }
+  }
+
+  function recordUndo(previousYaml: string) {
+    if (undoStack[undoStack.length - 1] === previousYaml) {
+      return;
+    }
+    undoStack = [...undoStack, previousYaml].slice(-100);
+  }
+
+  function undo() {
+    if (!canUndo || drag) {
+      return;
+    }
+    const previousYaml = undoStack[undoStack.length - 1];
+    undoStack = undoStack.slice(0, -1);
+    redoStack = [...redoStack, yamlText].slice(-100);
+    yamlText = previousYaml;
+    updateDirtyFromYaml();
+    scheduleRender();
+  }
+
+  function redo() {
+    if (!canRedo || drag) {
+      return;
+    }
+    const nextYaml = redoStack[redoStack.length - 1];
+    redoStack = redoStack.slice(0, -1);
+    undoStack = [...undoStack, yamlText].slice(-100);
+    yamlText = nextYaml;
+    updateDirtyFromYaml();
+    scheduleRender();
+  }
 </script>
 
 <main class:inspector-open={inspectorOpen} class="editor-shell">
@@ -899,6 +983,10 @@
     {svg}
     {selectPlan}
     {saveCurrentPlan}
+    {canUndo}
+    {canRedo}
+    {undo}
+    {redo}
     bind:canvasZoom
     bind:canvasElement
     {handleCanvasPointerDown}
