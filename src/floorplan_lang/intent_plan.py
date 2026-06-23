@@ -19,15 +19,21 @@ from floorplan_lang.wall_plan import (
     AreaLabel,
     Feature,
     FeatureAnchor,
+    FoundationPlan,
     OverlayLine,
     RoofSection,
     Stair,
     StairRun,
+    EXTERIOR_WALL_THICKNESS_FT,
     WallExtrusion,
     WallLevel,
     WallOpening,
     WallPlan,
     WallSegment,
+    _connected_wall_paths,
+    _offset_closed_orthogonal_loop,
+    _rect_union_boundary_walls,
+    _same_point,
 )
 
 Direction = Literal["N", "E", "S", "W"]
@@ -92,6 +98,7 @@ def intent_plan_from_dict(data: dict[str, Any]) -> WallPlan:
 
     _compile_roofs(data.get("masses") or {}, data, plan, level_datums, level_elevations)
     _compile_stairs(data.get("stairs") or {}, data.get("story") or {}, plan, contexts)
+    _compile_foundations(data.get("foundations") or {}, data, plan, level_datums, level_elevations)
 
     return plan
 
@@ -281,6 +288,92 @@ def _compile_roofs(
                         end=roof.end,
                     )
                 )
+
+
+def _compile_foundations(
+    foundations: dict[str, Any] | list[Any],
+    data: dict[str, Any],
+    plan: WallPlan,
+    level_datums: dict[str, dict[str, dict[str, float]]],
+    level_elevations: dict[str, float],
+) -> None:
+    items = _foundation_items(foundations)
+    for foundation_id, foundation_data in items:
+        source_level = str(foundation_data.get("source_level", "L1"))
+        if source_level not in level_datums:
+            raise ValueError(f"Foundation {foundation_id!r} references missing source level {source_level!r}")
+        datums = level_datums[source_level]
+        rects = _foundation_source_rects(foundation_data, data.get("masses") or {}, source_level, datums, level_elevations)
+        perimeter_loops = _foundation_body_loops(rects)
+        if not perimeter_loops:
+            raise ValueError(f"Foundation {foundation_id!r} has no source perimeter")
+        pad_wall_margin = float(foundation_data.get("pad_wall_margin", EXTERIOR_WALL_THICKNESS_FT))
+        footing_center_offset = float(foundation_data.get("footing_center_offset", EXTERIOR_WALL_THICKNESS_FT / 2))
+        body_loops = tuple(tuple(_offset_loop_or_original(loop, pad_wall_margin)) for loop in perimeter_loops)
+        footing_loops = tuple(tuple(_offset_loop_or_original(loop, footing_center_offset)) for loop in perimeter_loops)
+        level_id = str(foundation_data.get("level", foundation_id))
+        level = WallLevel(id=level_id, title=foundation_data.get("title", "Concrete Pad"))
+        level.foundations.append(
+            FoundationPlan(
+                id=foundation_id,
+                body_loops=body_loops,
+                footing_loops=footing_loops,
+                insulation_margin=float(foundation_data.get("insulation_margin", foundation_data.get("margin", 4.0))),
+                footing_width=float(foundation_data.get("footing_width", 2.0)),
+                footing_rebar_offset=float(foundation_data.get("footing_rebar_offset", 0.0)),
+                pad_rebar_spacing=float(foundation_data.get("pad_rebar_spacing", foundation_data.get("rebar_spacing", 2.0))),
+                pad_rebar_edge_cover=float(
+                    foundation_data.get("pad_rebar_edge_cover", foundation_data.get("rebar_edge_cover", 2 / 12))
+                ),
+            )
+        )
+        plan.levels[level_id] = level
+
+
+def _foundation_items(foundations: dict[str, Any] | list[Any]) -> list[tuple[str, dict[str, Any]]]:
+    if isinstance(foundations, dict):
+        return [(str(foundation_id), dict(foundation_data or {})) for foundation_id, foundation_data in foundations.items()]
+    return [
+        (str(foundation_data.get("id", f"foundation_{index}")), dict(foundation_data or {}))
+        for index, foundation_data in enumerate(foundations, start=1)
+    ]
+
+
+def _foundation_source_rects(
+    foundation_data: dict[str, Any],
+    masses: dict[str, Any],
+    source_level: str,
+    datums: dict[str, dict[str, float]],
+    level_elevations: dict[str, float],
+) -> list[Rect]:
+    if foundation_data.get("rects") is not None:
+        return [_rect_from_spec(rect_spec, datums) for rect_spec in foundation_data["rects"]]
+    if foundation_data.get("rect") is not None:
+        return [_rect_from_spec(foundation_data["rect"], datums)]
+    selected = foundation_data.get("masses", foundation_data.get("source_masses"))
+    selected_ids = set(selected or masses)
+    rects: list[Rect] = []
+    for mass_id, mass_data in masses.items():
+        if mass_id not in selected_ids:
+            continue
+        for rect_spec in _mass_rect_specs(mass_data):
+            if source_level in _rect_level_ids(rect_spec, mass_data, [source_level], level_elevations):
+                rects.append(_rect_from_spec(rect_spec, datums))
+    return rects
+
+
+def _foundation_body_loops(rects: list[Rect]) -> list[list[Point]]:
+    return [
+        points
+        for points in _connected_wall_paths(_rect_union_boundary_walls(rects, "foundation"))
+        if len(points) >= 4 and _same_point(points[0], points[-1])
+    ]
+
+
+def _offset_loop_or_original(loop: list[Point], distance: float) -> list[Point]:
+    if abs(distance) <= EPSILON:
+        return loop
+    return _offset_closed_orthogonal_loop(loop, distance) or loop
 
 
 def _mass_level_ids(mass_data: dict[str, Any], level_ids: list[str]) -> list[str]:

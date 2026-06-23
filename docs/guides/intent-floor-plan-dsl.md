@@ -262,6 +262,36 @@ features:
 
 The compiler finds the wall on that side of the space and extrudes inward.
 
+## Foundations
+
+Use top-level `foundations` to generate a concrete-pad drawing from datum-backed mass geometry. Generated foundation levels are appended after authored floor levels, so a plan with `L1`, `L2`, and `L3` will render the pad in the fourth quadrant.
+
+```yaml
+foundations:
+  F1:
+    title: Concrete Pad
+    source_level: L1
+    masses: [shared_body]
+    insulation_margin: 4
+    footing_width: 2
+    pad_rebar_spacing: 2
+    pad_rebar_edge_cover: 0.1667
+```
+
+Fields:
+
+- `source_level`: level whose resolved datums should be used, default `L1`.
+- `masses`: optional mass ids to include; omitted means all masses active on `source_level`.
+- `rect` or `rects`: optional direct rectangle specs instead of masses.
+- `insulation_margin`: shaded insulation margin outside the concrete pad, in feet.
+- `pad_wall_margin`: concrete-pad expansion outside the mass perimeter, defaulting to the exterior wall thickness.
+- `footing_center_offset`: footing path offset outside the mass perimeter, defaulting to half the exterior wall thickness.
+- `footing_width`: rendered footing band width.
+- `pad_rebar_spacing`: cross-hatch rebar spacing.
+- `pad_rebar_edge_cover`: distance rebar terminates before the pad edge; `0.1667` is about 2 inches.
+
+The compiler reuses the same rect-union perimeter strategy as exterior-wall generation, so the pad, footing paths, insulation margin, and rebar move when referenced datums move.
+
 ## Validation
 
 Strict validation is opt-in per level:

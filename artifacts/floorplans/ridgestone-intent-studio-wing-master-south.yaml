@@ -204,6 +204,15 @@ levels:
       tower_spiral: {kind: spiral_stair, within: tower, size: [6, 6], label: '', at: [34.5, 26]}
     openings:
       - {id: nest_south_window, kind: window, width: 1, offset: 3, space: tower, side: south}
+foundations:
+  F1:
+    title: 'Concrete Pad'
+    source_level: L1
+    masses: [shared_body]
+    insulation_margin: 4
+    footing_width: 2
+    pad_rebar_spacing: 2
+    pad_rebar_edge_cover: 0.1667
 stairs:
   main_stair:
     spaces:

@@ -166,6 +166,92 @@ def test_intent_plan_clips_promoted_lower_roof_under_higher_eave() -> None:
     assert '<line class="roof-gable-end" x1="496.000"' in lower_l3_group
 
 
+def test_intent_plan_compiles_foundation_from_datum_backed_masses() -> None:
+    data = {
+        "type": "intent_plan",
+        "plan": "foundation-test",
+        "masses": {
+            "body": {
+                "levels": ["L1"],
+                "rects": [
+                    {"x": ["w", "e"], "y": ["n", "s"]},
+                    {"x": ["e", "bay_e"], "y": ["bay_n", "bay_s"]},
+                ],
+            }
+        },
+        "datums": {
+            "x": {"w": 0, "e": 20, "bay_e": 26},
+            "y": {"n": 0, "s": 12, "bay_n": 3, "bay_s": 9},
+        },
+        "levels": {
+            "L1": {"spaces": {"main": {"x": ["w", "e"], "y": ["n", "s"]}}},
+            "L2": {"spaces": {"upper": {"x": ["w", "e"], "y": ["n", "s"]}}},
+            "L3": {"spaces": {"nest": {"x": ["w", "e"], "y": ["n", "s"]}}},
+        },
+        "foundations": {
+            "F1": {
+                "source_level": "L1",
+                "masses": ["body"],
+                "insulation_margin": 4,
+                "footing_width": 2,
+                "pad_rebar_spacing": 4,
+                "pad_rebar_edge_cover": 2 / 12,
+            }
+        },
+    }
+
+    plan = intent_plan_from_dict(data)
+
+    assert list(plan.levels) == ["L1", "L2", "L3", "F1"]
+    foundation = plan.levels["F1"].foundations[0]
+    assert foundation.insulation_margin == pytest.approx(4)
+    assert foundation.footing_width == pytest.approx(2)
+    assert max(point.x for loop in foundation.body_loops for point in loop) == pytest.approx(27)
+    assert max(point.x for loop in foundation.footing_loops for point in loop) == pytest.approx(26.5)
+
+    moved = dict(data)
+    moved["datums"] = {"x": {"w": 0, "e": 20, "bay_e": 30}, "y": data["datums"]["y"]}
+    moved_plan = intent_plan_from_dict(moved)
+    moved_foundation = moved_plan.levels["F1"].foundations[0]
+    assert max(point.x for loop in moved_foundation.body_loops for point in loop) == pytest.approx(31)
+    assert max(point.x for loop in moved_foundation.footing_loops for point in loop) == pytest.approx(30.5)
+
+
+def test_wall_plan_renders_foundation_pad_footings_and_rebar() -> None:
+    plan = intent_plan_from_dict(
+        {
+            "type": "intent_plan",
+            "plan": "foundation-render-test",
+            "scale": 16,
+            "masses": {
+                "body": {
+                    "levels": ["L1"],
+                    "rect": {"x": ["w", "e"], "y": ["n", "s"]},
+                }
+            },
+            "datums": {"x": {"w": 0, "e": 10}, "y": {"n": 0, "s": 8}},
+            "levels": {
+                "L1": {"spaces": {"main": {"x": ["w", "e"], "y": ["n", "s"]}}},
+                "L2": {"spaces": {"upper": {"x": ["w", "e"], "y": ["n", "s"]}}},
+                "L3": {"spaces": {"nest": {"x": ["w", "e"], "y": ["n", "s"]}}},
+            },
+            "foundations": {"F1": {"source_level": "L1", "pad_rebar_spacing": 4}},
+        }
+    )
+
+    svg = render_wall_plan_svg(plan)
+
+    assert 'data-fp-level="F1" data-fp-id="F1"' in svg
+    assert 'class="foundation-insulation"' in svg
+    assert 'class="foundation-pad"' in svg
+    assert 'class="foundation-footing"' in svg
+    assert 'class="foundation-footing-rebar"' in svg
+    assert 'class="foundation-rebar"' in svg
+    assert 'd="M 168.000 136.000 L -8.000 136.000 L -8.000 -8.000 L 168.000 -8.000 L 168.000 136.000"' in svg
+    assert 'y1="-13.333"' in svg
+    assert 'y2="141.333"' in svg
+
+
 def test_wall_plan_renders_roof_modes() -> None:
     plan = wall_plan_from_dict(
         {
