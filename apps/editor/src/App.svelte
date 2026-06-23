@@ -1,4 +1,5 @@
 <script lang="ts">
+  import * as yaml from "js-yaml";
   import { onMount, tick } from "svelte";
   import {
     listPlans,
@@ -9,6 +10,7 @@
     type PlanSummary
   } from "./lib/api";
   import CanvasPane from "./components/CanvasPane.svelte";
+  import CostPane from "./components/CostPane.svelte";
   import InspectorPane from "./components/InspectorPane.svelte";
   import YamlPane from "./components/YamlPane.svelte";
   import type {
@@ -75,6 +77,13 @@
   } from "./lib/canvasSvg";
   import { liveRenderWait, YAML_RENDER_DEBOUNCE_MS } from "./lib/renderTiming";
   import { findYamlRangeForSelection } from "./lib/yamlSelection";
+  import {
+    DEFAULT_COST_ASSUMPTIONS,
+    DEFAULT_MATERIAL_COSTS,
+    estimateCosts,
+    floorAreaEstimate,
+    type MaterialCost
+  } from "./lib/costEstimator";
 
   let plans: PlanSummary[] = [];
   let selectedPlan = "";
@@ -105,6 +114,8 @@
   let canvasZoom = 0.7;
   let yamlOpen = false;
   let inspectorOpen = true;
+  let costOpen = false;
+  let materialCosts: MaterialCost[] = DEFAULT_MATERIAL_COSTS.map((material) => ({ ...material }));
 
 
   $: levelIds = Object.keys((data.levels as AnyRecord | undefined) ?? {});
@@ -130,6 +141,10 @@
       : [];
   $: canUndo = undoStack.length > 0;
   $: canRedo = redoStack.length > 0;
+  $: currentCostTotal = estimateCosts(data, DEFAULT_COST_ASSUMPTIONS, materialCosts).total;
+  $: undoCostTotal = undoStack.length ? estimateCosts(yamlToPlanData(undoStack[undoStack.length - 1]), DEFAULT_COST_ASSUMPTIONS, materialCosts).total : currentCostTotal;
+  $: costDelta = currentCostTotal - undoCostTotal;
+  $: totalFloorArea = floorAreaEstimate(data);
 
   onMount(() => {
     document.addEventListener("keydown", handleGlobalKeydown);
@@ -393,6 +408,8 @@
     }
     if (selected.kind === "roof") {
       yamlOpen = true;
+      inspectorOpen = false;
+      costOpen = false;
     }
     void tick().then(() => markSelectedInSvg(canvasElement, selected));
     void tick().then(() => jumpToSelectedYaml({ force: true }));
@@ -916,6 +933,41 @@
     error = err instanceof Error ? err.message : String(err);
   }
 
+  function yamlToPlanData(source: string): AnyRecord {
+    try {
+      return (yaml.load(source) ?? {}) as AnyRecord;
+    } catch {
+      return {};
+    }
+  }
+
+  function toggleYamlPane() {
+    const next = !yamlOpen;
+    yamlOpen = next;
+    if (next) {
+      inspectorOpen = false;
+      costOpen = false;
+    }
+  }
+
+  function toggleInspectorPane() {
+    const next = !inspectorOpen;
+    inspectorOpen = next;
+    if (next) {
+      yamlOpen = false;
+      costOpen = false;
+    }
+  }
+
+  function toggleCostPane() {
+    const next = !costOpen;
+    costOpen = next;
+    if (next) {
+      yamlOpen = false;
+      inspectorOpen = false;
+    }
+  }
+
   function resetHistoryForLoadedYaml() {
     savedYamlText = yamlText;
     undoStack = [];
@@ -973,13 +1025,12 @@
   }
 </script>
 
-<main class:inspector-open={inspectorOpen} class="editor-shell">
+<main class:inspector-open={inspectorOpen} class:yaml-open={yamlOpen} class:cost-open={costOpen} class="editor-shell">
   <CanvasPane
     document={planDocument}
     {plans}
     bind:selectedPlan
     {dirty}
-    {error}
     {svg}
     {selectPlan}
     {saveCurrentPlan}
@@ -987,6 +1038,9 @@
     {canRedo}
     {undo}
     {redo}
+    costTotal={currentCostTotal}
+    {costDelta}
+    floorArea={totalFloorArea}
     bind:canvasZoom
     bind:canvasElement
     {handleCanvasPointerDown}
@@ -999,8 +1053,10 @@
     open={yamlOpen}
     bind:yamlTextarea
     {onYamlInput}
-    onToggle={() => (yamlOpen = !yamlOpen)}
+    onToggle={toggleYamlPane}
   />
+
+  <CostPane planData={data} open={costOpen} bind:materialCosts onToggle={toggleCostPane} />
 
   <InspectorPane
     open={inspectorOpen}
@@ -1025,6 +1081,6 @@
     {selectObject}
     {updateField}
     {updateNumber}
-    onToggle={() => (inspectorOpen = !inspectorOpen)}
+    onToggle={toggleInspectorPane}
   />
 </main>

@@ -292,6 +292,105 @@ Fields:
 
 The compiler reuses the same rect-union perimeter strategy as exterior-wall generation, so the pad, footing paths, insulation margin, and rebar move when referenced datums move.
 
+Costing uses `insulation_margin` to estimate the pad insulation apron area as the difference between the insulation-margin perimeter and the concrete pad perimeter.
+
+## Costing
+
+Use top-level `costing` to declare estimating assumptions that are not directly rendered in plan. The cost estimator still falls back to defaults when this block is omitted.
+
+```yaml
+costing:
+  exterior_wall:
+    height_ft: 10
+    icf:
+      block: {length_ft: 4, height_ft: 1.3333}
+      insulation_thickness_in: 2.5
+      concrete_thickness_in: 6
+      waste_percent: 8
+    cladding:
+      type: fieldstone
+      thickness_in: 4
+      waste_percent: 10
+  plumbing:
+    pex_per_wet_space_ft: 60
+```
+
+Fields:
+
+- `exterior_wall.height_ft`: wall height used for exterior wall area.
+- `icf.block.length_ft` / `icf.block.height_ft`: nominal ICF block face size used to estimate block count.
+- `icf.insulation_thickness_in`: insulation thickness on each side of the ICF sandwich.
+- `icf.concrete_thickness_in`: concrete core thickness used to estimate ICF core concrete volume.
+- `icf.waste_percent`: extra ICF blocks for cuts and waste.
+- `cladding.type`: label for the exterior cladding estimate, such as `brick`, `fieldstone`, or `shingles`.
+- `cladding.thickness_in`: cladding thickness added to the total exterior wall thickness estimate.
+- `cladding.waste_percent`: extra cladding area for cuts and waste.
+- `plumbing.pex_per_wet_space_ft`: first-pass PEX allowance for each inferred wet space.
+
+Interior doors are estimated from room-to-room `connections` and interior-wall `openings` whose `kind` is omitted or set to `door`. `open`, `arch`, and `window` entries are not counted as interior doors.
+
+Future plan variants can use an overlay-style cascade, for example:
+
+```yaml
+extends: ridgestone-base.yaml
+overrides:
+  roof:
+    eave_margin: 1.5
+  costing:
+    exterior_wall:
+      cladding: {type: brick, thickness_in: 3.5}
+```
+
+That is not active syntax yet; it needs loader and save semantics so generated YAML does not accidentally flatten or lose inherited intent.
+
+## Structural Preparation
+
+Use top-level `structural` to describe assumptions and load-path candidates before doing code-level structural calculations. This block is intended to prepare engineer-facing static load work; it is not a replacement for stamped design.
+
+```yaml
+structural:
+  materials:
+    concrete_slab: {density_pcf: 150}
+    icf_concrete: {density_pcf: 150}
+    fieldstone_veneer: {dead_load_psf: 45}
+    brick_masonry: {density_pcf: 120}
+    roof_assembly: {dead_load_psf: 15}
+    timber_roof_framing: {dead_load_psf: 4}
+    floor_assembly: {dead_load_psf: 12}
+    interior_partition: {dead_load_psf: 8}
+  design_loads:
+    floor_live_psf: 40
+    bedroom_live_psf: 30
+    roof_dead_psf: 15
+    roof_snow_psf: null
+    wind_psf: null
+    soil_bearing_psf: null
+  rafters:
+    spacing_in: 16
+    purchase_length_threshold_ft: 16
+  bearing:
+    point_loads:
+      - {id: hearth_chimney, kind: masonry_mass, level: L1, at: [43, 17], size: [6, 2], height_ft: 20, material: brick_masonry}
+    line_loads:
+      - {id: tower_brick_walls, kind: masonry_perimeter, level: L1, space: tower_closet, height_ft: 30, wall_thickness_in: 8, material: brick_masonry}
+    slab_zones:
+      - {id: hearth_pad, level: L1, at: [43, 17], size: [6, 2], reason: masonry hearth/chimney bearing}
+      - {id: tower_pad, level: L1, space: tower_closet, reason: masonry tower bearing}
+```
+
+Fields:
+
+- `materials.*.density_pcf`: material density in pounds per cubic foot for volume-based load estimates.
+- `materials.*.dead_load_psf`: dead load in pounds per square foot for area-based assemblies.
+- `design_loads`: project assumptions and missing code/site inputs. Leave values as `null` until confirmed from site/code data.
+- `rafters.spacing_in`: assumed rafter spacing for early count and length estimates.
+- `rafters.purchase_length_threshold_ft`: flags rafter lengths that likely need purchased lumber instead of milled stock.
+- `bearing.point_loads`: concentrated masonry or post loads that should map to local slab/footing reinforcement.
+- `bearing.line_loads`: continuous loads such as masonry tower walls.
+- `bearing.slab_zones`: named zones expected to need local slab or grade-beam attention.
+
+The editor-side structural estimator currently derives configured masonry point/line loads and rafter counts/lengths from this block. Snow, wind, seismic, and soil-bearing values remain explicit missing inputs until supplied.
+
 ## Validation
 
 Strict validation is opt-in per level:
