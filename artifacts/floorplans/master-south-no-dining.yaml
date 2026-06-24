@@ -140,13 +140,13 @@ levels:
       - {id: library_window, width: 6, kind: window, offset: 4.5, space: library, side: west}
       - {id: stair_window, space: stair, side: north, width: 4, kind: window}
       - {id: great_room_window, width: 8, kind: window, offset: 3.5, space: great_room, side: north}
-      - {id: dining_east_window, width: 4, kind: window, offset: 13.5, space: dining, side: east}
-      - {id: kitchen_window, space: kitchen, side: south, width: 8, kind: window}
+      - {id: dining_east_window, width: 5, kind: window, offset: 12, space: dining, side: east}
+      - {id: kitchen_window, space: kitchen, side: south, width: 6, kind: window, offset: 4}
       - {id: office_window, space: office_studio, side: south, width: 7, kind: window}
       - {id: library_piano_south_window, offset: 2.5, width: 3, kind: window, space: library, side: south}
       - {id: studio_west_window, width: 2, kind: window, offset: 0.5, space: office_studio, side: west}
       - {id: kitchen_east_window, offset: 27.5, width: 4, kind: window, space: kitchen, side: east}
-      - {id: exterior_12_window, kind: window, width: 3, offset: 1, space: bathroom, side: east}
+      - {id: exterior_12_window, kind: window, width: 2, offset: 0.5, space: bathroom, side: east}
       - {id: exterior_6_window, kind: window, width: 1, offset: 3, space: tower_closet, side: south}
       - {id: exterior_15_window, kind: window, width: 3, offset: 1.5, space: kitchen, side: west}
     overlays:
@@ -197,7 +197,7 @@ levels:
       - {between: [room_hall, room_2], width: 3, offset: 1}
       - {between: [room_hall, room_1], width: 3, offset: 4}
       - {between: [upper_landing, lounge], kind: open}
-      - {between: [lounge, room_hall], kind: open}
+      - {between: [lounge, room_hall], kind: open, offset: 0}
       - {between: [stair_storage, upper_landing], kind: door, width: 3, swing: out-left}
     access:
       - [upper_landing, upper_hall]

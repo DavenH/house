@@ -184,7 +184,7 @@ levels:
       washer: {kind: rectangle, within: upper_hall, at: [23, 26.5], size: [2.5, 2.5], label: W}
       dryer: {kind: rectangle, within: upper_hall, at: [25.5, 26.5], size: [2.5, 2.5], label: D}
       hall_linen: {kind: rectangle, within: upper_hall, at: [29, 27], size: [3, 1.5], label: LINEN}
-      tower_spiral: {kind: spiral_stair, within: tower, size: [6, 6], label: ''}
+      tower_spiral: {kind: spiral_stair, within: tower, size: [6, 6], label: '', at: [34.5, 26]}
       pool_table: {kind: rectangle, at: [46, 28], size: [4, 8], label: 'POOL TABLE', clearance: {walls: 5}}
     connections:
       - {between: [walk_in_closet, master_bedroom], width: 3.5, offset: 1, kind: arch}

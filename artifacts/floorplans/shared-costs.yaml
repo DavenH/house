@@ -20,7 +20,7 @@ costing:
     interior_framing:
       label: Interior framing lumber
       unit: sq ft wall
-      unit_cost: 2.25
+      unit_cost: 1.25
     interior_drywall:
       label: Interior wall board
       unit: sq ft face
@@ -28,7 +28,7 @@ costing:
     icf_block:
       label: ICF blocks
       unit: block
-      unit_cost: 52
+      unit_cost: 28
     exterior_cladding:
       label: Exterior cladding
       unit: sq ft
@@ -48,7 +48,7 @@ costing:
     flooring:
       label: Flooring
       unit: sq ft
-      unit_cost: 4
+      unit_cost: 8
     pex_pipe:
       label: PEX pipe
       unit: ft
