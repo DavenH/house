@@ -1,7 +1,12 @@
 """Deterministic floor-plan description tools for Ridgestone house studies."""
 
 from floorplan_lang.geometry import Circle, Point, Poly, Rect, Segment
-from floorplan_lang.intent_plan import intent_plan_from_dict, load_intent_plan_yaml
+from floorplan_lang.intent_plan import (
+    intent_plan_from_dict,
+    load_intent_plan_data,
+    load_intent_plan_yaml,
+    resolve_intent_plan_imports,
+)
 from floorplan_lang.model import (
     Alignment,
     Door,
@@ -37,6 +42,7 @@ __all__ = [
     "WallDefaults",
     "WallPlan",
     "intent_plan_from_dict",
+    "load_intent_plan_data",
     "load_intent_plan_yaml",
     "load_plan_yaml",
     "load_wall_plan_yaml",
@@ -44,6 +50,7 @@ __all__ = [
     "plan_to_dict",
     "render_svg",
     "render_wall_plan_svg",
+    "resolve_intent_plan_imports",
     "wall_plan_from_dict",
     "write_plan_yaml",
 ]

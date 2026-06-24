@@ -1,13 +1,15 @@
 import { describe, expect, it } from "vitest";
 import {
+  assignSpaceEdgeDatum,
   moveExteriorWall,
   moveOpening,
   moveOverlay,
   moveSharedWall,
+  moveSpaceEdgeForDrag,
   resolveSpaceRect,
   spaceSideOpeningOffsetBounds
 } from "./geometry";
-import type { AnyRecord, ExteriorWallDrag, OpeningDrag, OverlayDrag, SharedWallDrag, SpaceRect } from "./types";
+import type { AnyRecord, ExteriorWallDrag, OpeningDrag, OverlayDrag, SharedWallDrag, SpaceEdgeDrag, SpaceRect } from "./types";
 
 function rect(left: number, top: number, right: number, bottom: number): SpaceRect {
   return { left, top, right, bottom, width: right - left, height: bottom - top };
@@ -134,6 +136,56 @@ describe("moveExteriorWall", () => {
     expect(data.datums.x.dining_w).toBe(55);
     expect(resolveSpaceRect(data, "L1", "kitchen")?.right).toBe(55);
     expect(resolveSpaceRect(data, "L1", "dining")?.left).toBe(55);
+  });
+});
+
+describe("space edge editing", () => {
+  it("creates datum-backed bounds when an edge is dropped away from existing datums", () => {
+    const data: AnyRecord = {
+      datums: { x: { w: 0, e: 10 }, y: { n: 0, s: 10 } },
+      levels: {
+        L1: {
+          spaces: {
+            room: { x: ["w", "e"], y: ["n", "s"] }
+          }
+        }
+      }
+    };
+    const drag: SpaceEdgeDrag = {
+      type: "space-edge",
+      id: "room",
+      level: "L1",
+      edge: "right",
+      orientation: "vertical",
+      startPoint: { x: 0, y: 0 },
+      startRect: rect(0, 0, 10, 10),
+      startCoordinate: 10,
+      snapshot: structuredClone(data)
+    };
+
+    moveSpaceEdgeForDrag(data, drag, 12);
+    assignSpaceEdgeDatum(data, "L1", "room", "right", 12);
+
+    expect(data.levels.L1.spaces.room.x).toEqual(["w", "room_e"]);
+    expect(data.datums.x.room_e).toBe(12);
+  });
+
+  it("snaps dropped space edges to nearby existing datums", () => {
+    const data: AnyRecord = {
+      datums: { x: { w: 0, mid: 12, e: 20 }, y: { n: 0, s: 10 } },
+      levels: {
+        L1: {
+          spaces: {
+            room: { x: ["w", "e"], y: ["n", "s"] }
+          }
+        }
+      }
+    };
+
+    assignSpaceEdgeDatum(data, "L1", "room", "right", 12.1);
+
+    expect(data.levels.L1.spaces.room.x).toEqual(["w", "mid"]);
+    expect(data.datums.x.room_e).toBeUndefined();
   });
 });
 

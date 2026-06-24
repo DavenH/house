@@ -1,0 +1,58 @@
+type: intent_plan_defaults
+imports:
+  - shared-costs.yaml
+unit: ft
+scale: 16
+story:
+  floor_to_floor: 10
+compass:
+  up_bearing: 115
+  latitude: 45.96
+roof:
+  pitch: '8:12'
+costing:
+  exterior_wall:
+    height_ft: 10
+    icf:
+      block:
+        length_ft: 4
+        height_ft: 1.3333
+      insulation_thickness_in: 2.5
+      concrete_thickness_in: 6
+      waste_percent: 8
+    cladding:
+      type: fieldstone
+      thickness_in: 4
+      waste_percent: 10
+  plumbing:
+    pex_per_wet_space_ft: 60
+structural:
+  materials:
+    concrete_slab:
+      density_pcf: 150
+    icf_concrete:
+      density_pcf: 150
+    fieldstone_veneer:
+      dead_load_psf: 45
+    brick_masonry:
+      density_pcf: 120
+    roof_assembly:
+      dead_load_psf: 15
+    timber_roof_framing:
+      dead_load_psf: 4
+    floor_assembly:
+      dead_load_psf: 12
+    interior_partition:
+      dead_load_psf: 8
+  design_loads:
+    floor_live_psf: 40
+    bedroom_live_psf: 30
+    roof_dead_psf: 15
+    roof_snow_psf: null
+    wind_psf: null
+    soil_bearing_psf: null
+  rafters:
+    spacing_in: 16
+    purchase_length_threshold_ft: 16
+catalog:
+  counter: {label: COUNTER}

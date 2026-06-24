@@ -537,8 +537,25 @@ h3 {
   min-height: 0;
   overflow: auto;
   overscroll-behavior: contain;
+  position: relative;
   -webkit-user-select: none;
   user-select: none;
+}
+
+.canvas-error {
+  background: #fff6ef;
+  border: 1px solid #d27d45;
+  border-radius: 6px;
+  box-shadow: 0 8px 22px rgb(44 39 33 / 16%);
+  color: #7a3514;
+  font-size: 13px;
+  font-weight: 650;
+  left: 16px;
+  max-width: min(720px, calc(100% - 32px));
+  padding: 9px 11px;
+  position: sticky;
+  top: 12px;
+  z-index: 12;
 }
 
 .canvas-extent {
@@ -626,9 +643,6 @@ h3 {
 .svg-canvas .wall-select-target,
 .svg-canvas .wall-select-target:hover,
 .svg-canvas .wall-select-target.selected-object,
-.svg-canvas .wall-grip-target,
-.svg-canvas .wall-grip-target:hover,
-.svg-canvas .wall-grip-target.selected-object,
 .svg-canvas .opening-hit-target,
 .svg-canvas .opening-hit-target:hover,
 .svg-canvas .opening-hit-target.selected-object {
@@ -636,28 +650,19 @@ h3 {
 }
 
 .svg-canvas .wall-select-target {
-  stroke-width: 12px !important;
-}
-
-.svg-canvas .wall-grip-target {
   stroke-width: 18px !important;
 }
 
-.svg-canvas .wall-grip-target[data-fp-orientation="vertical"] {
+.svg-canvas .wall-select-target[data-fp-orientation="vertical"] {
   cursor: ew-resize;
 }
 
-.svg-canvas .wall-grip-target[data-fp-orientation="horizontal"] {
+.svg-canvas .wall-select-target[data-fp-orientation="horizontal"] {
   cursor: ns-resize;
 }
 
-.svg-canvas .wall-select-target,
-.svg-canvas [data-fp-kind="wall-select"] {
+.svg-canvas .wall-select-target[data-fp-orientation="angled"] {
   cursor: pointer;
-}
-
-.svg-canvas .wall-grip-dot {
-  pointer-events: none;
 }
 
 .svg-canvas [data-fp-kind="opening"][data-fp-orientation="horizontal"] {

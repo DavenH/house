@@ -151,6 +151,7 @@ def wall_plan_from_dict(data: dict[str, Any]) -> WallPlan:
                     kind=feature_data.get("kind", "feature"),
                     size=_size(feature_data["size"]) if "size" in feature_data else None,
                     at=_point(feature_data["at"]) if "at" in feature_data else None,
+                    polygon=tuple(_point(point) for point in feature_data["polygon"]) if "polygon" in feature_data else None,
                     anchor=_feature_anchor(feature_data["anchor"]) if "anchor" in feature_data else None,
                     extrude=_wall_extrusion(feature_data["extrude"]) if "extrude" in feature_data else None,
                     label=feature_data.get("label"),
@@ -1817,6 +1818,8 @@ def _render_feature_fixture(feature: Feature, box: Rect, level_id: str, scale: f
         return [f'<path class="piano-fixture" {attrs} {_feature_rotation_attr(feature, box, scale)}d="{body}" />']
     if feature.kind == "spiral_stair":
         return _render_spiral_stair_fixture(feature, box, attrs, scale)
+    if feature.polygon is not None:
+        return [f'<path class="fixture" {attrs} d="{_polygon_path(feature.polygon, scale)}" />']
     return [
         f'<rect class="fixture" {attrs} x="{box.x * scale:.3f}" y="{box.y * scale:.3f}" '
         f'width="{box.w * scale:.3f}" height="{box.h * scale:.3f}" '
@@ -1827,6 +1830,8 @@ def _render_feature_fixture(feature: Feature, box: Rect, level_id: str, scale: f
 def _feature_shape_path(feature: Feature, box: Rect, scale: float) -> str:
     if feature.kind == "piano":
         return _piano_path(box, scale)
+    if feature.polygon is not None:
+        return _polygon_path(feature.polygon, scale)
     return _rect_path(box, scale)
 
 
@@ -1961,10 +1966,12 @@ def _validate_level(level: WallLevel, *, strict_features: bool = True) -> list[s
     for feature in level.features:
         if feature.size is not None and (feature.size[0] <= 0 or feature.size[1] <= 0):
             errors.append(f"{level.id}.{feature.id} feature dimensions must be positive")
-        if feature.size is None and feature.extrude is None:
+        if feature.polygon is not None and len(feature.polygon) < 3:
+            errors.append(f"{level.id}.{feature.id} polygon needs at least three points")
+        if feature.size is None and feature.extrude is None and feature.polygon is None:
             errors.append(f"{level.id}.{feature.id} needs size unless extrude is set")
             continue
-        if feature.at is None and feature.anchor is None and feature.extrude is None:
+        if feature.at is None and feature.anchor is None and feature.extrude is None and feature.polygon is None:
             errors.append(f"{level.id}.{feature.id} needs at, anchor, or extrude")
             continue
         if feature.within is not None and feature.within not in zones:
@@ -2536,13 +2543,8 @@ def _point_on_segment_local(point: Point, first: Point, second: Point, tolerance
 
 def _render_wall_hit_svg(wall: WallSegment, level: WallLevel, scale: float, openings: list[WallOpening]) -> str:
     orientation = "horizontal" if wall.direction in {"E", "W"} else "vertical" if wall.direction in {"N", "S"} else "angled"
-    fully_open = _wall_is_fully_open(wall, openings)
     render_wall = _render_wall_hit_segment(wall, level)
     end = render_wall.end
-    grip_span = _wall_grip_span(wall, openings)
-    grip_length = grip_span[1] - grip_span[0]
-    grip_start = render_wall.point_at(grip_span[0])
-    grip_end = render_wall.point_at(grip_span[1])
     model_end = wall.end
     model_attrs = (
         f'data-fp-model-x1="{wall.at.x * scale:.3f}" data-fp-model-y1="{wall.at.y * scale:.3f}" '
@@ -2554,14 +2556,6 @@ def _render_wall_hit_svg(wall: WallSegment, level: WallLevel, scale: float, open
         f'data-fp-level="{escape(level.id)}" data-fp-id="{escape(wall.id)}" '
         f'data-fp-orientation="{orientation}" {model_attrs} />',
     ]
-    if orientation != "angled" and not fully_open and grip_length > EPSILON:
-        parts.append(
-            f'<line class="wall-grip-target" x1="{grip_start.x * scale:.3f}" y1="{grip_start.y * scale:.3f}" '
-            f'x2="{grip_end.x * scale:.3f}" y2="{grip_end.y * scale:.3f}" data-fp-kind="wall-grip" '
-            f'data-fp-level="{escape(level.id)}" data-fp-id="{escape(wall.id)}" '
-            f'data-fp-orientation="{orientation}" {model_attrs} />'
-        )
-        parts.extend(_render_wall_grip_dots(render_wall, scale, grip_span))
     return "".join(parts)
 
 
@@ -2579,57 +2573,6 @@ def _render_wall_hit_segment(wall: WallSegment, level: WallLevel) -> WallSegment
         offset=wall.offset,
         to=end if wall.to is not None else None,
     )
-
-
-def _wall_grip_span(wall: WallSegment, openings: list[WallOpening]) -> tuple[float, float]:
-    preferred_length = min(wall.length, 2.25)
-    clear_spans = _clear_wall_spans(wall, openings)
-    if not clear_spans:
-        center = wall.length / 2
-        half = preferred_length / 2
-        return (max(0, center - half), min(wall.length, center + half))
-    center = wall.length / 2
-    span = max(clear_spans, key=lambda item: (item[1] - item[0], -abs(((item[0] + item[1]) / 2) - center)))
-    available = span[1] - span[0]
-    length = min(preferred_length, available)
-    span_center = (span[0] + span[1]) / 2
-    start = max(span[0], min(span_center - length / 2, span[1] - length))
-    return (start, start + length)
-
-
-def _clear_wall_spans(wall: WallSegment, openings: list[WallOpening]) -> list[tuple[float, float]]:
-    blocked = sorted(
-        (max(0, opening.offset), min(wall.length, opening.offset + opening.width))
-        for opening in openings
-        if opening.offset < wall.length and opening.offset + opening.width > 0
-    )
-    spans = []
-    cursor = 0.0
-    min_span = 0.35
-    for start, end in blocked:
-        if start - cursor >= min_span:
-            spans.append((cursor, start))
-        cursor = max(cursor, end)
-    if wall.length - cursor >= min_span:
-        spans.append((cursor, wall.length))
-    return spans
-
-
-def _render_wall_grip_dots(wall: WallSegment, scale: float, grip_span: tuple[float, float]) -> list[str]:
-    count = 3
-    span_length = grip_span[1] - grip_span[0]
-    spacing = min(0.35, span_length / (count + 1))
-    center = (grip_span[0] + grip_span[1]) / 2
-    radius = 0.12 * scale
-    dots = []
-    for index in range(count):
-        offset = center + (index - (count - 1) / 2) * spacing
-        point = wall.point_at(max(0, min(wall.length, offset)))
-        dots.append(
-            f'<circle class="wall-grip-dot" cx="{point.x * scale:.3f}" cy="{point.y * scale:.3f}" '
-            f'r="{radius:.3f}" />'
-        )
-    return dots
 
 
 def _render_exterior_wall_solids(level: WallLevel, scale: float) -> list[str]:
@@ -3248,6 +3191,27 @@ def _rect_path(rect: Rect, scale: float) -> str:
     )
 
 
+def _polygon_path(points: tuple[Point, ...], scale: float) -> str:
+    if not points:
+        return ""
+    commands = [
+        f"{'M' if index == 0 else 'L'} {point.x * scale:.3f} {point.y * scale:.3f}"
+        for index, point in enumerate(points)
+    ]
+    commands.append("Z")
+    return " ".join(commands)
+
+
+def _points_bbox(points: tuple[Point, ...]) -> Rect:
+    x_values = [point.x for point in points]
+    y_values = [point.y for point in points]
+    left = min(x_values)
+    right = max(x_values)
+    top = min(y_values)
+    bottom = max(y_values)
+    return Rect(left, top, right - left, bottom - top)
+
+
 def _clearance_pattern_defs() -> str:
     patterns = []
     for index, color in enumerate(CLEARANCE_PALETTE):
@@ -3448,6 +3412,8 @@ def _rect_attr(rect: Rect, attr: str) -> float:
 
 
 def _feature_rect(feature: Feature, walls: dict[str, WallSegment]) -> Rect:
+    if feature.polygon is not None:
+        return _points_bbox(feature.polygon)
     if feature.extrude is not None:
         return _extrusion_rect(feature.extrude, walls)
     if feature.size is None:

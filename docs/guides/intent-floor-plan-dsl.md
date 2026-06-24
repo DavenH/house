@@ -53,6 +53,26 @@ levels:
 
 This compiles into an exterior perimeter, two semantic zones, labels, a shared partition wall, and a centered door in that partition.
 
+## Shared Defaults
+
+Intent plans can import shared YAML defaults before applying local overrides:
+
+```yaml
+type: intent_plan
+imports:
+  - shared-structural.yaml
+plan: compact-study
+roof:
+  eave_margin: 1.5
+structural:
+  bearing:
+    point_loads: []
+```
+
+Imports are resolved relative to the importing YAML file. Multiple imports are applied in order. Nested mappings deep-merge, while lists and scalar values are replaced by the later file. Use shared files for global assumptions such as `compass`, `story`, `roof.pitch`, `costing`, `catalog`, `structural.materials`, `structural.design_loads`, and `structural.rafters`. Keep house-specific geometry, datums, spaces, masses, foundations, stairs, and configured load locations in the leaf plan.
+
+The Ridgestone variants currently import `shared-structural.yaml`, which itself imports `shared-costs.yaml`. This keeps estimating assumptions and material prices shared without flattening them into each house variant.
+
 ## Datums
 
 Use datums for all meaningful repeated coordinates:
@@ -262,6 +282,15 @@ features:
 
 The compiler finds the wall on that side of the space and extrudes inward.
 
+Use `wrap` when one authored fixture should hug several sides of a space. The compiler follows every wall segment on the requested sides, so interrupted interior and exterior walls both work:
+
+```yaml
+features:
+  kitchen_counters:
+    kind: counter
+    wrap: {space: kitchen, sides: [west, south, east], depth: 2}
+```
+
 ## Foundations
 
 Use top-level `foundations` to generate a concrete-pad drawing from datum-backed mass geometry. Generated foundation levels are appended after authored floor levels, so a plan with `L1`, `L2`, and `L3` will render the pad in the fourth quadrant.
@@ -313,6 +342,9 @@ costing:
       waste_percent: 10
   plumbing:
     pex_per_wet_space_ft: 60
+  materials:
+    concrete: {label: Concrete, unit: yd3, unit_cost: 220}
+    windows: {label: Windows, unit: sq ft, unit_cost: 70}
 ```
 
 Fields:
@@ -326,22 +358,24 @@ Fields:
 - `cladding.thickness_in`: cladding thickness added to the total exterior wall thickness estimate.
 - `cladding.waste_percent`: extra cladding area for cuts and waste.
 - `plumbing.pex_per_wet_space_ft`: first-pass PEX allowance for each inferred wet space.
+- `materials`: unit-cost table used by the editor Costs pane. It is keyed by material id; each row has `label`, `unit`, and `unit_cost`.
 
 Interior doors are estimated from room-to-room `connections` and interior-wall `openings` whose `kind` is omitted or set to `door`. `open`, `arch`, and `window` entries are not counted as interior doors.
 
-Future plan variants can use an overlay-style cascade, for example:
+Shared defaults can be layered with imports:
 
 ```yaml
-extends: ridgestone-base.yaml
-overrides:
-  roof:
-    eave_margin: 1.5
-  costing:
-    exterior_wall:
-      cladding: {type: brick, thickness_in: 3.5}
+type: intent_plan_defaults
+imports:
+  - shared-costs.yaml
+roof:
+  pitch: '8:12'
+costing:
+  exterior_wall:
+    cladding: {type: brick, thickness_in: 3.5}
 ```
 
-That is not active syntax yet; it needs loader and save semantics so generated YAML does not accidentally flatten or lose inherited intent.
+The Materials tab writes unit-cost edits back to the shared costs YAML rather than marking the active house plan dirty.
 
 ## Structural Preparation
 
@@ -457,7 +491,5 @@ ruff check src tests
 
 ## Current Example Files
 
-- `artifacts/floorplans/ridgestone-intent.yaml`
-- `artifacts/floorplans/ridgestone-intent-studio-wing.yaml`
-- `artifacts/floorplans/ridgestone-intent-upper-alt.yaml`
-- `artifacts/floorplans/fieldstone-manor-intent.yaml`
+- `artifacts/floorplans/master-south.yaml`
+- `artifacts/floorplans/studio-wing.yaml`

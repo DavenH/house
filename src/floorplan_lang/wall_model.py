@@ -108,6 +108,7 @@ class Feature:
     kind: str
     size: tuple[float, float] | None = None
     at: Point | None = None
+    polygon: tuple[Point, ...] | None = None
     anchor: FeatureAnchor | None = None
     extrude: WallExtrusion | None = None
     label: str | None = None

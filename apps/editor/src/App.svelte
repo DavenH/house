@@ -5,6 +5,7 @@
     listPlans,
     loadPlan,
     renderYaml,
+    saveMaterialCosts,
     savePlan,
     type PlanDocument,
     type PlanSummary
@@ -19,6 +20,7 @@
     MassEdgeRef,
     Selection,
     SelectionKind,
+    SpaceEdge,
     SpaceRect,
     WallLine,
     WallDirection
@@ -44,13 +46,16 @@
   import {
     clamp,
     findMassEdgeRefs,
+    assignSpaceEdgeDatum,
     moveContainedWall,
     moveExteriorWall,
     moveOverlay,
     moveOpening,
     moveSharedWall,
+    moveSpaceEdgeForDrag,
     openingAxisDelta,
     spaceSideOpeningOffsetBounds,
+    spaceEdgeCoordinate,
     resolveSpaceRect,
     snapToGrid
   } from "./lib/geometry";
@@ -72,6 +77,7 @@
     previewOverlaySvg,
     previewOpeningSvg,
     previewSharedWallSvg,
+    previewSpaceEdgeSvg,
     removeWallDragPreview,
     svgPoint
   } from "./lib/canvasSvg";
@@ -82,6 +88,8 @@
     DEFAULT_MATERIAL_COSTS,
     estimateCosts,
     floorAreaEstimate,
+    materialCostsFromPlan,
+    materialCostsToYaml,
     type MaterialCost
   } from "./lib/costEstimator";
 
@@ -90,6 +98,7 @@
   let planDocument: PlanDocument | null = null;
   let yamlText = "";
   let data: AnyRecord = {};
+  let effectiveData: AnyRecord = {};
   let lastRenderedData: AnyRecord = {};
   let svg = "";
   let lastRenderedSvg = "";
@@ -108,6 +117,8 @@
   let liveRenderQueued = false;
   let lastLiveRenderAt = 0;
   let renderGeneration = 0;
+  let materialCostSaveTimer: ReturnType<typeof setTimeout> | null = null;
+  let pendingMaterialCosts: MaterialCost[] | null = null;
   let canvasPointerActive = false;
   let drag: DragState = null;
   let dragStartYamlText: string | null = null;
@@ -141,10 +152,12 @@
       : [];
   $: canUndo = undoStack.length > 0;
   $: canRedo = redoStack.length > 0;
-  $: currentCostTotal = estimateCosts(data, DEFAULT_COST_ASSUMPTIONS, materialCosts).total;
-  $: undoCostTotal = undoStack.length ? estimateCosts(yamlToPlanData(undoStack[undoStack.length - 1]), DEFAULT_COST_ASSUMPTIONS, materialCosts).total : currentCostTotal;
+  $: currentCostTotal = estimateCosts(effectiveData, DEFAULT_COST_ASSUMPTIONS, materialCosts).total;
+  $: undoCostTotal = undoStack.length
+    ? estimateCosts(withCurrentSharedDefaults(yamlToPlanData(undoStack[undoStack.length - 1])), DEFAULT_COST_ASSUMPTIONS, materialCosts).total
+    : currentCostTotal;
   $: costDelta = currentCostTotal - undoCostTotal;
-  $: totalFloorArea = floorAreaEstimate(data);
+  $: totalFloorArea = floorAreaEstimate(effectiveData);
 
   onMount(() => {
     document.addEventListener("keydown", handleGlobalKeydown);
@@ -169,6 +182,9 @@
       document.removeEventListener("selectstart", blockNonEditorSelection, { capture: true });
       document.removeEventListener("dragstart", blockNonEditorSelection, { capture: true });
       document.removeEventListener("selectionchange", clearAccidentalSelection);
+      if (materialCostSaveTimer) {
+        clearTimeout(materialCostSaveTimer);
+      }
     };
   });
 
@@ -197,7 +213,7 @@
     try {
       plans = await listPlans();
       selectedPlan =
-        plans.find((plan) => plan.name === "ridgestone-intent-studio-wing.yaml")?.name ??
+        plans.find((plan) => plan.name === "master-south.yaml")?.name ??
         plans[0]?.name ??
         "";
       if (selectedPlan) {
@@ -259,6 +275,33 @@
     return Boolean(target.closest("textarea, input, [contenteditable='true']"));
   }
 
+  function withCurrentSharedDefaults(planData: AnyRecord): AnyRecord {
+    const defaults: AnyRecord = {};
+    for (const key of ["unit", "scale", "story", "compass", "roof", "costing", "structural", "catalog"]) {
+      if (effectiveData[key] !== undefined) {
+        defaults[key] = structuredClone(effectiveData[key]);
+      }
+    }
+    return deepMerge(defaults, planData);
+  }
+
+  function deepMerge(base: AnyRecord, override: AnyRecord): AnyRecord {
+    const merged: AnyRecord = {...base};
+    for (const [key, value] of Object.entries(override)) {
+      const baseValue = merged[key];
+      if (isPlainRecord(baseValue) && isPlainRecord(value)) {
+        merged[key] = deepMerge(baseValue, value);
+      } else {
+        merged[key] = value;
+      }
+    }
+    return merged;
+  }
+
+  function isPlainRecord(value: unknown): value is AnyRecord {
+    return Boolean(value) && typeof value === "object" && !Array.isArray(value);
+  }
+
   async function selectPlan(name: string) {
     selectedPlan = name;
     error = "";
@@ -268,6 +311,7 @@
       planDocument = await loadPlan(name);
       yamlText = planDocument.yaml_text;
       data = planDocument.data;
+      effectiveData = planDocument.data;
       activeLevel = Object.keys((data.levels as AnyRecord | undefined) ?? {})[0] ?? "L1";
       resetHistoryForLoadedYaml();
       await renderCurrentYaml();
@@ -331,11 +375,16 @@
         yamlText = cleaned.yamlText;
       }
       const rendered = await renderYaml(yamlText);
+      const nextEffectiveData = (rendered.effective_data ?? rendered.data) as AnyRecord;
       if (generation !== renderGeneration) {
         return;
       }
       data = rendered.data;
-      lastRenderedData = structuredClone(rendered.data);
+      effectiveData = nextEffectiveData;
+      if (!pendingMaterialCosts) {
+        materialCosts = materialCostsFromPlan(nextEffectiveData);
+      }
+      lastRenderedData = structuredClone(nextEffectiveData);
       svg = rendered.svg;
       lastRenderedSvg = rendered.svg;
       if (!levelIds.includes(activeLevel)) {
@@ -416,9 +465,6 @@
   }
 
   function handleCanvasPointerDown(event: PointerEvent) {
-    event.preventDefault();
-    window.getSelection()?.removeAllRanges();
-    canvasElement?.setPointerCapture?.(event.pointerId);
     const element = (event.target as Element | null)?.closest?.("[data-fp-kind][data-fp-id]") as
       | SVGGraphicsElement
       | null;
@@ -427,14 +473,33 @@
     }
     const rawKind = element.getAttribute("data-fp-kind") ?? "";
     const kind = normalizeSvgKind(rawKind);
-    if (!["feature", "wall", "opening", "overlay"].includes(kind) || event.button !== 0) {
+    if (!["feature", "wall", "opening", "overlay", "space"].includes(kind) || event.button !== 0) {
       return;
     }
     const id = element.getAttribute("data-fp-id") ?? "";
     const levelFromSvg = element.getAttribute("data-fp-level") ?? activeLevel;
-    if (kind === "wall" && rawKind !== "wall-grip") {
+    if (kind === "space") {
+      const spaceDrag = createSpaceEdgeDrag(id, levelFromSvg, event);
+      if (!spaceDrag) {
+        return;
+      }
+      event.preventDefault();
+      window.getSelection()?.removeAllRanges();
+      canvasElement?.setPointerCapture?.(event.pointerId);
+      selected = { kind: "space", level: levelFromSvg, id };
+      activeLevel = levelFromSvg;
+      drag = spaceDrag;
+      dragStartYamlText = yamlText;
+      setDragCursor(spaceDrag.orientation === "vertical" ? "ew" : "ns");
+      window.addEventListener("pointermove", handleWindowPointerMove);
+      window.addEventListener("pointerup", handleWindowPointerUp, { once: true });
+      void tick().then(() => markSelectedInSvg(canvasElement, selected));
+      void tick().then(() => jumpToSelectedYaml());
       return;
     }
+    event.preventDefault();
+    window.getSelection()?.removeAllRanges();
+    canvasElement?.setPointerCapture?.(event.pointerId);
     if (kind === "overlay") {
       const overlayDrag = createOverlayDrag(id, levelFromSvg, event, element);
       if (!overlayDrag) {
@@ -487,9 +552,14 @@
     if (!feature) {
       return;
     }
-    feature.at ??= [20, 20];
     selected = { kind: "feature", level: levelFromSvg, id };
     activeLevel = levelFromSvg;
+    if (feature.wrap || feature.along || feature.extrude) {
+      void tick().then(() => markSelectedInSvg(canvasElement, selected));
+      void tick().then(() => jumpToSelectedYaml());
+      return;
+    }
+    feature.at ??= [20, 20];
     drag = {
       type: "feature",
       id,
@@ -563,6 +633,16 @@
       status = "Dragging";
       return;
     }
+    if (drag.type === "space-edge") {
+      const delta = drag.orientation === "vertical" ? dx : dy;
+      const nextCoordinate = clampedSpaceEdgeCoordinate(drag, snapToGrid(drag.startCoordinate + delta));
+      data = structuredClone(drag.snapshot);
+      moveSpaceEdgeForDrag(data, drag, nextCoordinate);
+      previewSpaceEdgeSvg(canvasElement, drag.level, drag.id, drag.startRect, drag.edge, nextCoordinate, scale);
+      yamlText = dumpPlanYaml(data);
+      status = "Dragging";
+      return;
+    }
     const feature = ((data.levels as AnyRecord)?.[drag.level]?.features ?? {})[drag.id] as AnyRecord;
     const nextAt: [number, number] = [
       snapToGrid(drag.startAt[0] + dx),
@@ -577,6 +657,13 @@
   function handleWindowPointerUp(event: PointerEvent) {
     const rollbackData = drag?.type ? structuredClone(drag.snapshot) : null;
     const previousYaml = dragStartYamlText;
+    if (drag?.type === "space-edge") {
+      const rect = resolveSpaceRect(data, drag.level, drag.id);
+      if (rect) {
+        assignSpaceEdgeDatum(data, drag.level, drag.id, drag.edge, spaceEdgeCoordinate(rect, drag.edge));
+        yamlText = dumpPlanYaml(data);
+      }
+    }
     const nextYaml = yamlText;
     window.removeEventListener("pointermove", handleWindowPointerMove);
     if (canvasElement?.hasPointerCapture?.(event.pointerId)) {
@@ -594,6 +681,56 @@
       updateDirtyFromYaml();
     }
     void renderCurrentYaml({ rollbackData });
+  }
+
+  function createSpaceEdgeDrag(id: string, levelId: string, event: PointerEvent) {
+    const rect = resolveSpaceRect(data, levelId, id);
+    if (!rect) {
+      return null;
+    }
+    const point = svgPoint(canvasElement, event);
+    const scale = Number(data.scale ?? 16);
+    const x = point.x / scale;
+    const y = point.y / scale;
+    if (x < rect.left - 0.75 || x > rect.right + 0.75 || y < rect.top - 0.75 || y > rect.bottom + 0.75) {
+      return null;
+    }
+    const edgeDistances: Array<{ edge: SpaceEdge; distance: number }> = [
+      { edge: "left", distance: Math.abs(x - rect.left) },
+      { edge: "right", distance: Math.abs(x - rect.right) },
+      { edge: "top", distance: Math.abs(y - rect.top) },
+      { edge: "bottom", distance: Math.abs(y - rect.bottom) }
+    ];
+    const nearest = edgeDistances.sort((a, b) => a.distance - b.distance)[0];
+    if (!nearest || nearest.distance > 0.75) {
+      return null;
+    }
+    const orientation: "vertical" | "horizontal" = nearest.edge === "left" || nearest.edge === "right" ? "vertical" : "horizontal";
+    return {
+      type: "space-edge" as const,
+      id,
+      level: levelId,
+      edge: nearest.edge,
+      orientation,
+      startPoint: svgPoint(canvasElement, event),
+      startRect: rect,
+      startCoordinate: spaceEdgeCoordinate(rect, nearest.edge),
+      snapshot: structuredClone(data)
+    };
+  }
+
+  function clampedSpaceEdgeCoordinate(spaceDrag: NonNullable<DragState> & { type: "space-edge" }, coordinate: number) {
+    const minSize = 1;
+    if (spaceDrag.edge === "left") {
+      return Math.min(coordinate, spaceDrag.startRect.right - minSize);
+    }
+    if (spaceDrag.edge === "right") {
+      return Math.max(coordinate, spaceDrag.startRect.left + minSize);
+    }
+    if (spaceDrag.edge === "top") {
+      return Math.min(coordinate, spaceDrag.startRect.bottom - minSize);
+    }
+    return Math.max(coordinate, spaceDrag.startRect.top + minSize);
   }
 
   function createOverlayDrag(id: string, levelId: string, event: PointerEvent, element: SVGGraphicsElement) {
@@ -721,8 +858,16 @@
       setError(`Could not read wall geometry for ${id}.`);
       return null;
     }
-    const orientation: "vertical" | "horizontal" =
-      Math.abs(line.x1 - line.x2) < 0.01 ? "vertical" : "horizontal";
+    const orientation: "vertical" | "horizontal" | null =
+      Math.abs(line.x1 - line.x2) < 0.01
+        ? "vertical"
+        : Math.abs(line.y1 - line.y2) < 0.01
+          ? "horizontal"
+          : null;
+    if (!orientation) {
+      setError("Dragging angled exterior walls is not supported yet. Edit the YAML directly.");
+      return null;
+    }
     let edgeRefs = findMassEdgeRefs(levelId, line, orientation, data);
     if (edgeRefs.length === 0) {
       edgeRefs = findMassEdgeRefs(levelId, line, orientation, lastRenderedData);
@@ -898,6 +1043,7 @@
   }
 
   function syncDataToYaml() {
+    data = data;
     commitYamlText(dumpPlanYaml(data), { render: false });
     scheduleRender();
   }
@@ -968,6 +1114,40 @@
     }
   }
 
+  function handleMaterialCostsChange(nextMaterialCosts: MaterialCost[]) {
+    materialCosts = nextMaterialCosts;
+    pendingMaterialCosts = nextMaterialCosts;
+    if (materialCostSaveTimer) {
+      clearTimeout(materialCostSaveTimer);
+    }
+    status = "Saving costs";
+    materialCostSaveTimer = setTimeout(() => {
+      materialCostSaveTimer = null;
+      void saveMaterialCostDefaults();
+    }, 500);
+  }
+
+  async function saveMaterialCostDefaults() {
+    const costsToSave = pendingMaterialCosts ?? materialCosts;
+    try {
+      const materials = materialCostsToYaml(costsToSave);
+      await saveMaterialCosts(materials);
+      pendingMaterialCosts = null;
+      materialCosts = costsToSave;
+      effectiveData = {
+        ...effectiveData,
+        costing: {
+          ...((effectiveData.costing as AnyRecord | undefined) ?? {}),
+          materials
+        }
+      };
+      status = dirty ? "Unsaved" : "Saved";
+    } catch (err) {
+      setError(err);
+      status = "Cost save failed";
+    }
+  }
+
   function resetHistoryForLoadedYaml() {
     savedYamlText = yamlText;
     undoStack = [];
@@ -1032,6 +1212,7 @@
     bind:selectedPlan
     {dirty}
     {svg}
+    {error}
     {selectPlan}
     {saveCurrentPlan}
     {canUndo}
@@ -1056,7 +1237,13 @@
     onToggle={toggleYamlPane}
   />
 
-  <CostPane planData={data} open={costOpen} bind:materialCosts onToggle={toggleCostPane} />
+  <CostPane
+    planData={effectiveData}
+    open={costOpen}
+    bind:materialCosts
+    onToggle={toggleCostPane}
+    onMaterialCostsChange={handleMaterialCostsChange}
+  />
 
   <InspectorPane
     open={inspectorOpen}

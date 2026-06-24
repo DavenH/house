@@ -89,10 +89,62 @@ export const DEFAULT_MATERIAL_COSTS: MaterialCost[] = [
   { id: "pex_pipe", label: "PEX pipe", unit: "ft", unitCost: 0.8 }
 ];
 
+export function materialCostsFromPlan(
+  data: AnyRecord,
+  fallback: MaterialCost[] = DEFAULT_MATERIAL_COSTS
+): MaterialCost[] {
+  const rawMaterials = ((data.costing as AnyRecord | undefined)?.materials ?? {}) as unknown;
+  const fallbackById = new Map(fallback.map((material) => [material.id, material]));
+  const materialById = new Map<string, MaterialCost>(fallback.map((material) => [material.id, { ...material }]));
+  const materialOrder = fallback.map((material) => material.id);
+
+  if (Array.isArray(rawMaterials)) {
+    for (const rawMaterial of rawMaterials) {
+      if (!isRecord(rawMaterial)) {
+        continue;
+      }
+      const id = String(rawMaterial.id ?? "");
+      if (!id) {
+        continue;
+      }
+      const fallbackMaterial = fallbackById.get(id);
+      materialById.set(id, materialFromRecord(id, rawMaterial, fallbackMaterial));
+      if (!materialOrder.includes(id)) {
+        materialOrder.push(id);
+      }
+    }
+  } else if (isRecord(rawMaterials)) {
+    for (const [id, rawMaterial] of Object.entries(rawMaterials)) {
+      if (!isRecord(rawMaterial)) {
+        continue;
+      }
+      const fallbackMaterial = fallbackById.get(id);
+      materialById.set(id, materialFromRecord(id, rawMaterial, fallbackMaterial));
+      if (!materialOrder.includes(id)) {
+        materialOrder.push(id);
+      }
+    }
+  }
+
+  return materialOrder.map((id) => materialById.get(id)).filter((material): material is MaterialCost => Boolean(material));
+}
+
+export function materialCostsToYaml(materials: MaterialCost[]): AnyRecord {
+  const out: AnyRecord = {};
+  for (const material of materials) {
+    out[material.id] = {
+      label: material.label,
+      unit: material.unit,
+      unit_cost: material.unitCost
+    };
+  }
+  return out;
+}
+
 export function estimateCosts(
   data: AnyRecord,
   assumptions: CostAssumptions = DEFAULT_COST_ASSUMPTIONS,
-  materials: MaterialCost[] = DEFAULT_MATERIAL_COSTS
+  materials: MaterialCost[] = materialCostsFromPlan(data)
 ): CostEstimate {
   const firstLevelId = Object.keys((data.levels as AnyRecord | undefined) ?? {})[0] ?? "L1";
   const sourceLevelId = foundationSourceLevel(data) ?? firstLevelId;
@@ -285,6 +337,21 @@ export function estimateCosts(
       { label: "PEX length", value: pexLength, unit: "ft" }
     ]
   };
+}
+
+function materialFromRecord(id: string, rawMaterial: AnyRecord, fallback?: MaterialCost): MaterialCost {
+  const rawUnitCost = rawMaterial.unit_cost ?? rawMaterial.unitCost;
+  const unitCost = Number(rawUnitCost ?? fallback?.unitCost ?? 0);
+  return {
+    id,
+    label: String(rawMaterial.label ?? fallback?.label ?? titleCase(id.split("_").join(" "))),
+    unit: String(rawMaterial.unit ?? fallback?.unit ?? "each"),
+    unitCost: Number.isFinite(unitCost) ? unitCost : fallback?.unitCost ?? 0
+  };
+}
+
+function isRecord(value: unknown): value is AnyRecord {
+  return Boolean(value) && typeof value === "object" && !Array.isArray(value);
 }
 
 export function floorAreaEstimate(data: AnyRecord): number {

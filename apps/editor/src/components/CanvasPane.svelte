@@ -14,6 +14,7 @@
   export let selectedPlan = "";
   export let dirty = false;
   export let svg = "";
+  export let error = "";
   export let canvasZoom = 0.7;
   export let canvasElement: HTMLDivElement;
   export let selectPlan: (name: string) => void | Promise<void>;
@@ -332,6 +333,9 @@
   </header>
 
   <div class="canvas-frame" bind:this={canvasFrame} on:wheel|nonpassive={handleCanvasWheel}>
+    {#if error}
+      <div class="canvas-error" role="status">{error}</div>
+    {/if}
     {#if svg}
       <div class="canvas-extent" style={`width:${contentWidth}px;height:${contentHeight}px;`}>
         <div

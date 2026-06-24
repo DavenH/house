@@ -67,6 +67,7 @@ export type WallLine = {
 };
 
 export type WallDirection = "N" | "E" | "S" | "W";
+export type SpaceEdge = "left" | "right" | "top" | "bottom";
 
 export type MassEdgeRef = {
   massId: string;
@@ -151,4 +152,24 @@ export type OverlayDrag = {
   snapshot: AnyRecord;
 };
 
-export type DragState = FeatureDrag | SharedWallDrag | ContainedWallDrag | ExteriorWallDrag | OpeningDrag | OverlayDrag | null;
+export type SpaceEdgeDrag = {
+  type: "space-edge";
+  id: string;
+  level: string;
+  edge: SpaceEdge;
+  orientation: "vertical" | "horizontal";
+  startPoint: { x: number; y: number };
+  startRect: SpaceRect;
+  startCoordinate: number;
+  snapshot: AnyRecord;
+};
+
+export type DragState =
+  | FeatureDrag
+  | SharedWallDrag
+  | ContainedWallDrag
+  | ExteriorWallDrag
+  | OpeningDrag
+  | OverlayDrag
+  | SpaceEdgeDrag
+  | null;

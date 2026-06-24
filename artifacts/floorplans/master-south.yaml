@@ -1,57 +1,49 @@
 type: intent_plan
-plan: ridgestone-intent-studio-wing-master-south
-unit: ft
-scale: 16
-story:
-  floor_to_floor: 10
-compass:
-  up_bearing: 115
-  latitude: 45.96
+imports:
+  - shared-structural.yaml
+plan: master-south
 roof:
-  pitch: '8:12'
   eave_margin: 1.5
-costing:
-  exterior_wall:
-    height_ft: 10
-    icf:
-      block: {length_ft: 4, height_ft: 1.3333}
-      insulation_thickness_in: 2.5
-      concrete_thickness_in: 6
-      waste_percent: 8
-    cladding:
-      type: fieldstone
-      thickness_in: 4
-      waste_percent: 10
-  plumbing:
-    pex_per_wet_space_ft: 60
 structural:
-  materials:
-    concrete_slab: {density_pcf: 150}
-    icf_concrete: {density_pcf: 150}
-    fieldstone_veneer: {dead_load_psf: 45}
-    brick_masonry: {density_pcf: 120}
-    roof_assembly: {dead_load_psf: 15}
-    timber_roof_framing: {dead_load_psf: 4}
-    floor_assembly: {dead_load_psf: 12}
-    interior_partition: {dead_load_psf: 8}
-  design_loads:
-    floor_live_psf: 40
-    bedroom_live_psf: 30
-    roof_dead_psf: 15
-    roof_snow_psf: null
-    wind_psf: null
-    soil_bearing_psf: null
-  rafters:
-    spacing_in: 16
-    purchase_length_threshold_ft: 16
   bearing:
     point_loads:
-      - {id: hearth_chimney, kind: masonry_mass, level: L1, at: [43, 17], size: [6, 2], height_ft: 20, material: brick_masonry}
+      -
+        id: hearth_chimney
+        kind: masonry_mass
+        level: L1
+        at:
+          - 43
+          - 17
+        size:
+          - 6
+          - 2
+        height_ft: 20
+        material: brick_masonry
     line_loads:
-      - {id: tower_brick_walls, kind: masonry_perimeter, level: L1, space: tower_closet, height_ft: 30, wall_thickness_in: 8, material: brick_masonry}
+      -
+        id: tower_brick_walls
+        kind: masonry_perimeter
+        level: L1
+        space: tower_closet
+        height_ft: 30
+        wall_thickness_in: 8
+        material: brick_masonry
     slab_zones:
-      - {id: hearth_pad, level: L1, at: [43, 17], size: [6, 2], reason: masonry hearth/chimney bearing}
-      - {id: tower_pad, level: L1, space: tower_closet, reason: masonry tower bearing}
+      -
+        id: hearth_pad
+        level: L1
+        at:
+          - 43
+          - 17
+        size:
+          - 6
+          - 2
+        reason: 'masonry hearth/chimney bearing'
+      -
+        id: tower_pad
+        level: L1
+        space: tower_closet
+        reason: 'masonry tower bearing'
 notes:
   - 'Opinionated optimization variant of the studio/library/piano wing.'
   - 'Keeps the no-basement storage strategy intact while making circulation space do double duty where there are real wall stubs.'
@@ -63,10 +55,8 @@ notes:
   - 'The master suite route becomes bedroom -> closet -> ensuite, with the former foyer area absorbed into the bedroom as an entry zone.'
   - 'The second-floor tower is treated as stair circulation up to the nest, not as storage.'
 datums:
-  x: {west: 1, storage_e: 8, left_w: 8, closet_w: 14, gallery_w: 15, left_e: 21, stair_e: 32.5, piano_w: 29.5, tower_e: 38, right_w: 38, pantry_w: 43, room_split: 43, pantry_e: 49, dining_w: 54, right_e: 54, east_projection_e: 63.5, e: 31}
+  x: {west: 1, storage_e: 8, left_w: 8, closet_w: 14, gallery_w: 15, left_e: 21, stair_e: 32.5, piano_w: 29.5, tower_e: 38, right_w: 38, pantry_w: 43.5, room_split: 43, pantry_e: 49.5, dining_w: 54, right_e: 54, east_projection_e: 63.5, e: 31}
   y: {gable_n: 2, main_n: 8, ensuite_s: 10, bath_s: 13, stair_s: 17.5, east_projection_n: 17.5, closet_s: 18, public_split: 22.5, lower_storage_n: 25.5, entry_s: 28, main_ridge: 18, east_projection_s: 28, tower_s: 30, gable_s: 32, main_s: 37}
-catalog:
-  counter: {label: COUNTER}
 masses:
   shared_body:
     levels:
@@ -84,7 +74,7 @@ levels:
     title: 'First Floor'
     derive_partitions: true
     spaces:
-      laundry: {x: [west, storage_e], y: [main_n, bath_s], label: MACHINE/ROOM, privacy: service}
+      laundry: {x: [west, storage_e], y: [main_n, bath_s], label: STORAGE, privacy: service}
       bathroom: {x: [left_w, left_e], y: [gable_n, bath_s], privacy: private}
       library: {x: [west, gallery_w], y: [bath_s, entry_s], label: /LIBRARY/OFFICE, privacy: semi_private}
       book_gallery: {x: [gallery_w, left_e], y: [bath_s, entry_s], label: GALLERY, privacy: circulation}
@@ -93,26 +83,27 @@ levels:
       hall: {x: [left_e, right_w], y: [stair_s, public_split], label: HALL, privacy: circulation}
       entrance: {x: [left_e, e], y: [public_split, entry_s], label: ENTRANCE, privacy: circulation}
       tower_closet: {x: [e, tower_e], y: [public_split, tower_s], label: COAT/CLOSET, privacy: service}
-      hearth_storage: {x: [stair_e, right_w], y: [main_n, stair_s], label: STORAGE, privacy: service}
+      hearth_storage: {x: [stair_e, right_w], y: [main_n, stair_s], label: MACHINE/ROOM, privacy: service}
       great_room: {x: [right_w, dining_w], y: [main_n, public_split], label: GREAT/ROOM, privacy: public}
       kitchen: {x: [right_w, right_e], y: [public_split, main_s], privacy: public, label: /KITCHEN}
-      pantry: {x: [pantry_w, pantry_e], y: [19, 22.5], privacy: service}
+      pantry: {x: [pantry_w, pantry_e], y: [19, 23], privacy: service}
       dining: {x: [dining_w, east_projection_e], y: [east_projection_n, east_projection_s], label: 'DINING AREA', privacy: public}
     features:
       piano: {kind: piano, within: library, at: [7, 18.5], size: [7.5, 5], label: PIANO, avoid_openings: true, clearance: {around: 1}, rotation: 225}
       piano_bench: {kind: rectangle, within: library, at: [10, 21.5], size: [1, 2], label: '', rotation: 45, clearance: {around: 1}}
       library_north_books: {kind: rectangle, within: library, at: [8, 13.5], size: [14, 0.8], label: ''}
-      hearth_fireplace: {kind: rectangle, at: [46, 18], size: [6, 2], label: HEARTH}
-      great_room_couch: {kind: rectangle, within: great_room, at: [46, 10], size: [6, 3], label: COUCH}
-      great_room_chair_w: {kind: rectangle, within: great_room, at: [41, 13.5], size: [3, 3], label: CHAIR}
+      hearth_fireplace: {kind: rectangle, at: [46.5, 18], size: [6, 2], label: HEARTH}
+      great_room_couch: {kind: rectangle, within: great_room, at: [46.5, 10], size: [6, 3], label: COUCH}
+      great_room_chair_w: {kind: rectangle, within: great_room, at: [41.5, 13.5], size: [3, 3], label: CHAIR}
       great_room_chair_e: {kind: rectangle, within: great_room, at: [51.5, 13.5], size: [3, 3], label: CHAIR}
-      great_room_coffee_table: {kind: rectangle, within: great_room, at: [46, 13.5], size: [4, 2], label: ''}
-      kitchen_south_counter: {kind: counter, along: {space: kitchen, side: south}, depth: 2}
-      kitchen_east_counter: {kind: counter, along: {space: kitchen, side: east}, depth: 2, at: [56.5, 30], label: ''}
-      kitchen_west_counter: {kind: rectangle, within: kitchen, at: [39, 33.5], size: [2, 7], label: ''}
-      kitchen_island: {kind: rectangle, size: [5, 4], at: [46.5, 30], label: ISLAND, clearance: {walls: 4, around: 3}}
+      great_room_coffee_table: {kind: rectangle, within: great_room, at: [46.5, 13.5], size: [4, 2], label: '', clearance: {around: 1}}
+      kitchen_counters: {kind: counter, wrap: {space: kitchen, sides: [west, south, east], depth: 2}}
+      kitchen_island: {kind: rectangle, size: [5, 4], at: [46, 30], label: ISLAND, clearance: {walls: 4, around: 3}}
       refrigerator: {kind: rectangle, within: kitchen, at: [39.25, 28.5], size: [2.5, 3], label: FRIDGE}
-      mechanicals: {kind: rectangle, within: laundry, at: [2.5, 11.5], size: [2, 2], label: MECH}
+      air_exchanger: {kind: rectangle, within: hearth_storage, at: [34, 9.5], size: [2, 2], label: AIR/EXCH}
+      hot_water_tank: {kind: rectangle, within: hearth_storage, at: [33.5, 12], size: [1.5, 1.5], label: HWT}
+      water_tank: {kind: rectangle, within: hearth_storage, at: [33.5, 14], size: [1.5, 1.5], label: WATER/TANK}
+      electrical_panel: {kind: rectangle, within: hearth_storage, at: [36.5, 9], size: [2, 1], label: ELEC/PANEL}
       dining_table: {kind: rectangle, within: dining, at: [56.5, 22.5], size: [7, 3], label: TABLE, clearance: {around: 3.5}}
       library_reading_seat: {kind: rectangle, within: library, at: [4, 26.5], size: [4, 2], label: READING/SEAT}
       studio_desk: {kind: rectangle, within: office_studio, at: [14.5, 28], size: [5, 2.5], label: DESK}
@@ -146,7 +137,7 @@ levels:
       - {id: library_window, width: 6, kind: window, offset: 5, space: library, side: west}
       - {id: stair_window, space: stair, side: north, width: 4, kind: window}
       - {id: great_room_window, width: 8, kind: window, offset: 21.5, space: great_room, side: north}
-      - {id: great_room_south_window, width: 4, kind: window, offset: 1.75, space: great_room, side: east}
+      - {id: great_room_south_window, width: 4, kind: window, offset: 2, space: great_room, side: east}
       - {id: kitchen_window, space: kitchen, side: south, width: 8, kind: window}
       - {id: office_window, space: office_studio, side: south, width: 7, kind: window}
       - {id: dining_window, space: dining, side: east, width: 5, kind: window}
@@ -187,7 +178,7 @@ levels:
       room_2: {x: [room_split, right_e], y: [main_n, stair_s], label: 'ROOM 2', privacy: private}
       lounge: {x: [right_w, right_e], y: [stair_s, main_s], privacy: public, label: LOUNGE}
     features:
-      chimney: {kind: rectangle, at: [46, 18], size: [6, 2], label: CHIMNEY, avoid_openings: true}
+      chimney: {kind: rectangle, at: [46.5, 18], size: [6, 2], label: CHIMNEY, avoid_openings: true}
       queen_bed: {kind: rectangle, within: master_bedroom, at: [14.5, 27.5], size: [5, 7], label: BED, clearance: {left: 1, right: 1, top: 1, foot: 1}, avoid_openings: true}
       gym_mat: {kind: rectangle, within: suite_gym, at: [4.5, 19.5], size: [4, 7], label: MAT}
       washer: {kind: rectangle, within: upper_hall, at: [23, 26.5], size: [2.5, 2.5], label: W}
@@ -233,7 +224,7 @@ levels:
     overlays:
       plumbing:
         - {id: cold_riser_l2, kind: riser, label: RISER, color: '#2678b9', width: 0.16, points: [[8, 10], [8, 10]]}
-        - {id: cold_main_l2, label: 'COLD WATER', color: '#2678b9', width: 0.16, points: [[8, 10], [21, 10], [21, 22.5], [24, 22.5], [24, 26.5]]}
+        - {id: cold_main_l2, label: 'COLD WATER', color: '#2678b9', width: 0.16, points: [[8, 10], [21, 10], [21, 26.5], [24, 26.5], [24, 26.5]]}
       annotations:
         - {id: cold_ensuite_l2_note, label: 'ENSUITE CW', color: '#5d5751', width: 0.04, points: [[15, 10], [15, 7]]}
         - {id: cold_laundry_l2_note, label: 'LAUNDRY CW', color: '#5d5751', width: 0.04, points: [[24, 26.5], [25.5, 26.5]]}
@@ -250,7 +241,8 @@ foundations:
   F1:
     title: 'Concrete Pad'
     source_level: L1
-    masses: [shared_body]
+    masses:
+      - shared_body
     insulation_margin: 4
     footing_width: 2
     pad_rebar_spacing: 2

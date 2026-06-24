@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { estimateCosts } from "./costEstimator";
+import { estimateCosts, materialCostsFromPlan, materialCostsToYaml } from "./costEstimator";
 import type { AnyRecord } from "./types";
 
 function simplePlan(east = 10): AnyRecord {
@@ -44,6 +44,30 @@ function simplePlan(east = 10): AnyRecord {
 }
 
 describe("estimateCosts", () => {
+  it("loads material costs from plan costing material defaults", () => {
+    const materials = materialCostsFromPlan({
+      costing: {
+        materials: {
+          concrete: { label: "Concrete", unit: "yd3", unit_cost: 250 },
+          custom_fasteners: { label: "Custom fasteners", unit: "box", unit_cost: 12.5 }
+        }
+      }
+    });
+
+    expect(materials.find((material) => material.id === "concrete")?.unitCost).toBe(250);
+    expect(materials.find((material) => material.id === "custom_fasteners")).toEqual({
+      id: "custom_fasteners",
+      label: "Custom fasteners",
+      unit: "box",
+      unitCost: 12.5
+    });
+    expect(materialCostsToYaml(materials).concrete).toEqual({
+      label: "Concrete",
+      unit: "yd3",
+      unit_cost: 250
+    });
+  });
+
   it("estimates first-pass concrete, rebar, walls, and roofing quantities", () => {
     const estimate = estimateCosts(simplePlan());
     const summary: Record<string, { value: number }> = {};

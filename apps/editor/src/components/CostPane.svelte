@@ -12,6 +12,7 @@
   export let open = false;
   export let materialCosts: MaterialCost[] = [];
   export let onToggle: () => void;
+  export let onMaterialCostsChange: (materials: MaterialCost[]) => void = () => {};
 
   let activeView: "quantities" | "materials" = "quantities";
   const quantityGroupOrder: Array<{ id: QuantityEstimate["group"]; label: string }> = [
@@ -42,6 +43,7 @@
       return;
     }
     materialCosts = materialCosts.map((material) => material.id === materialId ? { ...material, unitCost: next } : material);
+    onMaterialCostsChange(materialCosts);
   }
 
   function money(value: number) {

@@ -15,6 +15,7 @@ export type PlanDocument = {
 export type RenderedPlan = {
   svg: string;
   data: Record<string, unknown>;
+  effective_data: Record<string, unknown>;
 };
 
 export async function listPlans(): Promise<PlanSummary[]> {
@@ -61,6 +62,18 @@ export async function savePlan(name: string, yamlText: string): Promise<PlanDocu
   });
   if (!response.ok) {
     throw new Error(await errorMessage(response, `Unable to save ${name}`));
+  }
+  return response.json();
+}
+
+export async function saveMaterialCosts(materials: Record<string, unknown>): Promise<Record<string, unknown>> {
+  const response = await fetch("/api/costs/materials", {
+    method: "PUT",
+    headers: {"Content-Type": "application/json"},
+    body: JSON.stringify({materials})
+  });
+  if (!response.ok) {
+    throw new Error(await errorMessage(response, "Unable to save material costs"));
   }
   return response.json();
 }

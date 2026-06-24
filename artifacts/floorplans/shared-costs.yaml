@@ -1,0 +1,55 @@
+type: intent_plan_defaults
+costing:
+  materials:
+    concrete:
+      label: Concrete
+      unit: yd3
+      unit_cost: 220
+    pad_insulation:
+      label: Pad insulation
+      unit: sq ft
+      unit_cost: 3.5
+    rebar:
+      label: Rebar
+      unit: ft
+      unit_cost: 0.85
+    roofing:
+      label: Roofing assembly
+      unit: sq ft
+      unit_cost: 2.5
+    interior_framing:
+      label: Interior framing lumber
+      unit: sq ft wall
+      unit_cost: 2.25
+    interior_drywall:
+      label: Interior wall board
+      unit: sq ft face
+      unit_cost: 1.15
+    icf_block:
+      label: ICF blocks
+      unit: block
+      unit_cost: 52
+    exterior_cladding:
+      label: Exterior cladding
+      unit: sq ft
+      unit_cost: 2
+    windows:
+      label: Windows
+      unit: sq ft
+      unit_cost: 70
+    exterior_doors:
+      label: Exterior doors
+      unit: each
+      unit_cost: 1800
+    interior_doors:
+      label: Interior doors
+      unit: each
+      unit_cost: 350
+    flooring:
+      label: Flooring
+      unit: sq ft
+      unit_cost: 4
+    pex_pipe:
+      label: PEX pipe
+      unit: ft
+      unit_cost: 0.8
