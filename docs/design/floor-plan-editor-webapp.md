@@ -923,7 +923,7 @@ MVP can defer:
 
 ### Phase 1: Viewer And Inspector
 
-- Load `ridgestone-intent-studio-wing.yaml`.
+- Load `studio-wing.yaml`.
 - Render existing SVG layers in browser.
 - Select rooms, openings, and features.
 - Show inspector values.

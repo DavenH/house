@@ -108,6 +108,7 @@ class Feature:
     kind: str
     size: tuple[float, float] | None = None
     at: Point | None = None
+    polygon: tuple[Point, ...] | None = None
     anchor: FeatureAnchor | None = None
     extrude: WallExtrusion | None = None
     label: str | None = None
@@ -155,6 +156,18 @@ class RoofSection:
 
 
 @dataclass(frozen=True)
+class FoundationPlan:
+    id: str
+    body_loops: tuple[tuple[Point, ...], ...]
+    footing_loops: tuple[tuple[Point, ...], ...] = ()
+    insulation_margin: float = 4.0
+    footing_width: float = 2.0
+    footing_rebar_offset: float = 0.0
+    pad_rebar_spacing: float = 2.0
+    pad_rebar_edge_cover: float = 2 / 12
+
+
+@dataclass(frozen=True)
 class StairRun:
     rect: Rect
     direction: Direction
@@ -190,3 +203,4 @@ class WallLevel:
     access: list[tuple[str, str]] = field(default_factory=list)
     overlays: list[OverlayLine] = field(default_factory=list)
     roofs: list[RoofSection] = field(default_factory=list)
+    foundations: list[FoundationPlan] = field(default_factory=list)

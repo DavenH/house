@@ -1,11 +1,9 @@
-import type { AnyRecord, ContainedWallDrag, OpeningDrag, Selection, SharedWallDrag, SpaceRect, WallLine } from "./types";
+import type { AnyRecord, ContainedWallDrag, OpeningDrag, Selection, SharedWallDrag, SpaceEdge, SpaceRect, WallLine } from "./types";
 import { movedLine, movedPreviewRect, openingDeltaVector, wallLineFromRects } from "./geometry";
 import { normalizeSvgKind } from "./planEditing";
 
 const EXPORT_REMOVED_SELECTORS = [
   ".layer-hidden",
-  ".wall-grip-dot",
-  ".wall-grip-target",
   ".wall-select-target",
   ".opening-hit-target",
   ".space-select-target",
@@ -194,7 +192,7 @@ export function markSelectedInSvg(canvasElement: HTMLDivElement | undefined, sel
     if (element instanceof SVGTextElement || element instanceof SVGTSpanElement) {
       return;
     }
-    if (element.classList.contains("wall-select-target") || element.classList.contains("wall-grip-target")) {
+    if (element.classList.contains("wall-select-target")) {
       return;
     }
     if ((element instanceof SVGGElement && selected.kind !== "roof") || element instanceof SVGSVGElement) {
@@ -459,6 +457,33 @@ export function previewExteriorWallSvg(
   updateWallPreviewSvg(canvasElement, levelId, wallId, movedLine(line, orientation, delta), scale);
 }
 
+export function previewSpaceEdgeSvg(
+  canvasElement: HTMLDivElement | undefined,
+  levelId: string,
+  spaceId: string,
+  startRect: SpaceRect,
+  edge: SpaceEdge,
+  coordinate: number,
+  scale: number
+) {
+  if (!canvasElement) {
+    return;
+  }
+  const next = { ...startRect };
+  if (edge === "left") {
+    next.left = coordinate;
+  } else if (edge === "right") {
+    next.right = coordinate;
+  } else if (edge === "top") {
+    next.top = coordinate;
+  } else {
+    next.bottom = coordinate;
+  }
+  next.width = next.right - next.left;
+  next.height = next.bottom - next.top;
+  updateSpaceSvg(canvasElement, levelId, spaceId, next, scale);
+}
+
 export function removeWallDragPreview(canvasElement: HTMLDivElement | undefined) {
   canvasElement?.querySelectorAll(".wall-drag-preview").forEach((element) => element.remove());
 }
@@ -543,7 +568,7 @@ function ensureWallPreviewLine(canvasElement: HTMLDivElement, levelId: string, w
     return existing;
   }
   const anchor = canvasElement.querySelector(
-    `.wall-grip-target[data-fp-id="${cssEscape(wallId)}"][data-fp-level="${cssEscape(levelId)}"]`
+    `.wall-select-target[data-fp-id="${cssEscape(wallId)}"][data-fp-level="${cssEscape(levelId)}"]`
   );
   const parent = anchor?.parentElement;
   if (!parent) {

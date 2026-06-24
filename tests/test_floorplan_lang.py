@@ -11,6 +11,7 @@ from floorplan_lang import (
     Rect,
     Room,
     intent_plan_from_dict,
+    load_intent_plan_data,
     load_intent_plan_yaml,
     load_plan_yaml,
     render_svg,
@@ -19,6 +20,51 @@ from floorplan_lang import (
 from floorplan_lang.wall_plan import load_wall_plan_yaml, render_wall_plan_svg, wall_plan_from_dict
 from floorplan_lang.yaml_io import plan_from_dict
 from tests.svg_assertions import assert_has_class, elements_with_class
+
+
+def test_intent_plan_imports_deep_merge_shared_defaults(tmp_path: Path) -> None:
+    (tmp_path / "shared.yaml").write_text(
+        """
+type: intent_plan_defaults
+unit: ft
+roof:
+  pitch: '8:12'
+  eave_margin: 2
+structural:
+  design_loads:
+    floor_live_psf: 40
+    roof_snow_psf: null
+  materials:
+    concrete_slab:
+      density_pcf: 150
+catalog:
+  counter: {label: COUNTER}
+"""
+    )
+    plan_path = tmp_path / "leaf.yaml"
+    plan_path.write_text(
+        """
+type: intent_plan
+imports:
+  - shared.yaml
+plan: imported-leaf
+roof:
+  eave_margin: 1.5
+structural:
+  design_loads:
+    roof_snow_psf: 70
+levels: {}
+"""
+    )
+
+    data = load_intent_plan_data(plan_path)
+
+    assert data["unit"] == "ft"
+    assert data["roof"] == {"pitch": "8:12", "eave_margin": 1.5}
+    assert data["structural"]["design_loads"]["floor_live_psf"] == 40
+    assert data["structural"]["design_loads"]["roof_snow_psf"] == 70
+    assert data["structural"]["materials"]["concrete_slab"]["density_pcf"] == 150
+    assert data["catalog"]["counter"]["label"] == "COUNTER"
 
 
 def test_intent_plan_compiles_shared_masses_and_inferred_door() -> None:
@@ -164,6 +210,92 @@ def test_intent_plan_clips_promoted_lower_roof_under_higher_eave() -> None:
     assert 'data-fp-level="L3" data-fp-id="upper_main"' in svg
     assert '<line class="roof-gable-end" x1="320.000"' not in lower_l3_group
     assert '<line class="roof-gable-end" x1="496.000"' in lower_l3_group
+
+
+def test_intent_plan_compiles_foundation_from_datum_backed_masses() -> None:
+    data = {
+        "type": "intent_plan",
+        "plan": "foundation-test",
+        "masses": {
+            "body": {
+                "levels": ["L1"],
+                "rects": [
+                    {"x": ["w", "e"], "y": ["n", "s"]},
+                    {"x": ["e", "bay_e"], "y": ["bay_n", "bay_s"]},
+                ],
+            }
+        },
+        "datums": {
+            "x": {"w": 0, "e": 20, "bay_e": 26},
+            "y": {"n": 0, "s": 12, "bay_n": 3, "bay_s": 9},
+        },
+        "levels": {
+            "L1": {"spaces": {"main": {"x": ["w", "e"], "y": ["n", "s"]}}},
+            "L2": {"spaces": {"upper": {"x": ["w", "e"], "y": ["n", "s"]}}},
+            "L3": {"spaces": {"nest": {"x": ["w", "e"], "y": ["n", "s"]}}},
+        },
+        "foundations": {
+            "F1": {
+                "source_level": "L1",
+                "masses": ["body"],
+                "insulation_margin": 4,
+                "footing_width": 2,
+                "pad_rebar_spacing": 4,
+                "pad_rebar_edge_cover": 2 / 12,
+            }
+        },
+    }
+
+    plan = intent_plan_from_dict(data)
+
+    assert list(plan.levels) == ["L1", "L2", "L3", "F1"]
+    foundation = plan.levels["F1"].foundations[0]
+    assert foundation.insulation_margin == pytest.approx(4)
+    assert foundation.footing_width == pytest.approx(2)
+    assert max(point.x for loop in foundation.body_loops for point in loop) == pytest.approx(27)
+    assert max(point.x for loop in foundation.footing_loops for point in loop) == pytest.approx(26.5)
+
+    moved = dict(data)
+    moved["datums"] = {"x": {"w": 0, "e": 20, "bay_e": 30}, "y": data["datums"]["y"]}
+    moved_plan = intent_plan_from_dict(moved)
+    moved_foundation = moved_plan.levels["F1"].foundations[0]
+    assert max(point.x for loop in moved_foundation.body_loops for point in loop) == pytest.approx(31)
+    assert max(point.x for loop in moved_foundation.footing_loops for point in loop) == pytest.approx(30.5)
+
+
+def test_wall_plan_renders_foundation_pad_footings_and_rebar() -> None:
+    plan = intent_plan_from_dict(
+        {
+            "type": "intent_plan",
+            "plan": "foundation-render-test",
+            "scale": 16,
+            "masses": {
+                "body": {
+                    "levels": ["L1"],
+                    "rect": {"x": ["w", "e"], "y": ["n", "s"]},
+                }
+            },
+            "datums": {"x": {"w": 0, "e": 10}, "y": {"n": 0, "s": 8}},
+            "levels": {
+                "L1": {"spaces": {"main": {"x": ["w", "e"], "y": ["n", "s"]}}},
+                "L2": {"spaces": {"upper": {"x": ["w", "e"], "y": ["n", "s"]}}},
+                "L3": {"spaces": {"nest": {"x": ["w", "e"], "y": ["n", "s"]}}},
+            },
+            "foundations": {"F1": {"source_level": "L1", "pad_rebar_spacing": 4}},
+        }
+    )
+
+    svg = render_wall_plan_svg(plan)
+
+    assert 'data-fp-level="F1" data-fp-id="F1"' in svg
+    assert 'class="foundation-insulation"' in svg
+    assert 'class="foundation-pad"' in svg
+    assert 'class="foundation-footing"' in svg
+    assert 'class="foundation-footing-rebar"' in svg
+    assert 'class="foundation-rebar"' in svg
+    assert 'd="M 168.000 136.000 L -8.000 136.000 L -8.000 -8.000 L 168.000 -8.000 L 168.000 136.000"' in svg
+    assert 'y1="-13.333"' in svg
+    assert 'y2="141.333"' in svg
 
 
 def test_wall_plan_renders_roof_modes() -> None:
@@ -452,7 +584,7 @@ def test_wall_plan_larger_coplanar_roof_face_wins_overlap() -> None:
 
 
 def test_ridgestone_coplanar_right_gable_face_clips_internal_ridge() -> None:
-    plan = load_intent_plan_yaml("artifacts/floorplans/ridgestone-intent-studio-wing-master-south.yaml")
+    plan = load_intent_plan_yaml("artifacts/floorplans/master-south.yaml")
 
     svg = render_wall_plan_svg(plan)
     right_gable = svg[
@@ -542,6 +674,33 @@ def test_intent_plan_prefers_specific_contained_room_wall_for_connection() -> No
     assert opening.width == 3
 
 
+def test_intent_plan_connects_protruding_room_to_larger_room() -> None:
+    plan = intent_plan_from_dict(
+        {
+            "type": "intent_plan",
+            "plan": "protruding-room-connection-test",
+            "levels": {
+                "L1": {
+                    "derive_partitions": True,
+                    "spaces": {
+                        "great_room": {"rect": [0, 0, 20, 17]},
+                        "kitchen": {"rect": [0, 17, 20, 8]},
+                        "pantry": {"rect": [8, 12, 4, 7]},
+                    },
+                    "connections": [{"between": ["kitchen", "pantry"], "width": 3}],
+                }
+            },
+        }
+    )
+
+    wall_ids = {wall.id for wall in plan.levels["L1"].walls}
+    opening = plan.levels["L1"].openings[0]
+
+    assert "pantry__kitchen_overlap_south_wall" in wall_ids
+    assert opening.wall == "pantry__kitchen_overlap_south_wall"
+    assert opening.width == 3
+
+
 def test_intent_plan_places_wall_side_window_and_counter_extrusion() -> None:
     plan = intent_plan_from_dict(
         {
@@ -573,6 +732,145 @@ def test_intent_plan_places_wall_side_window_and_counter_extrusion() -> None:
     counter = plan.levels["L1"].features[0]
     assert counter.extrude is not None
     assert counter.extrude.length == pytest.approx(20)
+
+
+def test_intent_plan_wraps_feature_along_multiple_space_sides() -> None:
+    plan = intent_plan_from_dict(
+        {
+            "type": "intent_plan",
+            "plan": "intent-feature-wrap-test",
+            "datums": {"x": {"w": 0, "e": 20}, "y": {"n": 0, "s": 12}},
+            "masses": {"body": {"levels": ["L1"], "rect": {"x": ["w", "e"], "y": ["n", "s"]}}},
+            "levels": {
+                "L1": {
+                    "spaces": {"kitchen": {"x": ["w", "e"], "y": ["n", "s"]}},
+                    "features": {
+                        "counter_run": {
+                            "kind": "counter",
+                            "wrap": {"space": "kitchen", "sides": ["west", "south", "east"], "depth": 2},
+                        }
+                    },
+                }
+            },
+        }
+    )
+
+    assert not plan.validate()
+    counter = plan.levels["L1"].features[0]
+    assert counter.id == "counter_run"
+    assert counter.polygon is not None
+    assert counter.extrude is None
+    assert len(counter.polygon) >= 8
+
+
+def test_intent_plan_wrap_uses_space_side_span_for_interior_direction() -> None:
+    plan = intent_plan_from_dict(
+        {
+            "type": "intent_plan",
+            "plan": "intent-feature-wrap-span-test",
+            "datums": {"x": {"w": 0, "e": 20}, "y": {"n": 0, "split": 10, "s": 20}},
+            "masses": {"body": {"levels": ["L1"], "rect": {"x": ["w", "e"], "y": ["n", "s"]}}},
+            "levels": {
+                "L1": {
+                    "derive_partitions": True,
+                    "spaces": {
+                        "great_room": {"x": ["w", "e"], "y": ["n", "split"]},
+                        "kitchen": {"x": ["w", "e"], "y": ["split", "s"]},
+                    },
+                    "features": {
+                        "kitchen_counters": {
+                            "kind": "counter",
+                            "wrap": {"space": "kitchen", "sides": ["east"], "depth": 2},
+                        }
+                    },
+                }
+            },
+        }
+    )
+
+    counter = plan.levels["L1"].features[0]
+    assert counter.polygon is not None
+    assert max(point.x for point in counter.polygon) == pytest.approx(20)
+    assert min(point.x for point in counter.polygon) == pytest.approx(18)
+
+
+def test_intent_plan_wrap_clips_open_wall_spans() -> None:
+    plan = intent_plan_from_dict(
+        {
+            "type": "intent_plan",
+            "plan": "intent-feature-wrap-open-span-test",
+            "datums": {"x": {"w": 0, "split": 10, "e": 20}, "y": {"n": 0, "mid": 5, "s": 10}},
+            "masses": {
+                "body": {
+                    "levels": ["L1"],
+                    "rects": [
+                        {"x": ["w", "split"], "y": ["n", "s"]},
+                        {"x": ["split", "e"], "y": ["n", "mid"]},
+                    ],
+                }
+            },
+            "levels": {
+                "L1": {
+                    "derive_partitions": True,
+                    "spaces": {
+                        "kitchen": {"x": ["w", "split"], "y": ["n", "s"]},
+                        "dining": {"x": ["split", "e"], "y": ["n", "mid"]},
+                    },
+                    "features": {
+                        "kitchen_counters": {
+                            "kind": "counter",
+                            "wrap": {"space": "kitchen", "sides": ["east"], "depth": 2},
+                        }
+                    },
+                    "connections": [{"between": ["kitchen", "dining"], "kind": "open"}],
+                }
+            },
+        }
+    )
+
+    counter = plan.levels["L1"].features[0]
+    assert counter.polygon is not None
+    assert min(point.y for point in counter.polygon) == pytest.approx(5)
+    assert max(point.y for point in counter.polygon) == pytest.approx(10)
+    assert min(point.x for point in counter.polygon) == pytest.approx(8)
+    assert max(point.x for point in counter.polygon) == pytest.approx(10)
+
+
+def test_intent_plan_space_side_window_prefers_exterior_wall_span() -> None:
+    plan = intent_plan_from_dict(
+        {
+            "type": "intent_plan",
+            "plan": "space-side-window-exterior-span-test",
+            "masses": {
+                "body": {
+                    "levels": ["L1"],
+                    "rects": [
+                        {"rect": [0, 0, 10, 10]},
+                        {"rect": [-5, 0, 5, 7]},
+                    ],
+                }
+            },
+            "levels": {
+                "L1": {
+                    "derive_partitions": True,
+                    "spaces": {
+                        "kitchen": {"rect": [0, 0, 10, 10]},
+                        "tower_closet": {"rect": [-5, 0, 5, 7]},
+                    },
+                    "openings": [
+                        {"id": "kitchen_west_window", "kind": "window", "space": "kitchen", "side": "west", "width": 2}
+                    ],
+                }
+            },
+        }
+    )
+
+    opening = plan.levels["L1"].openings[0]
+    wall = next(wall for wall in plan.levels["L1"].walls if wall.id == opening.wall)
+
+    assert wall.kind == "exterior"
+    assert wall.at.x == pytest.approx(0)
+    assert min(wall.at.y, wall.end.y) == pytest.approx(7)
 
 
 def test_intent_plan_renders_layered_overlay_lines() -> None:
@@ -2174,7 +2472,7 @@ def test_wall_plan_validates_access_and_stack_members() -> None:
 
 
 def test_wall_artifact_loads_and_renders(tmp_path: Path) -> None:
-    plan = load_wall_plan_yaml("artifacts/floorplans/ridgestone-walls.yaml")
+    plan = load_wall_plan_yaml("artifacts/floorplans/studio-wing.yaml")
     svg_path = tmp_path / "wall.svg"
 
     render_wall_plan_svg(plan, svg_path)

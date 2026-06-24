@@ -295,7 +295,7 @@ h3 {
   border-bottom: 1px solid #d4cec4;
   display: grid;
   gap: 12px;
-  grid-template-columns: minmax(0, 1fr) minmax(320px, 42%);
+  grid-template-columns: minmax(0, 1fr);
   min-height: 62px;
   padding: 12px 16px;
 }
@@ -352,6 +352,72 @@ h3 {
   flex: 0 0 auto;
   flex-direction: column;
   gap: 3px;
+}
+
+.estimate-group {
+  align-items: start;
+  flex: 0 0 auto;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 142px;
+}
+
+.estimate-values {
+  align-items: baseline;
+  display: flex;
+  gap: 8px;
+  min-width: 0;
+}
+
+.estimate-group strong {
+  color: #24221f;
+  font-size: 18px;
+  line-height: 1;
+  white-space: nowrap;
+}
+
+.floor-area {
+  color: #70675d;
+  font-size: 12px;
+  font-weight: 750;
+  line-height: 1;
+  white-space: nowrap;
+}
+
+.cost-delta {
+  animation: cost-delta-fade 1800ms ease forwards;
+  font-size: 12px;
+  font-weight: 800;
+  line-height: 1;
+  transform: translateY(0);
+  white-space: nowrap;
+}
+
+.cost-delta.positive {
+  color: #9b4b1f;
+}
+
+.cost-delta.negative {
+  color: #2f7650;
+}
+
+@keyframes cost-delta-fade {
+  0% {
+    opacity: 0;
+    transform: translateY(4px);
+  }
+  18% {
+    opacity: 1;
+    transform: translateY(0);
+  }
+  75% {
+    opacity: 1;
+    transform: translateY(0);
+  }
+  100% {
+    opacity: 0;
+    transform: translateY(-7px);
+  }
 }
 
 .toolbar-label {
@@ -471,8 +537,25 @@ h3 {
   min-height: 0;
   overflow: auto;
   overscroll-behavior: contain;
+  position: relative;
   -webkit-user-select: none;
   user-select: none;
+}
+
+.canvas-error {
+  background: #fff6ef;
+  border: 1px solid #d27d45;
+  border-radius: 6px;
+  box-shadow: 0 8px 22px rgb(44 39 33 / 16%);
+  color: #7a3514;
+  font-size: 13px;
+  font-weight: 650;
+  left: 16px;
+  max-width: min(720px, calc(100% - 32px));
+  padding: 9px 11px;
+  position: sticky;
+  top: 12px;
+  z-index: 12;
 }
 
 .canvas-extent {
@@ -560,9 +643,6 @@ h3 {
 .svg-canvas .wall-select-target,
 .svg-canvas .wall-select-target:hover,
 .svg-canvas .wall-select-target.selected-object,
-.svg-canvas .wall-grip-target,
-.svg-canvas .wall-grip-target:hover,
-.svg-canvas .wall-grip-target.selected-object,
 .svg-canvas .opening-hit-target,
 .svg-canvas .opening-hit-target:hover,
 .svg-canvas .opening-hit-target.selected-object {
@@ -570,28 +650,19 @@ h3 {
 }
 
 .svg-canvas .wall-select-target {
-  stroke-width: 12px !important;
-}
-
-.svg-canvas .wall-grip-target {
   stroke-width: 18px !important;
 }
 
-.svg-canvas .wall-grip-target[data-fp-orientation="vertical"] {
+.svg-canvas .wall-select-target[data-fp-orientation="vertical"] {
   cursor: ew-resize;
 }
 
-.svg-canvas .wall-grip-target[data-fp-orientation="horizontal"] {
+.svg-canvas .wall-select-target[data-fp-orientation="horizontal"] {
   cursor: ns-resize;
 }
 
-.svg-canvas .wall-select-target,
-.svg-canvas [data-fp-kind="wall-select"] {
+.svg-canvas .wall-select-target[data-fp-orientation="angled"] {
   cursor: pointer;
-}
-
-.svg-canvas .wall-grip-dot {
-  pointer-events: none;
 }
 
 .svg-canvas [data-fp-kind="opening"][data-fp-orientation="horizontal"] {
@@ -631,47 +702,6 @@ h3 {
 
 .svg-canvas [data-fp-kind="space"]:hover {
   fill: #e9f5f8 !important;
-}
-
-.error-region {
-  align-items: center;
-  background: transparent;
-  border: 1px solid transparent;
-  border-radius: 6px;
-  color: #766e65;
-  display: grid;
-  gap: 10px;
-  grid-template-columns: minmax(0, 1fr) auto;
-  min-height: 38px;
-  min-width: 0;
-  padding: 4px 6px 4px 10px;
-}
-
-.error-region.error {
-  background: #fff0ed;
-  border-color: #e3a698;
-  color: #8b2b1b;
-}
-
-.error-message {
-  display: -webkit-box;
-  font-size: 13px;
-  line-height: 18px;
-  max-height: 36px;
-  overflow: hidden;
-  -webkit-box-orient: vertical;
-  -webkit-line-clamp: 2;
-}
-
-.copy-error {
-  align-items: center;
-  display: inline-flex;
-  font-size: 16px;
-  height: 28px;
-  justify-content: center;
-  min-height: 28px;
-  padding: 0;
-  width: 30px;
 }
 
 .muted {
@@ -938,8 +968,39 @@ dd {
   border-left: 1px solid #d4cec4;
 }
 
+.cost-panel {
+  background: #fffefa;
+  border-left: 1px solid #d4cec4;
+  bottom: 0;
+  box-shadow: -14px 0 32px rgb(44 39 33 / 16%);
+  display: grid;
+  gap: 10px;
+  grid-template-rows: auto auto minmax(0, 1fr);
+  margin: 0;
+  min-height: 0;
+  overflow: hidden;
+  padding: 14px 26px 14px 14px;
+  position: absolute;
+  right: 0;
+  top: 0;
+  transform: translateX(100%);
+  transition: transform 180ms ease;
+  width: min(525px, 34.5vw);
+  z-index: 19;
+}
+
+.cost-panel.open {
+  transform: translateX(0);
+}
+
 .yaml-panel.open {
   transform: translateX(0);
+}
+
+.editor-shell.yaml-open .inspector-pullout,
+.editor-shell.yaml-open .cost-pullout,
+.editor-shell.yaml-open .yaml-pullout {
+  right: min(620px, 42vw);
 }
 
 .yaml-pullout {
@@ -1011,6 +1072,12 @@ dd {
   right: var(--inspector-width);
 }
 
+.editor-shell.inspector-open .yaml-pullout,
+.editor-shell.inspector-open .inspector-pullout,
+.editor-shell.inspector-open .cost-pullout {
+  right: var(--inspector-width);
+}
+
 .inspector-pullout svg {
   fill: none;
   height: 25px;
@@ -1024,6 +1091,142 @@ dd {
 
 .inspector-pullout svg.open {
   transform: rotate(180deg);
+}
+
+.cost-pullout {
+  align-items: center;
+  background: #456b57;
+  border: 1px solid #365744;
+  border-radius: 8px 0 0 8px;
+  box-shadow: -4px 4px 12px rgb(44 39 33 / 18%);
+  color: #fff;
+  cursor: pointer;
+  display: grid;
+  font-size: 12px;
+  font-weight: 800;
+  justify-items: center;
+  min-height: 54px;
+  padding: 8px 6px;
+  position: fixed;
+  right: 0;
+  text-transform: uppercase;
+  top: 216px;
+  transition: right 180ms ease;
+  width: 50px;
+  z-index: 29;
+}
+
+.cost-pullout.open {
+  right: min(525px, 34.5vw);
+}
+
+.editor-shell.cost-open .yaml-pullout,
+.editor-shell.cost-open .inspector-pullout,
+.editor-shell.cost-open .cost-pullout {
+  right: min(525px, 34.5vw);
+}
+
+.cost-pullout svg {
+  fill: none;
+  height: 25px;
+  stroke: currentColor;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  stroke-width: 2.4;
+  transition: transform 180ms ease;
+  width: 25px;
+}
+
+.cost-view {
+  min-height: 0;
+  overflow: auto;
+  padding-right: 2px;
+}
+
+.segmented-control {
+  background: #f2eee7;
+  border: 1px solid #d4cec4;
+  border-radius: 7px;
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  padding: 3px;
+}
+
+.segmented-control button {
+  background: transparent;
+  border-color: transparent;
+  border-radius: 5px;
+  font-size: 12px;
+  font-weight: 750;
+  min-width: 0;
+}
+
+.segmented-control button.active {
+  background: #fff;
+  border-color: #c8c0b5;
+}
+
+.cost-table {
+  border-collapse: collapse;
+  font-size: 12px;
+  min-width: 100%;
+  width: 100%;
+}
+
+.cost-table th,
+.cost-table td {
+  border-bottom: 1px solid #e4ded5;
+  padding: 8px 6px;
+  text-align: right;
+  vertical-align: top;
+}
+
+.cost-table th:first-child,
+.cost-table td:first-child {
+  text-align: left;
+}
+
+.cost-table th {
+  color: #70675d;
+  font-size: 11px;
+  text-transform: uppercase;
+}
+
+.cost-table .cost-section-row th {
+  background: #f2eee7;
+  border-bottom-color: #d4cec4;
+  border-top: 1px solid #d4cec4;
+  color: #4c463f;
+  font-size: 11px;
+  font-weight: 800;
+  padding-bottom: 6px;
+  padding-top: 7px;
+}
+
+.cost-table .cost-section-row th:last-child {
+  text-align: right;
+}
+
+.cost-table td strong,
+.cost-table td span {
+  display: block;
+}
+
+.cost-table td span {
+  color: #766e65;
+  font-size: 11px;
+  margin-top: 2px;
+}
+
+.materials-table input {
+  min-width: 0;
+  text-align: right;
+  width: 120px;
+}
+
+.assumptions-list {
+  border-top: 1px solid #e4ded5;
+  padding-top: 10px;
 }
 
 .yaml-panel textarea {
@@ -1047,7 +1250,27 @@ dd {
     width: min(620px, calc(100vw - 52px));
   }
 
+  .cost-panel {
+    width: min(525px, calc(100vw - 52px));
+  }
+
   .yaml-pullout.open {
     right: min(620px, calc(100vw - 52px));
+  }
+
+  .editor-shell.yaml-open .inspector-pullout,
+  .editor-shell.yaml-open .cost-pullout,
+  .editor-shell.yaml-open .yaml-pullout {
+    right: min(620px, calc(100vw - 52px));
+  }
+
+  .editor-shell.cost-open .yaml-pullout,
+  .editor-shell.cost-open .inspector-pullout,
+  .editor-shell.cost-open .cost-pullout {
+    right: min(525px, calc(100vw - 52px));
+  }
+
+  .cost-pullout.open {
+    right: min(525px, calc(100vw - 52px));
   }
 }

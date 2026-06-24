@@ -13,12 +13,19 @@
   export let plans: PlanSummary[] = [];
   export let selectedPlan = "";
   export let dirty = false;
-  export let error = "";
   export let svg = "";
+  export let error = "";
   export let canvasZoom = 0.7;
   export let canvasElement: HTMLDivElement;
   export let selectPlan: (name: string) => void | Promise<void>;
   export let saveCurrentPlan: () => void | Promise<void>;
+  export let canUndo = false;
+  export let canRedo = false;
+  export let undo: () => void;
+  export let redo: () => void;
+  export let costTotal = 0;
+  export let costDelta = 0;
+  export let floorArea = 0;
   export let handleCanvasPointerDown: (event: PointerEvent) => void;
   export let preventCanvasSelection: (event: Event) => void;
   export let handleCanvasClick: (event: MouseEvent) => void;
@@ -71,13 +78,6 @@
     };
   });
 
-  async function copyError() {
-    if (!error) {
-      return;
-    }
-    await navigator.clipboard?.writeText(error);
-  }
-
   function exportSvg() {
     if (!svg) {
       return;
@@ -111,6 +111,14 @@
   function exportBaseName() {
     const source = document?.name ?? selectedPlan ?? "floor-plan";
     return source.replace(/\.(ya?ml|json)$/i, "");
+  }
+
+  function money(value: number) {
+    return `$${value.toLocaleString(undefined, { maximumFractionDigits: 0 })}`;
+  }
+
+  function wholeNumber(value: number) {
+    return value.toLocaleString(undefined, { maximumFractionDigits: 0 });
   }
 
   function clearSelectHighlight(event: Event) {
@@ -296,9 +304,25 @@
             </div>
           </details>
         </div>
+        <div class="toolbar-group estimate-group">
+          <span class="toolbar-label">Estimate</span>
+          <div class="estimate-values">
+            <strong>{money(costTotal)}</strong>
+            {#if Math.abs(costDelta) >= 1}
+              {#key Math.round(costDelta)}
+                <span class:positive={costDelta > 0} class:negative={costDelta < 0} class="cost-delta">
+                  {costDelta > 0 ? "+" : ""}{money(costDelta)}
+                </span>
+              {/key}
+            {/if}
+          </div>
+          <span class="floor-area">{wholeNumber(floorArea)} sq ft</span>
+        </div>
         <div class="toolbar-group file-group">
           <span class="toolbar-label">File</span>
           <div class="file-actions">
+            <button type="button" disabled={!canUndo} aria-label="Undo" title="Undo" on:click={() => undo()}>↶</button>
+            <button type="button" disabled={!canRedo} aria-label="Redo" title="Redo" on:click={() => redo()}>↷</button>
             <button type="button" disabled={!svg} on:click={exportSvg}>Export SVG</button>
             <button type="button" disabled={!svg} on:click={exportPrintPages}>Print pages</button>
             <button type="button" class="primary" disabled={!dirty} on:click={() => saveCurrentPlan()}>Save</button>
@@ -306,21 +330,12 @@
         </div>
       </div>
     </div>
-    <div class:error={Boolean(error)} class:empty-error={!error} class="error-region">
-      <div class="error-message">
-        {#if error}
-          {error}
-        {:else}
-          {" "}
-        {/if}
-      </div>
-      <button type="button" class="copy-error" disabled={!error} aria-label="Copy error message" on:click={copyError}>
-        <span aria-hidden="true">⧉</span>
-      </button>
-    </div>
   </header>
 
   <div class="canvas-frame" bind:this={canvasFrame} on:wheel|nonpassive={handleCanvasWheel}>
+    {#if error}
+      <div class="canvas-error" role="status">{error}</div>
+    {/if}
     {#if svg}
       <div class="canvas-extent" style={`width:${contentWidth}px;height:${contentHeight}px;`}>
         <div

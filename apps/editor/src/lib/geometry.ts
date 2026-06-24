@@ -6,6 +6,8 @@ import type {
   OpeningDrag,
   OverlayDrag,
   SharedWallDrag,
+  SpaceEdge,
+  SpaceEdgeDrag,
   SpaceRect,
   WallDirection,
   WallLine
@@ -241,6 +243,78 @@ export function moveContainedWall(data: AnyRecord, wallDrag: ContainedWallDrag, 
   const touchedDatums = new Set<string>();
   const movedEdges = new Set<string>();
   moveSpaceEdgeAndStackedMembers(data, wallDrag.level, wallDrag.innerSpace, wallDrag.edge, delta, touchedDatums, movedEdges);
+}
+
+export function moveSpaceEdgeForDrag(data: AnyRecord, spaceDrag: SpaceEdgeDrag, coordinate: number) {
+  const space = ((data.levels as AnyRecord)?.[spaceDrag.level]?.spaces ?? {})[spaceDrag.id] as AnyRecord | undefined;
+  if (!space) {
+    return;
+  }
+  const axis = spaceEdgeAxis(spaceDrag.edge);
+  const edgeIndex = spaceEdgeIndex(spaceDrag.edge);
+  if (Array.isArray(space[axis])) {
+    space[axis][edgeIndex] = coordinate;
+    return;
+  }
+  if (!Array.isArray(space.rect)) {
+    return;
+  }
+  if (spaceDrag.edge === "left") {
+    const right = spaceDrag.startRect.right;
+    space.rect[0] = coordinate;
+    space.rect[2] = right - coordinate;
+  } else if (spaceDrag.edge === "right") {
+    space.rect[2] = coordinate - spaceDrag.startRect.left;
+  } else if (spaceDrag.edge === "top") {
+    const bottom = spaceDrag.startRect.bottom;
+    space.rect[1] = coordinate;
+    space.rect[3] = bottom - coordinate;
+  } else {
+    space.rect[3] = coordinate - spaceDrag.startRect.top;
+  }
+}
+
+export function assignSpaceEdgeDatum(
+  data: AnyRecord,
+  levelId: string,
+  spaceId: string,
+  edge: SpaceEdge,
+  coordinate: number,
+  snapTolerance = 0.25
+) {
+  const space = ((data.levels as AnyRecord)?.[levelId]?.spaces ?? {})[spaceId] as AnyRecord | undefined;
+  if (!space) {
+    return;
+  }
+  const axis = spaceEdgeAxis(edge);
+  const edgeIndex = spaceEdgeIndex(edge);
+  const datumName = nearestDatumName(data, axis, coordinate, snapTolerance) ?? createDatum(data, axis, suggestedDatumName(spaceId, edge), coordinate);
+  if (Array.isArray(space[axis])) {
+    space[axis][edgeIndex] = datumName;
+    return;
+  }
+  if (Array.isArray(space.rect)) {
+    const rect = rectSpecToRect(space.rect, data);
+    if (!rect) {
+      return;
+    }
+    space.x = [edge === "left" ? datumName : createDatum(data, "x", `${spaceId}_w`, rect.left), edge === "right" ? datumName : createDatum(data, "x", `${spaceId}_e`, rect.right)];
+    space.y = [edge === "top" ? datumName : createDatum(data, "y", `${spaceId}_n`, rect.top), edge === "bottom" ? datumName : createDatum(data, "y", `${spaceId}_s`, rect.bottom)];
+    delete space.rect;
+  }
+}
+
+export function spaceEdgeCoordinate(rect: SpaceRect, edge: SpaceEdge) {
+  if (edge === "left") {
+    return rect.left;
+  }
+  if (edge === "right") {
+    return rect.right;
+  }
+  if (edge === "top") {
+    return rect.top;
+  }
+  return rect.bottom;
 }
 
 export function findMassEdgeRefs(
@@ -493,8 +567,6 @@ function updateSpacesAlongExteriorWall(
     }
   }
 }
-
-type SpaceEdge = "left" | "right" | "top" | "bottom";
 
 function moveSharedDatumBoundary(
   data: AnyRecord,
@@ -758,4 +830,57 @@ function datumValue(sourceData: AnyRecord, axis: "x" | "y", value: unknown): num
     return typeof axisDatums[value] === "number" ? axisDatums[value] : null;
   }
   return null;
+}
+
+function spaceEdgeAxis(edge: SpaceEdge): "x" | "y" {
+  return edge === "left" || edge === "right" ? "x" : "y";
+}
+
+function spaceEdgeIndex(edge: SpaceEdge): 0 | 1 {
+  return edge === "left" || edge === "top" ? 0 : 1;
+}
+
+function nearestDatumName(data: AnyRecord, axis: "x" | "y", coordinate: number, tolerance: number) {
+  const datums = ((data.datums ?? {}) as AnyRecord)[axis] ?? {};
+  let best: { name: string; distance: number } | null = null;
+  for (const [name, value] of Object.entries(datums)) {
+    if (typeof value !== "number") {
+      continue;
+    }
+    const distance = Math.abs(value - coordinate);
+    if (distance <= tolerance && (!best || distance < best.distance)) {
+      best = { name, distance };
+    }
+  }
+  return best?.name ?? null;
+}
+
+function createDatum(data: AnyRecord, axis: "x" | "y", preferredName: string, coordinate: number) {
+  data.datums ??= {};
+  data.datums[axis] ??= {};
+  const datums = data.datums[axis] as AnyRecord;
+  const base = cleanDatumName(preferredName);
+  let name = base;
+  let index = 2;
+  while (Object.prototype.hasOwnProperty.call(datums, name)) {
+    name = `${base}_${index}`;
+    index += 1;
+  }
+  datums[name] = snapToGrid(coordinate);
+  return name;
+}
+
+function suggestedDatumName(spaceId: string, edge: SpaceEdge) {
+  const suffix = edge === "left" ? "w" : edge === "right" ? "e" : edge === "top" ? "n" : "s";
+  return `${spaceId}_${suffix}`;
+}
+
+function cleanDatumName(value: string) {
+  return (
+    value
+      .toLowerCase()
+      .split(/[^a-z0-9]+/)
+      .filter(Boolean)
+      .join("_") || "datum"
+  );
 }

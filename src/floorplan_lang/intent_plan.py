@@ -19,15 +19,21 @@ from floorplan_lang.wall_plan import (
     AreaLabel,
     Feature,
     FeatureAnchor,
+    FoundationPlan,
     OverlayLine,
     RoofSection,
     Stair,
     StairRun,
+    EXTERIOR_WALL_THICKNESS_FT,
     WallExtrusion,
     WallLevel,
     WallOpening,
     WallPlan,
     WallSegment,
+    _connected_wall_paths,
+    _offset_closed_orthogonal_loop,
+    _rect_union_boundary_walls,
+    _same_point,
 )
 
 Direction = Literal["N", "E", "S", "W"]
@@ -39,12 +45,53 @@ class IntentContext:
     datums: dict[str, dict[str, float]]
     spaces: dict[str, Rect]
     walls: dict[str, WallSegment]
+    openings: tuple[WallOpening, ...] = ()
 
 
 def load_intent_plan_yaml(path: str | Path) -> WallPlan:
-    plan = intent_plan_from_dict(yaml.safe_load(Path(path).read_text()))
+    plan = intent_plan_from_dict(load_intent_plan_data(path))
     plan.require_valid()
     return plan
+
+
+def load_intent_plan_data(path: str | Path) -> dict[str, Any]:
+    source_path = Path(path)
+    data = yaml.safe_load(source_path.read_text())
+    if not isinstance(data, dict):
+        raise ValueError(f"Intent plan YAML is not a mapping: {source_path}")
+    return resolve_intent_plan_imports(data, base_path=source_path.parent, seen={source_path.resolve()})
+
+
+def resolve_intent_plan_imports(
+    data: dict[str, Any], *, base_path: str | Path | None = None, seen: set[Path] | None = None
+) -> dict[str, Any]:
+    imports = data.get("imports") or []
+    if isinstance(imports, (str, Path)):
+        imports = [imports]
+    if not imports:
+        return dict(data)
+
+    base_dir = Path(base_path) if base_path is not None else Path.cwd()
+    seen_paths = set(seen or ())
+    merged: dict[str, Any] = {}
+    for import_ref in imports:
+        import_path = Path(import_ref)
+        if not import_path.is_absolute():
+            import_path = base_dir / import_path
+        import_path = import_path.resolve()
+        if import_path in seen_paths:
+            raise ValueError(f"Cyclic intent plan import: {import_path}")
+        import_data = yaml.safe_load(import_path.read_text())
+        if not isinstance(import_data, dict):
+            raise ValueError(f"Intent plan import is not a mapping: {import_path}")
+        resolved = resolve_intent_plan_imports(
+            import_data, base_path=import_path.parent, seen={*seen_paths, import_path}
+        )
+        merged = _deep_merge(merged, resolved)
+
+    leaf_data = dict(data)
+    leaf_data.pop("imports", None)
+    return _deep_merge(merged, leaf_data)
 
 
 def intent_plan_from_dict(data: dict[str, Any]) -> WallPlan:
@@ -78,13 +125,22 @@ def intent_plan_from_dict(data: dict[str, Any]) -> WallPlan:
             level.walls.extend(_space_partition_walls(spaces))
         level.walls.extend(_partition_walls(level_data.get("partitions") or [], datums))
         context = IntentContext(datums=datums, spaces=spaces, walls={wall.id: wall for wall in level.walls})
+        compiled_openings = (
+            *_compile_connections(level_data.get("connections") or [], context),
+            *_compile_openings(level_data.get("openings") or [], context),
+        )
+        context = IntentContext(
+            datums=datums,
+            spaces=spaces,
+            walls={wall.id: wall for wall in level.walls},
+            openings=tuple(compiled_openings),
+        )
         contexts[level_id] = context
 
         level.zones.extend(_compile_zones(level_data.get("spaces") or {}, spaces))
         level.areas.extend(_compile_area_labels(level_data.get("spaces") or {}, spaces))
         level.features.extend(_compile_features(level_data.get("features") or {}, catalog, context))
-        level.openings.extend(_compile_connections(level_data.get("connections") or [], context))
-        level.openings.extend(_compile_openings(level_data.get("openings") or [], context))
+        level.openings.extend(compiled_openings)
         level.openings.extend(_compile_auto_windows(level_data, context, level.openings))
         level.access.extend(_compile_access(level_data.get("access") or [], level.openings))
         level.overlays.extend(_compile_overlays(level_data.get("overlays") or {}, datums))
@@ -92,8 +148,20 @@ def intent_plan_from_dict(data: dict[str, Any]) -> WallPlan:
 
     _compile_roofs(data.get("masses") or {}, data, plan, level_datums, level_elevations)
     _compile_stairs(data.get("stairs") or {}, data.get("story") or {}, plan, contexts)
+    _compile_foundations(data.get("foundations") or {}, data, plan, level_datums, level_elevations)
 
     return plan
+
+
+def _deep_merge(base: dict[str, Any], override: dict[str, Any]) -> dict[str, Any]:
+    merged = dict(base)
+    for key, value in override.items():
+        base_value = merged.get(key)
+        if isinstance(base_value, dict) and isinstance(value, dict):
+            merged[key] = _deep_merge(base_value, value)
+        else:
+            merged[key] = value
+    return merged
 
 
 def _require_valid_intent_level(
@@ -129,6 +197,8 @@ def _validate_intent_references(level_id: str, level_data: dict[str, Any], space
             errors.append(f"{level_id}.{feature_id} references missing containing space {feature['within']!r}")
         if feature.get("along", {}).get("space") is not None and feature["along"]["space"] not in space_ids:
             errors.append(f"{level_id}.{feature_id} references missing along space {feature['along']['space']!r}")
+        if feature.get("wrap", {}).get("space") is not None and feature["wrap"]["space"] not in space_ids:
+            errors.append(f"{level_id}.{feature_id} references missing wrap space {feature['wrap']['space']!r}")
     for index, edge in enumerate(level_data.get("access") or (), start=1):
         if isinstance(edge, dict):
             endpoints = (edge.get("from"), edge.get("to"))
@@ -281,6 +351,92 @@ def _compile_roofs(
                         end=roof.end,
                     )
                 )
+
+
+def _compile_foundations(
+    foundations: dict[str, Any] | list[Any],
+    data: dict[str, Any],
+    plan: WallPlan,
+    level_datums: dict[str, dict[str, dict[str, float]]],
+    level_elevations: dict[str, float],
+) -> None:
+    items = _foundation_items(foundations)
+    for foundation_id, foundation_data in items:
+        source_level = str(foundation_data.get("source_level", "L1"))
+        if source_level not in level_datums:
+            raise ValueError(f"Foundation {foundation_id!r} references missing source level {source_level!r}")
+        datums = level_datums[source_level]
+        rects = _foundation_source_rects(foundation_data, data.get("masses") or {}, source_level, datums, level_elevations)
+        perimeter_loops = _foundation_body_loops(rects)
+        if not perimeter_loops:
+            raise ValueError(f"Foundation {foundation_id!r} has no source perimeter")
+        pad_wall_margin = float(foundation_data.get("pad_wall_margin", EXTERIOR_WALL_THICKNESS_FT))
+        footing_center_offset = float(foundation_data.get("footing_center_offset", EXTERIOR_WALL_THICKNESS_FT / 2))
+        body_loops = tuple(tuple(_offset_loop_or_original(loop, pad_wall_margin)) for loop in perimeter_loops)
+        footing_loops = tuple(tuple(_offset_loop_or_original(loop, footing_center_offset)) for loop in perimeter_loops)
+        level_id = str(foundation_data.get("level", foundation_id))
+        level = WallLevel(id=level_id, title=foundation_data.get("title", "Concrete Pad"))
+        level.foundations.append(
+            FoundationPlan(
+                id=foundation_id,
+                body_loops=body_loops,
+                footing_loops=footing_loops,
+                insulation_margin=float(foundation_data.get("insulation_margin", foundation_data.get("margin", 4.0))),
+                footing_width=float(foundation_data.get("footing_width", 2.0)),
+                footing_rebar_offset=float(foundation_data.get("footing_rebar_offset", 0.0)),
+                pad_rebar_spacing=float(foundation_data.get("pad_rebar_spacing", foundation_data.get("rebar_spacing", 2.0))),
+                pad_rebar_edge_cover=float(
+                    foundation_data.get("pad_rebar_edge_cover", foundation_data.get("rebar_edge_cover", 2 / 12))
+                ),
+            )
+        )
+        plan.levels[level_id] = level
+
+
+def _foundation_items(foundations: dict[str, Any] | list[Any]) -> list[tuple[str, dict[str, Any]]]:
+    if isinstance(foundations, dict):
+        return [(str(foundation_id), dict(foundation_data or {})) for foundation_id, foundation_data in foundations.items()]
+    return [
+        (str(foundation_data.get("id", f"foundation_{index}")), dict(foundation_data or {}))
+        for index, foundation_data in enumerate(foundations, start=1)
+    ]
+
+
+def _foundation_source_rects(
+    foundation_data: dict[str, Any],
+    masses: dict[str, Any],
+    source_level: str,
+    datums: dict[str, dict[str, float]],
+    level_elevations: dict[str, float],
+) -> list[Rect]:
+    if foundation_data.get("rects") is not None:
+        return [_rect_from_spec(rect_spec, datums) for rect_spec in foundation_data["rects"]]
+    if foundation_data.get("rect") is not None:
+        return [_rect_from_spec(foundation_data["rect"], datums)]
+    selected = foundation_data.get("masses", foundation_data.get("source_masses"))
+    selected_ids = set(selected or masses)
+    rects: list[Rect] = []
+    for mass_id, mass_data in masses.items():
+        if mass_id not in selected_ids:
+            continue
+        for rect_spec in _mass_rect_specs(mass_data):
+            if source_level in _rect_level_ids(rect_spec, mass_data, [source_level], level_elevations):
+                rects.append(_rect_from_spec(rect_spec, datums))
+    return rects
+
+
+def _foundation_body_loops(rects: list[Rect]) -> list[list[Point]]:
+    return [
+        points
+        for points in _connected_wall_paths(_rect_union_boundary_walls(rects, "foundation"))
+        if len(points) >= 4 and _same_point(points[0], points[-1])
+    ]
+
+
+def _offset_loop_or_original(loop: list[Point], distance: float) -> list[Point]:
+    if abs(distance) <= EPSILON:
+        return loop
+    return _offset_closed_orthogonal_loop(loop, distance) or loop
 
 
 def _mass_level_ids(mass_data: dict[str, Any], level_ids: list[str]) -> list[str]:
@@ -581,7 +737,12 @@ def _space_partition_walls(spaces: dict[str, Rect]) -> list[WallSegment]:
                 add_wall(f"{left_id}__{right_id}_wall", orientation, const, start, end)
                 continue
             contained = _contained_space_boundary_walls(left_id, left, right_id, right)
-            for wall_id, orientation, const, start, end in contained:
+            if contained:
+                for wall_id, orientation, const, start, end in contained:
+                    add_wall(wall_id, orientation, const, start, end)
+                continue
+            overlapping = _overlapping_space_boundary_walls(left_id, left, right_id, right)
+            for wall_id, orientation, const, start, end in overlapping:
                 add_wall(wall_id, orientation, const, start, end)
     return walls
 
@@ -624,6 +785,41 @@ def _inner_boundary_walls(
     if inner.left > outer.left + EPSILON:
         walls.append((f"{outer_id}__{inner_id}_west_wall", "vertical", inner.left, inner.top, inner.bottom))
     return walls
+
+
+def _overlapping_space_boundary_walls(
+    left_id: str, left: Rect, right_id: str, right: Rect
+) -> list[tuple[str, str, float, float, float]]:
+    if not _rects_overlap(left, right):
+        return []
+    smaller_id, larger_id, smaller, larger = (
+        (left_id, right_id, left, right) if left.area <= right.area else (right_id, left_id, right, left)
+    )
+    walls = []
+    if larger.left < smaller.left < larger.right:
+        start, end = _overlap_interval(smaller.top, smaller.bottom, larger.top, larger.bottom)
+        walls.append((f"{smaller_id}__{larger_id}_overlap_west_wall", "vertical", smaller.left, start, end))
+    if larger.left < smaller.right < larger.right:
+        start, end = _overlap_interval(smaller.top, smaller.bottom, larger.top, larger.bottom)
+        walls.append((f"{smaller_id}__{larger_id}_overlap_east_wall", "vertical", smaller.right, start, end))
+    if larger.top < smaller.top < larger.bottom:
+        start, end = _overlap_interval(smaller.left, smaller.right, larger.left, larger.right)
+        walls.append((f"{smaller_id}__{larger_id}_overlap_north_wall", "horizontal", smaller.top, start, end))
+    if larger.top < smaller.bottom < larger.bottom:
+        start, end = _overlap_interval(smaller.left, smaller.right, larger.left, larger.right)
+        walls.append((f"{smaller_id}__{larger_id}_overlap_south_wall", "horizontal", smaller.bottom, start, end))
+    return [wall for wall in walls if wall[4] > wall[3] + EPSILON]
+
+
+def _rects_overlap(left: Rect, right: Rect) -> bool:
+    return (
+        min(left.right, right.right) > max(left.left, right.left) + EPSILON
+        and min(left.bottom, right.bottom) > max(left.top, right.top) + EPSILON
+    )
+
+
+def _overlap_interval(a_start: float, a_end: float, b_start: float, b_end: float) -> tuple[float, float]:
+    return max(a_start, b_start), min(a_end, b_end)
 
 
 def _shared_rect_boundary(left: Rect, right: Rect) -> tuple[str, float, float, float] | None:
@@ -712,6 +908,9 @@ def _compile_features(
         kind = feature_data.get("kind", "feature")
         defaults = catalog.get(kind) or {}
         data = {**defaults, **feature_data}
+        if "wrap" in data:
+            compiled.append(_compile_feature_wrap(feature_id, kind, data, context))
+            continue
         size = tuple(float(value) for value in data["size"]) if "size" in data else None
         at = _feature_point(data, context)
         anchor = _compile_anchor(data.get("anchor"))
@@ -732,6 +931,137 @@ def _compile_features(
             )
         )
     return compiled
+
+
+def _compile_feature_wrap(
+    feature_id: str,
+    kind: str,
+    data: dict[str, Any],
+    context: IntentContext,
+) -> Feature:
+    wrap = data["wrap"]
+    space = context.spaces[wrap["space"]]
+    depth = float(wrap.get("depth", data.get("depth", 1.5)))
+    sides = wrap.get("sides") or ("north", "east", "south", "west")
+    rects = []
+    for index, side_name in enumerate(sides):
+        side = _side(side_name)
+        for segment_index, (wall, start, end) in enumerate(_walls_for_space_side(context, space, side)):
+            for clipped_start, clipped_end in _subtract_opening_spans(context, wall, start, end):
+                offset = _wall_offset_for_side_span(wall, side, clipped_start, clipped_end)
+                length = abs(clipped_end - clipped_start)
+                if length <= EPSILON:
+                    continue
+                rects.append(
+                    _wall_extrusion_rect(
+                        wall,
+                        depth=depth,
+                        offset=offset + float(wrap.get("offset", 0)),
+                        length=float(wrap.get("length", length)),
+                        side=wrap.get("extrude_side", _interior_side_for_space_wall(wall, space, offset, length)),
+                    )
+                )
+    return Feature(
+        id=feature_id,
+        kind=kind,
+        polygon=tuple(_union_rect_polygon(rects)),
+        label=data.get("label"),
+        clearance={str(key): float(value) for key, value in (data.get("clearance") or {}).items()},
+        avoid_openings=bool(data.get("avoid_openings", False)),
+        rotation=float(data.get("rotation", 0)),
+    )
+
+
+def _subtract_opening_spans(
+    context: IntentContext, wall: WallSegment, start: float, end: float
+) -> list[tuple[float, float]]:
+    blocked = []
+    for opening in context.openings:
+        if opening.wall != wall.id or opening.kind not in {"door", "arch", "open"}:
+            continue
+        opening_start = wall.point_at(opening.offset)
+        opening_end = wall.point_at(opening.offset + opening.width)
+        if wall.direction in {"E", "W"}:
+            blocked.append((min(opening_start.x, opening_end.x), max(opening_start.x, opening_end.x)))
+        else:
+            blocked.append((min(opening_start.y, opening_end.y), max(opening_start.y, opening_end.y)))
+    if not blocked:
+        return [(start, end)]
+    pieces = [(start, end)]
+    for block_start, block_end in sorted(blocked):
+        next_pieces = []
+        for piece_start, piece_end in pieces:
+            overlap_start = max(piece_start, block_start)
+            overlap_end = min(piece_end, block_end)
+            if overlap_end <= overlap_start + EPSILON:
+                next_pieces.append((piece_start, piece_end))
+                continue
+            if overlap_start > piece_start + EPSILON:
+                next_pieces.append((piece_start, overlap_start))
+            if piece_end > overlap_end + EPSILON:
+                next_pieces.append((overlap_end, piece_end))
+        pieces = next_pieces
+    return pieces
+
+
+def _wall_extrusion_rect(wall: WallSegment, *, depth: float, offset: float, length: float, side: str) -> Rect:
+    start = wall.point_at(offset)
+    end = wall.point_at(offset + length)
+    nx, ny = wall.normal
+    if side in {"right", "outside", "opposite"}:
+        nx *= -1
+        ny *= -1
+    x_values = [start.x, end.x, start.x + nx * depth, end.x + nx * depth]
+    y_values = [start.y, end.y, start.y + ny * depth, end.y + ny * depth]
+    return Rect(min(x_values), min(y_values), max(x_values) - min(x_values), max(y_values) - min(y_values))
+
+
+def _union_rect_polygon(rects: list[Rect]) -> list[Point]:
+    boundary_walls = _boundary_walls(rects, "wrap")
+    paths = _connected_wall_paths(boundary_walls)
+    if not paths:
+        return []
+    return max(paths, key=lambda path: abs(_polygon_area(path)))
+
+
+def _connected_wall_paths(walls: list[WallSegment]) -> list[list[Point]]:
+    remaining = [(wall.at, wall.end) for wall in walls]
+    paths: list[list[Point]] = []
+    while remaining:
+        start, end = remaining.pop(0)
+        path = [start, end]
+        changed = True
+        while changed:
+            changed = False
+            for index, (candidate_start, candidate_end) in enumerate(remaining):
+                if _same_point(path[-1], candidate_start):
+                    path.append(candidate_end)
+                elif _same_point(path[-1], candidate_end):
+                    path.append(candidate_start)
+                elif _same_point(path[0], candidate_end):
+                    path.insert(0, candidate_start)
+                elif _same_point(path[0], candidate_start):
+                    path.insert(0, candidate_end)
+                else:
+                    continue
+                remaining.pop(index)
+                changed = True
+                break
+        paths.append(path)
+    return paths
+
+
+def _same_point(left: Point, right: Point) -> bool:
+    return abs(left.x - right.x) <= EPSILON and abs(left.y - right.y) <= EPSILON
+
+
+def _polygon_area(points: list[Point]) -> float:
+    if len(points) < 3:
+        return 0
+    return sum(
+        first.x * second.y - second.x * first.y
+        for first, second in zip(points, points[1:] + [points[0]], strict=False)
+    ) / 2
 
 
 def _compile_overlays(overlays: dict[str, Any], datums: dict[str, dict[str, float]]) -> list[OverlayLine]:
@@ -797,7 +1127,7 @@ def _compile_feature_extrusion(data: dict[str, Any], context: IntentContext) -> 
         depth=float(data["depth"]),
         offset=offset + float(along.get("offset", 0)),
         length=float(along.get("length", abs(end - start))),
-        side=along.get("extrude_side", _interior_side_for_space_wall(wall, space)),
+        side=along.get("extrude_side", _interior_side_for_space_wall(wall, space, offset, abs(end - start))),
     )
 
 
@@ -857,7 +1187,7 @@ def _compile_openings(openings: list[dict[str, Any]], context: IntentContext) ->
         if "space" in data and "side" in data:
             space = context.spaces[data["space"]]
             side = _side(data["side"])
-            wall, start, end = _wall_for_space_side(context, space, side)
+            wall, start, end = _wall_for_space_side_for_opening(context, space, side, kind)
             width = float(data["width"])
             if "offset" in data:
                 min_offset, max_offset = _opening_offset_bounds(wall, start, end, width)
@@ -882,6 +1212,17 @@ def _compile_openings(openings: list[dict[str, Any]], context: IntentContext) ->
             )
         )
     return compiled
+
+
+def _wall_for_space_side_for_opening(
+    context: IntentContext, space: Rect, side: Side, kind: str
+) -> tuple[WallSegment, float, float]:
+    if kind == "window":
+        try:
+            return _wall_for_space_side(context, space, side, kind="exterior")
+        except ValueError:
+            pass
+    return _wall_for_space_side(context, space, side)
 
 
 def _compile_auto_windows(
@@ -1363,7 +1704,52 @@ def _shared_wall(context: IntentContext, a: Rect, b: Rect) -> tuple[WallSegment,
         return _wall_for_boundary(context, "horizontal", a.bottom, max(a.left, b.left), min(a.right, b.right))
     if abs(b.bottom - a.top) <= EPSILON:
         return _wall_for_boundary(context, "horizontal", a.top, max(a.left, b.left), min(a.right, b.right))
+    overlapping = _overlapping_shared_wall(context, a, b)
+    if overlapping is not None:
+        return overlapping
     raise ValueError(f"Spaces do not share a boundary: {a} and {b}")
+
+
+def _overlapping_shared_wall(context: IntentContext, a: Rect, b: Rect) -> tuple[WallSegment, float, float] | None:
+    if not _rects_overlap(a, b):
+        return None
+    smaller, larger = (a, b) if a.area <= b.area else (b, a)
+    candidates = _overlap_boundary_candidates(smaller, larger)
+    if not candidates:
+        return None
+    preferred_edge = _edge_facing_center(smaller, larger)
+    candidates.sort(key=lambda candidate: (candidate[0] != preferred_edge, -(candidate[4] - candidate[3])))
+    for _, orientation, const, start, end in candidates:
+        try:
+            return _wall_for_boundary(context, orientation, const, start, end)
+        except ValueError:
+            continue
+    return None
+
+
+def _overlap_boundary_candidates(smaller: Rect, larger: Rect) -> list[tuple[str, str, float, float, float]]:
+    candidates = []
+    if larger.left < smaller.left < larger.right:
+        start, end = _overlap_interval(smaller.top, smaller.bottom, larger.top, larger.bottom)
+        candidates.append(("left", "vertical", smaller.left, start, end))
+    if larger.left < smaller.right < larger.right:
+        start, end = _overlap_interval(smaller.top, smaller.bottom, larger.top, larger.bottom)
+        candidates.append(("right", "vertical", smaller.right, start, end))
+    if larger.top < smaller.top < larger.bottom:
+        start, end = _overlap_interval(smaller.left, smaller.right, larger.left, larger.right)
+        candidates.append(("top", "horizontal", smaller.top, start, end))
+    if larger.top < smaller.bottom < larger.bottom:
+        start, end = _overlap_interval(smaller.left, smaller.right, larger.left, larger.right)
+        candidates.append(("bottom", "horizontal", smaller.bottom, start, end))
+    return [candidate for candidate in candidates if candidate[4] > candidate[3] + EPSILON]
+
+
+def _edge_facing_center(smaller: Rect, larger: Rect) -> str:
+    dx = larger.cx - smaller.cx
+    dy = larger.cy - smaller.cy
+    if abs(dx) > abs(dy):
+        return "right" if dx > 0 else "left"
+    return "bottom" if dy > 0 else "top"
 
 
 def _wall_for_space_side(
@@ -1378,9 +1764,28 @@ def _wall_for_space_side(
     return _wall_for_boundary(context, "vertical", space.left, space.top, space.bottom, kind=kind)
 
 
+def _walls_for_space_side(
+    context: IntentContext, space: Rect, side: Side, *, kind: str | None = None
+) -> list[tuple[WallSegment, float, float]]:
+    if side == "north":
+        return _walls_for_boundary(context, "horizontal", space.top, space.left, space.right, kind=kind)
+    if side == "south":
+        return _walls_for_boundary(context, "horizontal", space.bottom, space.left, space.right, kind=kind)
+    if side == "east":
+        return _walls_for_boundary(context, "vertical", space.right, space.top, space.bottom, kind=kind)
+    return _walls_for_boundary(context, "vertical", space.left, space.top, space.bottom, kind=kind)
+
+
 def _wall_for_boundary(
     context: IntentContext, orientation: str, const: float, start: float, end: float, *, kind: str | None = None
 ) -> tuple[WallSegment, float, float]:
+    matches = _walls_for_boundary(context, orientation, const, start, end, kind=kind)
+    return max(matches, key=lambda match: (match[2] - match[1], -(match[0].length - (match[2] - match[1]))))
+
+
+def _walls_for_boundary(
+    context: IntentContext, orientation: str, const: float, start: float, end: float, *, kind: str | None = None
+) -> list[tuple[WallSegment, float, float]]:
     if end <= start + EPSILON:
         raise ValueError("Boundary overlap must be positive")
     matches = []
@@ -1401,7 +1806,7 @@ def _wall_for_boundary(
             matches.append((wall, overlap_start, overlap_end))
     if not matches:
         raise ValueError(f"No wall found on {orientation} boundary {const} from {start} to {end}")
-    return max(matches, key=lambda match: (match[2] - match[1], -(match[0].length - (match[2] - match[1]))))
+    return sorted(matches, key=lambda match: (match[1], match[2], match[0].id))
 
 
 def _default_daylight(space_id: str, space_data: dict[str, Any]) -> str:
@@ -1464,9 +1869,12 @@ def _wall_offset_for_side_span(wall: WallSegment, side: Side, start: float, end:
     return wall.at.y - end
 
 
-def _interior_side_for_space_wall(wall: WallSegment, space: Rect) -> str:
+def _interior_side_for_space_wall(
+    wall: WallSegment, space: Rect, offset: float | None = None, length: float | None = None
+) -> str:
     normal_x, normal_y = wall.normal
-    test = Point((wall.at.x + wall.end.x) / 2 + normal_x * 0.1, (wall.at.y + wall.end.y) / 2 + normal_y * 0.1)
+    center = wall.point_at((offset or 0) + (length if length is not None else wall.length) / 2)
+    test = Point(center.x + normal_x * 0.1, center.y + normal_y * 0.1)
     return "left" if space.contains_point(test) else "right"
 
 

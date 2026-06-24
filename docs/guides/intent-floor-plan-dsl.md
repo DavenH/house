@@ -53,6 +53,26 @@ levels:
 
 This compiles into an exterior perimeter, two semantic zones, labels, a shared partition wall, and a centered door in that partition.
 
+## Shared Defaults
+
+Intent plans can import shared YAML defaults before applying local overrides:
+
+```yaml
+type: intent_plan
+imports:
+  - shared-structural.yaml
+plan: compact-study
+roof:
+  eave_margin: 1.5
+structural:
+  bearing:
+    point_loads: []
+```
+
+Imports are resolved relative to the importing YAML file. Multiple imports are applied in order. Nested mappings deep-merge, while lists and scalar values are replaced by the later file. Use shared files for global assumptions such as `compass`, `story`, `roof.pitch`, `costing`, `catalog`, `structural.materials`, `structural.design_loads`, and `structural.rafters`. Keep house-specific geometry, datums, spaces, masses, foundations, stairs, and configured load locations in the leaf plan.
+
+The Ridgestone variants currently import `shared-structural.yaml`, which itself imports `shared-costs.yaml`. This keeps estimating assumptions and material prices shared without flattening them into each house variant.
+
 ## Datums
 
 Use datums for all meaningful repeated coordinates:
@@ -262,6 +282,149 @@ features:
 
 The compiler finds the wall on that side of the space and extrudes inward.
 
+Use `wrap` when one authored fixture should hug several sides of a space. The compiler follows every wall segment on the requested sides, so interrupted interior and exterior walls both work:
+
+```yaml
+features:
+  kitchen_counters:
+    kind: counter
+    wrap: {space: kitchen, sides: [west, south, east], depth: 2}
+```
+
+## Foundations
+
+Use top-level `foundations` to generate a concrete-pad drawing from datum-backed mass geometry. Generated foundation levels are appended after authored floor levels, so a plan with `L1`, `L2`, and `L3` will render the pad in the fourth quadrant.
+
+```yaml
+foundations:
+  F1:
+    title: Concrete Pad
+    source_level: L1
+    masses: [shared_body]
+    insulation_margin: 4
+    footing_width: 2
+    pad_rebar_spacing: 2
+    pad_rebar_edge_cover: 0.1667
+```
+
+Fields:
+
+- `source_level`: level whose resolved datums should be used, default `L1`.
+- `masses`: optional mass ids to include; omitted means all masses active on `source_level`.
+- `rect` or `rects`: optional direct rectangle specs instead of masses.
+- `insulation_margin`: shaded insulation margin outside the concrete pad, in feet.
+- `pad_wall_margin`: concrete-pad expansion outside the mass perimeter, defaulting to the exterior wall thickness.
+- `footing_center_offset`: footing path offset outside the mass perimeter, defaulting to half the exterior wall thickness.
+- `footing_width`: rendered footing band width.
+- `pad_rebar_spacing`: cross-hatch rebar spacing.
+- `pad_rebar_edge_cover`: distance rebar terminates before the pad edge; `0.1667` is about 2 inches.
+
+The compiler reuses the same rect-union perimeter strategy as exterior-wall generation, so the pad, footing paths, insulation margin, and rebar move when referenced datums move.
+
+Costing uses `insulation_margin` to estimate the pad insulation apron area as the difference between the insulation-margin perimeter and the concrete pad perimeter.
+
+## Costing
+
+Use top-level `costing` to declare estimating assumptions that are not directly rendered in plan. The cost estimator still falls back to defaults when this block is omitted.
+
+```yaml
+costing:
+  exterior_wall:
+    height_ft: 10
+    icf:
+      block: {length_ft: 4, height_ft: 1.3333}
+      insulation_thickness_in: 2.5
+      concrete_thickness_in: 6
+      waste_percent: 8
+    cladding:
+      type: fieldstone
+      thickness_in: 4
+      waste_percent: 10
+  plumbing:
+    pex_per_wet_space_ft: 60
+  materials:
+    concrete: {label: Concrete, unit: yd3, unit_cost: 220}
+    windows: {label: Windows, unit: sq ft, unit_cost: 70}
+```
+
+Fields:
+
+- `exterior_wall.height_ft`: wall height used for exterior wall area.
+- `icf.block.length_ft` / `icf.block.height_ft`: nominal ICF block face size used to estimate block count.
+- `icf.insulation_thickness_in`: insulation thickness on each side of the ICF sandwich.
+- `icf.concrete_thickness_in`: concrete core thickness used to estimate ICF core concrete volume.
+- `icf.waste_percent`: extra ICF blocks for cuts and waste.
+- `cladding.type`: label for the exterior cladding estimate, such as `brick`, `fieldstone`, or `shingles`.
+- `cladding.thickness_in`: cladding thickness added to the total exterior wall thickness estimate.
+- `cladding.waste_percent`: extra cladding area for cuts and waste.
+- `plumbing.pex_per_wet_space_ft`: first-pass PEX allowance for each inferred wet space.
+- `materials`: unit-cost table used by the editor Costs pane. It is keyed by material id; each row has `label`, `unit`, and `unit_cost`.
+
+Interior doors are estimated from room-to-room `connections` and interior-wall `openings` whose `kind` is omitted or set to `door`. `open`, `arch`, and `window` entries are not counted as interior doors.
+
+Shared defaults can be layered with imports:
+
+```yaml
+type: intent_plan_defaults
+imports:
+  - shared-costs.yaml
+roof:
+  pitch: '8:12'
+costing:
+  exterior_wall:
+    cladding: {type: brick, thickness_in: 3.5}
+```
+
+The Materials tab writes unit-cost edits back to the shared costs YAML rather than marking the active house plan dirty.
+
+## Structural Preparation
+
+Use top-level `structural` to describe assumptions and load-path candidates before doing code-level structural calculations. This block is intended to prepare engineer-facing static load work; it is not a replacement for stamped design.
+
+```yaml
+structural:
+  materials:
+    concrete_slab: {density_pcf: 150}
+    icf_concrete: {density_pcf: 150}
+    fieldstone_veneer: {dead_load_psf: 45}
+    brick_masonry: {density_pcf: 120}
+    roof_assembly: {dead_load_psf: 15}
+    timber_roof_framing: {dead_load_psf: 4}
+    floor_assembly: {dead_load_psf: 12}
+    interior_partition: {dead_load_psf: 8}
+  design_loads:
+    floor_live_psf: 40
+    bedroom_live_psf: 30
+    roof_dead_psf: 15
+    roof_snow_psf: null
+    wind_psf: null
+    soil_bearing_psf: null
+  rafters:
+    spacing_in: 16
+    purchase_length_threshold_ft: 16
+  bearing:
+    point_loads:
+      - {id: hearth_chimney, kind: masonry_mass, level: L1, at: [43, 17], size: [6, 2], height_ft: 20, material: brick_masonry}
+    line_loads:
+      - {id: tower_brick_walls, kind: masonry_perimeter, level: L1, space: tower_closet, height_ft: 30, wall_thickness_in: 8, material: brick_masonry}
+    slab_zones:
+      - {id: hearth_pad, level: L1, at: [43, 17], size: [6, 2], reason: masonry hearth/chimney bearing}
+      - {id: tower_pad, level: L1, space: tower_closet, reason: masonry tower bearing}
+```
+
+Fields:
+
+- `materials.*.density_pcf`: material density in pounds per cubic foot for volume-based load estimates.
+- `materials.*.dead_load_psf`: dead load in pounds per square foot for area-based assemblies.
+- `design_loads`: project assumptions and missing code/site inputs. Leave values as `null` until confirmed from site/code data.
+- `rafters.spacing_in`: assumed rafter spacing for early count and length estimates.
+- `rafters.purchase_length_threshold_ft`: flags rafter lengths that likely need purchased lumber instead of milled stock.
+- `bearing.point_loads`: concentrated masonry or post loads that should map to local slab/footing reinforcement.
+- `bearing.line_loads`: continuous loads such as masonry tower walls.
+- `bearing.slab_zones`: named zones expected to need local slab or grade-beam attention.
+
+The editor-side structural estimator currently derives configured masonry point/line loads and rafter counts/lengths from this block. Snow, wind, seismic, and soil-bearing values remain explicit missing inputs until supplied.
+
 ## Validation
 
 Strict validation is opt-in per level:
@@ -328,7 +491,5 @@ ruff check src tests
 
 ## Current Example Files
 
-- `artifacts/floorplans/ridgestone-intent.yaml`
-- `artifacts/floorplans/ridgestone-intent-studio-wing.yaml`
-- `artifacts/floorplans/ridgestone-intent-upper-alt.yaml`
-- `artifacts/floorplans/fieldstone-manor-intent.yaml`
+- `artifacts/floorplans/master-south.yaml`
+- `artifacts/floorplans/studio-wing.yaml`

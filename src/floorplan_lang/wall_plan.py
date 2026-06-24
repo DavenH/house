@@ -27,6 +27,7 @@ from floorplan_lang.wall_model import (
     Direction,
     Feature,
     FeatureAnchor,
+    FoundationPlan,
     OverlayLine,
     RoofSection,
     Stair,
@@ -150,6 +151,7 @@ def wall_plan_from_dict(data: dict[str, Any]) -> WallPlan:
                     kind=feature_data.get("kind", "feature"),
                     size=_size(feature_data["size"]) if "size" in feature_data else None,
                     at=_point(feature_data["at"]) if "at" in feature_data else None,
+                    polygon=tuple(_point(point) for point in feature_data["polygon"]) if "polygon" in feature_data else None,
                     anchor=_feature_anchor(feature_data["anchor"]) if "anchor" in feature_data else None,
                     extrude=_wall_extrusion(feature_data["extrude"]) if "extrude" in feature_data else None,
                     label=feature_data.get("label"),
@@ -177,6 +179,7 @@ def wall_plan_from_dict(data: dict[str, Any]) -> WallPlan:
                 level.access.append((edge[0], edge[1]))
         level.overlays.extend(_overlay_lines_from_dict(level_data.get("overlays") or {}))
         level.roofs.extend(_roof_sections_from_dict(level_data.get("roofs") or []))
+        level.foundations.extend(_foundations_from_dict(level_data.get("foundations") or []))
         plan.levels[level_id] = level
     for stair_id, stair_data in (data.get("stairs") or {}).items():
         plan.stairs.append(_stair_from_dict(stair_id, stair_data))
@@ -249,6 +252,29 @@ def _roof_sections_from_dict(data: Any) -> list[RoofSection]:
     return roofs
 
 
+def _foundations_from_dict(data: Any) -> list[FoundationPlan]:
+    foundations = []
+    for index, item in enumerate(data or (), start=1):
+        item_data = dict(item)
+        loops = tuple(tuple(_point(point) for point in loop) for loop in item_data.get("body_loops") or ())
+        footing_loops = tuple(tuple(_point(point) for point in loop) for loop in item_data.get("footing_loops") or ())
+        foundations.append(
+            FoundationPlan(
+                id=item_data.get("id", f"foundation_{index}"),
+                body_loops=loops,
+                footing_loops=footing_loops,
+                insulation_margin=float(item_data.get("insulation_margin", item_data.get("margin", 4.0))),
+                footing_width=float(item_data.get("footing_width", 2.0)),
+                footing_rebar_offset=float(item_data.get("footing_rebar_offset", 0.0)),
+                pad_rebar_spacing=float(item_data.get("pad_rebar_spacing", item_data.get("rebar_spacing", 2.0))),
+                pad_rebar_edge_cover=float(
+                    item_data.get("pad_rebar_edge_cover", item_data.get("rebar_edge_cover", 2 / 12))
+                ),
+            )
+        )
+    return foundations
+
+
 def render_wall_plan_svg(
     plan: WallPlan,
     path: str | Path | None = None,
@@ -271,7 +297,6 @@ def render_wall_plan_svg(
     level_origins = _level_layout_origins(level_rows, level_boxes, padding, level_gap_ft, row_gap_ft)
     width = int((total_width_ft + padding * 2) * scale)
     height = int((total_height_ft + padding * 2) * scale)
-    interior_stroke = INTERIOR_WALL_STROKE_FT * scale
     exterior_opening_mask_stroke = (EXTERIOR_WALL_THICKNESS_FT + 0.2) * scale
     interior_opening_mask_stroke = (INTERIOR_WALL_STROKE_FT + 0.15) * scale
     parts = [
@@ -299,6 +324,7 @@ def render_wall_plan_svg(
         )
         if show_grid:
             parts.extend(_render_grid(level_box, level, scale))
+        parts.extend(_render_foundations(level.foundations, level.id, scale))
         parts.extend(_render_roofs(level.roofs, level.id, scale))
         parts.extend(_render_building_fills(level, scale))
         parts.extend(_render_perimeter_dimensions(level, scale))
@@ -436,6 +462,109 @@ def _level_layout_origins(
             x_cursor += level_boxes[level_id].w + level_gap_ft
         y_cursor += row_height + row_gap_ft
     return origins
+
+
+def _render_foundations(foundations: list[FoundationPlan], level_id: str, scale: float) -> list[str]:
+    parts = []
+    for foundation in foundations:
+        body_loops = [list(loop) for loop in foundation.body_loops if len(loop) >= 4]
+        if not body_loops:
+            continue
+        parts.append(
+            f'<g class="foundation" data-fp-kind="foundation" data-fp-layer="foundation" '
+            f'data-fp-level="{escape(level_id)}" data-fp-id="{escape(foundation.id)}">'
+        )
+        parts.extend(_render_foundation_insulation(foundation, body_loops, scale))
+        parts.extend(_render_foundation_pad(body_loops, scale))
+        parts.extend(_render_foundation_footings(foundation, body_loops, scale))
+        parts.extend(_render_foundation_pad_rebar(foundation, body_loops, scale))
+        parts.append("</g>")
+    return parts
+
+
+def _render_foundation_insulation(foundation: FoundationPlan, body_loops: list[list[Point]], scale: float) -> list[str]:
+    parts = []
+    for loop in body_loops:
+        outer = _offset_closed_orthogonal_loop(loop, foundation.insulation_margin)
+        if not outer:
+            continue
+        command = _path_command(outer, scale) + " " + _path_command(list(reversed(loop)), scale)
+        parts.append(f'<path class="foundation-insulation" fill-rule="evenodd" d="{command}" />')
+    return parts
+
+
+def _render_foundation_pad(body_loops: list[list[Point]], scale: float) -> list[str]:
+    return [f'<path class="foundation-pad" d="{_path_command(loop, scale)}" />' for loop in body_loops]
+
+
+def _render_foundation_footings(foundation: FoundationPlan, body_loops: list[list[Point]], scale: float) -> list[str]:
+    parts = []
+    footing_width = foundation.footing_width * scale
+    footing_loops = [list(loop) for loop in foundation.footing_loops] or body_loops
+    for loop in footing_loops:
+        parts.append(
+            f'<path class="foundation-footing" d="{_polyline_command(loop, scale)}" '
+            f'stroke-width="{footing_width:.3f}" />'
+        )
+        rebar_loop = (
+            (_offset_closed_orthogonal_loop(loop, foundation.footing_rebar_offset) or loop)
+            if foundation.footing_rebar_offset
+            else loop
+        )
+        parts.append(f'<path class="foundation-footing-rebar" d="{_polyline_command(rebar_loop, scale)}" />')
+    return parts
+
+
+def _render_foundation_pad_rebar(foundation: FoundationPlan, body_loops: list[list[Point]], scale: float) -> list[str]:
+    spacing = foundation.pad_rebar_spacing
+    if spacing <= EPSILON:
+        return []
+    parts = []
+    for loop in body_loops:
+        clean_loop = loop[:-1] if _same_point(loop[0], loop[-1]) else loop
+        box = bbox_union(Rect(point.x, point.y, 0.001, 0.001) for point in clean_loop)
+        x = ceil(box.left / spacing) * spacing
+        while x <= box.right + EPSILON:
+            for start, end in _foundation_rebar_segments("vertical", x, box.top, box.bottom, loop, foundation.pad_rebar_edge_cover):
+                parts.append(
+                    f'<line class="foundation-rebar" x1="{x * scale:.3f}" y1="{start * scale:.3f}" '
+                    f'x2="{x * scale:.3f}" y2="{end * scale:.3f}" />'
+                )
+            x += spacing
+        y = ceil(box.top / spacing) * spacing
+        while y <= box.bottom + EPSILON:
+            for start, end in _foundation_rebar_segments("horizontal", y, box.left, box.right, loop, foundation.pad_rebar_edge_cover):
+                parts.append(
+                    f'<line class="foundation-rebar" x1="{start * scale:.3f}" y1="{y * scale:.3f}" '
+                    f'x2="{end * scale:.3f}" y2="{y * scale:.3f}" />'
+                )
+            y += spacing
+    return parts
+
+
+def _foundation_rebar_segments(
+    axis: Literal["horizontal", "vertical"],
+    fixed: float,
+    start: float,
+    end: float,
+    loop: list[Point],
+    edge_cover: float,
+) -> list[tuple[float, float]]:
+    breaks = [start, end, *_grid_line_breakpoints(axis, fixed, start, end, loop)]
+    values = _unique_sorted(value for value in breaks if start - EPSILON <= value <= end + EPSILON)
+    segments = []
+    for segment_start, segment_end in zip(values, values[1:]):
+        if segment_end - segment_start <= edge_cover * 2 + EPSILON:
+            continue
+        midpoint = (segment_start + segment_end) / 2
+        point = Point(fixed, midpoint) if axis == "vertical" else Point(midpoint, fixed)
+        if not _point_in_or_on_any_loop(point, [loop]):
+            continue
+        trimmed_start = segment_start + edge_cover
+        trimmed_end = segment_end - edge_cover
+        if trimmed_end > trimmed_start + EPSILON:
+            segments.append((trimmed_start, trimmed_end))
+    return segments
 
 
 def _render_stairs(stairs: list[Stair], level_id: str, scale: float) -> list[str]:
@@ -578,7 +707,7 @@ def _stair_arrow_head(point: Point, previous: Point, scale: float) -> str:
         Point(base.x - px * size * 0.6, base.y - py * size * 0.6),
     ]
     return (
-        f'<polygon class="stair-arrow-head" points="'
+        '<polygon class="stair-arrow-head" points="'
         + " ".join(f"{p.x * scale:.3f},{p.y * scale:.3f}" for p in points)
         + '" />'
     )
@@ -1689,6 +1818,8 @@ def _render_feature_fixture(feature: Feature, box: Rect, level_id: str, scale: f
         return [f'<path class="piano-fixture" {attrs} {_feature_rotation_attr(feature, box, scale)}d="{body}" />']
     if feature.kind == "spiral_stair":
         return _render_spiral_stair_fixture(feature, box, attrs, scale)
+    if feature.polygon is not None:
+        return [f'<path class="fixture" {attrs} d="{_polygon_path(feature.polygon, scale)}" />']
     return [
         f'<rect class="fixture" {attrs} x="{box.x * scale:.3f}" y="{box.y * scale:.3f}" '
         f'width="{box.w * scale:.3f}" height="{box.h * scale:.3f}" '
@@ -1699,6 +1830,8 @@ def _render_feature_fixture(feature: Feature, box: Rect, level_id: str, scale: f
 def _feature_shape_path(feature: Feature, box: Rect, scale: float) -> str:
     if feature.kind == "piano":
         return _piano_path(box, scale)
+    if feature.polygon is not None:
+        return _polygon_path(feature.polygon, scale)
     return _rect_path(box, scale)
 
 
@@ -1833,10 +1966,12 @@ def _validate_level(level: WallLevel, *, strict_features: bool = True) -> list[s
     for feature in level.features:
         if feature.size is not None and (feature.size[0] <= 0 or feature.size[1] <= 0):
             errors.append(f"{level.id}.{feature.id} feature dimensions must be positive")
-        if feature.size is None and feature.extrude is None:
+        if feature.polygon is not None and len(feature.polygon) < 3:
+            errors.append(f"{level.id}.{feature.id} polygon needs at least three points")
+        if feature.size is None and feature.extrude is None and feature.polygon is None:
             errors.append(f"{level.id}.{feature.id} needs size unless extrude is set")
             continue
-        if feature.at is None and feature.anchor is None and feature.extrude is None:
+        if feature.at is None and feature.anchor is None and feature.extrude is None and feature.polygon is None:
             errors.append(f"{level.id}.{feature.id} needs at, anchor, or extrude")
             continue
         if feature.within is not None and feature.within not in zones:
@@ -2024,6 +2159,13 @@ def _rect_covered_by_rects(target: Rect, rects: list[Rect]) -> bool:
 def _level_bbox(level: WallLevel) -> Rect:
     boxes = [wall.bbox for wall in level.walls]
     boxes.extend(_roof_eave_rect(roof) for roof in level.roofs)
+    for foundation in level.foundations:
+        for loop in foundation.body_loops:
+            clean_loop = loop[:-1] if loop and _same_point(loop[0], loop[-1]) else loop
+            if len(clean_loop) < 3:
+                continue
+            body_box = bbox_union(Rect(point.x, point.y, 0.001, 0.001) for point in clean_loop)
+            boxes.append(body_box.padded(foundation.insulation_margin))
     for area in level.areas:
         boxes.append(Rect(area.at.x, area.at.y, 0.001, 0.001))
     for zone in level.zones:
@@ -2031,7 +2173,7 @@ def _level_bbox(level: WallLevel) -> Rect:
     wall_by_id = {wall.id: wall for wall in level.walls}
     for feature in level.features:
         boxes.append(_feature_rect(feature, wall_by_id))
-    return bbox_union(boxes)
+    return bbox_union(boxes) if boxes else Rect(0, 0, 1, 1)
 
 
 def _stair_opening_ids(stairs: list[Stair]) -> set[str]:
@@ -2401,13 +2543,8 @@ def _point_on_segment_local(point: Point, first: Point, second: Point, tolerance
 
 def _render_wall_hit_svg(wall: WallSegment, level: WallLevel, scale: float, openings: list[WallOpening]) -> str:
     orientation = "horizontal" if wall.direction in {"E", "W"} else "vertical" if wall.direction in {"N", "S"} else "angled"
-    fully_open = _wall_is_fully_open(wall, openings)
     render_wall = _render_wall_hit_segment(wall, level)
     end = render_wall.end
-    grip_span = _wall_grip_span(wall, openings)
-    grip_length = grip_span[1] - grip_span[0]
-    grip_start = render_wall.point_at(grip_span[0])
-    grip_end = render_wall.point_at(grip_span[1])
     model_end = wall.end
     model_attrs = (
         f'data-fp-model-x1="{wall.at.x * scale:.3f}" data-fp-model-y1="{wall.at.y * scale:.3f}" '
@@ -2419,14 +2556,6 @@ def _render_wall_hit_svg(wall: WallSegment, level: WallLevel, scale: float, open
         f'data-fp-level="{escape(level.id)}" data-fp-id="{escape(wall.id)}" '
         f'data-fp-orientation="{orientation}" {model_attrs} />',
     ]
-    if orientation != "angled" and not fully_open and grip_length > EPSILON:
-        parts.append(
-            f'<line class="wall-grip-target" x1="{grip_start.x * scale:.3f}" y1="{grip_start.y * scale:.3f}" '
-            f'x2="{grip_end.x * scale:.3f}" y2="{grip_end.y * scale:.3f}" data-fp-kind="wall-grip" '
-            f'data-fp-level="{escape(level.id)}" data-fp-id="{escape(wall.id)}" '
-            f'data-fp-orientation="{orientation}" {model_attrs} />'
-        )
-        parts.extend(_render_wall_grip_dots(render_wall, scale, grip_span))
     return "".join(parts)
 
 
@@ -2444,57 +2573,6 @@ def _render_wall_hit_segment(wall: WallSegment, level: WallLevel) -> WallSegment
         offset=wall.offset,
         to=end if wall.to is not None else None,
     )
-
-
-def _wall_grip_span(wall: WallSegment, openings: list[WallOpening]) -> tuple[float, float]:
-    preferred_length = min(wall.length, 2.25)
-    clear_spans = _clear_wall_spans(wall, openings)
-    if not clear_spans:
-        center = wall.length / 2
-        half = preferred_length / 2
-        return (max(0, center - half), min(wall.length, center + half))
-    center = wall.length / 2
-    span = max(clear_spans, key=lambda item: (item[1] - item[0], -abs(((item[0] + item[1]) / 2) - center)))
-    available = span[1] - span[0]
-    length = min(preferred_length, available)
-    span_center = (span[0] + span[1]) / 2
-    start = max(span[0], min(span_center - length / 2, span[1] - length))
-    return (start, start + length)
-
-
-def _clear_wall_spans(wall: WallSegment, openings: list[WallOpening]) -> list[tuple[float, float]]:
-    blocked = sorted(
-        (max(0, opening.offset), min(wall.length, opening.offset + opening.width))
-        for opening in openings
-        if opening.offset < wall.length and opening.offset + opening.width > 0
-    )
-    spans = []
-    cursor = 0.0
-    min_span = 0.35
-    for start, end in blocked:
-        if start - cursor >= min_span:
-            spans.append((cursor, start))
-        cursor = max(cursor, end)
-    if wall.length - cursor >= min_span:
-        spans.append((cursor, wall.length))
-    return spans
-
-
-def _render_wall_grip_dots(wall: WallSegment, scale: float, grip_span: tuple[float, float]) -> list[str]:
-    count = 3
-    span_length = grip_span[1] - grip_span[0]
-    spacing = min(0.35, span_length / (count + 1))
-    center = (grip_span[0] + grip_span[1]) / 2
-    radius = 0.12 * scale
-    dots = []
-    for index in range(count):
-        offset = center + (index - (count - 1) / 2) * spacing
-        point = wall.point_at(max(0, min(wall.length, offset)))
-        dots.append(
-            f'<circle class="wall-grip-dot" cx="{point.x * scale:.3f}" cy="{point.y * scale:.3f}" '
-            f'r="{radius:.3f}" />'
-        )
-    return dots
 
 
 def _render_exterior_wall_solids(level: WallLevel, scale: float) -> list[str]:
@@ -3113,6 +3191,27 @@ def _rect_path(rect: Rect, scale: float) -> str:
     )
 
 
+def _polygon_path(points: tuple[Point, ...], scale: float) -> str:
+    if not points:
+        return ""
+    commands = [
+        f"{'M' if index == 0 else 'L'} {point.x * scale:.3f} {point.y * scale:.3f}"
+        for index, point in enumerate(points)
+    ]
+    commands.append("Z")
+    return " ".join(commands)
+
+
+def _points_bbox(points: tuple[Point, ...]) -> Rect:
+    x_values = [point.x for point in points]
+    y_values = [point.y for point in points]
+    left = min(x_values)
+    right = max(x_values)
+    top = min(y_values)
+    bottom = max(y_values)
+    return Rect(left, top, right - left, bottom - top)
+
+
 def _clearance_pattern_defs() -> str:
     patterns = []
     for index, color in enumerate(CLEARANCE_PALETTE):
@@ -3313,6 +3412,8 @@ def _rect_attr(rect: Rect, attr: str) -> float:
 
 
 def _feature_rect(feature: Feature, walls: dict[str, WallSegment]) -> Rect:
+    if feature.polygon is not None:
+        return _points_bbox(feature.polygon)
     if feature.extrude is not None:
         return _extrusion_rect(feature.extrude, walls)
     if feature.size is None:

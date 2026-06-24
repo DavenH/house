@@ -6,7 +6,7 @@ export function normalizeSvgKind(kind: string): SelectionKind {
   if (kind === "feature-clearance") {
     return "feature";
   }
-  if (kind === "wall-select" || kind === "wall-grip") {
+  if (kind === "wall-select") {
     return "wall";
   }
   if (["space", "feature", "opening", "wall", "stair", "overlay", "roof", "level"].includes(kind)) {
