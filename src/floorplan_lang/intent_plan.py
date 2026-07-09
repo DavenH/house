@@ -1196,11 +1196,14 @@ def _compile_openings(openings: list[dict[str, Any]], context: IntentContext) ->
                 offset = _opening_offset(wall, start, end, width, data.get("position", "center"))
             wall_id = wall.id
         width = float(data["width"]) if "width" in data else 0
-        if kind in {"open", "arch"} and wall_id in context.walls:
+        if wall_id in context.walls:
             wall = context.walls[wall_id]
-            offset = max(0, min(float(offset or 0), wall.length))
-            available = max(wall.length - offset, 0)
-            width = available if "width" not in data else min(width, available)
+            if kind in {"open", "arch"} and "width" not in data:
+                offset = max(0, min(float(offset or 0), wall.length))
+                width = max(wall.length - offset, 0)
+            else:
+                width = min(width, wall.length)
+                offset = max(0, min(float(offset or 0), max(wall.length - width, 0)))
         compiled.append(
             WallOpening(
                 id=data.get("id", f"opening_{index}"),

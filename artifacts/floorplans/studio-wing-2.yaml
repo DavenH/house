@@ -137,7 +137,7 @@ levels:
       - {id: great_room_window, width: 8, kind: window, offset: 21.5, space: great_room, side: north}
       - {id: great_room_south_window, width: 6, kind: window, offset: 1.75, space: great_room, side: east}
       - {id: kitchen_window, space: kitchen, side: south, width: 8, kind: window}
-      - {id: office_window, space: office_studio, side: south, width: 7, kind: window}
+      - {id: office_window, space: office_studio, side: south, width: 8, kind: window}
       - {id: dining_window, space: dining, side: east, width: 5, kind: window}
       - {id: library_piano_south_window, offset: 2.5, width: 3, kind: window, space: library, side: south}
       - {id: studio_west_window, width: 2, kind: window, offset: 0.5, space: office_studio, side: west}
@@ -203,7 +203,7 @@ levels:
       - {id: laundry_hall_view_window, space: upper_hall, side: south, width: 5, kind: window}
       - {id: lounge_window, width: 8, kind: window, offset: 4, wall: exterior_6}
       - {id: lounge_south_window, wall: exterior_14, offset: 16.5, width: 8, kind: window}
-      - {id: gym_window, space: gym, side: south, width: 7, kind: window}
+      - {id: gym_window, space: gym, side: south, width: 8, kind: window}
       - {id: master_gym_borrowed_light, wall: master_bedroom__gym_wall, offset: 0.75, width: 5, kind: window}
       - {id: upper_landing__lounge_wall_open, wall: upper_landing__lounge_wall, offset: 0, width: 6, kind: open}
       - {id: exterior_4_window, kind: window, width: 1, offset: 3.5, space: tower, side: south}

@@ -303,6 +303,13 @@
     updateOpeningAt(index, field, Number.isNaN(numberValue) ? undefined : numberValue);
   }
 
+  function updateSelectedOpeningWall(value: string) {
+    const index = selected.index ?? 0;
+    updateOpeningAt(index, "wall", value);
+    updateOpeningAt(index, "space", undefined);
+    updateOpeningAt(index, "side", undefined);
+  }
+
   function removeOpeningAt(index: number) {
     const next = openings.slice();
     next.splice(index, 1);
@@ -1068,21 +1075,13 @@
           <option value="arch">arch</option>
           <option value="open">open</option>
         </select>
-        <div class="field-label">Space</div>
+        <div class="field-label">Wall</div>
         <input
-          value={selectedObject.space ?? ""}
-          on:input={(event) => updateField(["levels", selected.level, "openings", selected.index ?? 0, "space"], event.currentTarget.value)}
+          value={selectedObject.wall ?? ""}
+          on:input={(event) => updateSelectedOpeningWall(event.currentTarget.value)}
         />
-        <div class="field-label">Side</div>
-        <select
-          value={selectedObject.side ?? "north"}
-          on:change={(event) => updateField(["levels", selected.level, "openings", selected.index ?? 0, "side"], event.currentTarget.value)}
-        >
-          <option value="north">north</option>
-          <option value="east">east</option>
-          <option value="south">south</option>
-          <option value="west">west</option>
-        </select>
+        <div class="field-label">Offset</div>
+        <input type="number" step="0.5" value={selectedObject.offset ?? 0} on:input={(event) => updateNumber(["levels", selected.level, "openings", selected.index ?? 0, "offset"], event.currentTarget.value)} />
         <div class="field-label">Width</div>
         <input type="number" step="0.5" value={selectedObject.width ?? 3} on:input={(event) => updateNumber(["levels", selected.level, "openings", selected.index ?? 0, "width"], event.currentTarget.value)} />
       {:else if selected.kind === "connection" && connection}

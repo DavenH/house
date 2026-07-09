@@ -59,7 +59,7 @@ export function moveOpening(data: AnyRecord, openingDrag: OpeningDrag, offset: n
   }
   opening.offset = offset;
   delete opening.position;
-  if (openingDrag.source === "opening" && !openingDrag.preserveSpaceSide) {
+  if (openingDrag.source === "opening") {
     opening.wall = openingDrag.wall;
     delete opening.space;
     delete opening.side;

@@ -190,7 +190,7 @@ describe("space edge editing", () => {
 });
 
 describe("moveOpening", () => {
-  it("preserves space-side openings instead of rewriting them to generated wall ids", () => {
+  it("rewrites explicit space-side openings to wall-bound openings when dragged", () => {
     const data: AnyRecord = {
       levels: {
         L1: {
@@ -221,8 +221,7 @@ describe("moveOpening", () => {
 
     expect(data.levels.L1.openings[0]).toEqual({
       id: "bath_window",
-      space: "bathroom",
-      side: "north",
+      wall: "exterior_5",
       offset: 4,
       width: 5,
       kind: "window"

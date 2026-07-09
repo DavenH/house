@@ -72,6 +72,24 @@ class WallPlan:
             raise ValueError("Invalid wall plan:\n- " + "\n- ".join(errors))
 
 
+@dataclass(frozen=True)
+class ElevationView:
+    side: str
+    title: str
+    axis: str
+    span_start: float
+    span_end: float
+    max_height: float
+
+    @property
+    def width(self) -> float:
+        return max(self.span_end - self.span_start, 1)
+
+    @property
+    def height(self) -> float:
+        return max(self.max_height, 1)
+
+
 def load_wall_plan_yaml(path: str | Path) -> WallPlan:
     plan = wall_plan_from_dict(yaml.safe_load(Path(path).read_text()))
     plan.require_valid()
@@ -284,17 +302,36 @@ def render_wall_plan_svg(
 ) -> str:
     plan.require_valid(strict_features=False)
     scale = plan.scale
-    level_boxes = {level_id: _level_bbox(level).padded(padding) for level_id, level in plan.levels.items()}
+    level_order = _level_render_order(plan)
+    level_boxes = {level_id: _level_bbox(plan.levels[level_id]).padded(padding) for level_id in level_order}
     level_gap_ft = 7.5
     row_gap_ft = 7.5
-    level_rows = _level_layout_rows(list(plan.levels))
-    row_widths = [
-        sum(level_boxes[level_id].w for level_id in row) + max(0, len(row) - 1) * level_gap_ft for row in level_rows
-    ]
+    level_rows = _level_layout_rows(level_order)
+    elevation_views = _elevation_views(plan)
+    elevation_padding_ft = 2.0
+    elevation_boxes = {
+        view.side: Rect(0, 0, view.width + elevation_padding_ft * 2, view.height + elevation_padding_ft * 2.8)
+        for view in elevation_views
+    }
+    row_widths = [sum(level_boxes[level_id].w for level_id in row) + max(0, len(row) - 1) * level_gap_ft for row in level_rows]
     row_heights = [max(level_boxes[level_id].h for level_id in row) for row in level_rows]
-    total_width_ft = max(row_widths)
-    total_height_ft = sum(row_heights) + max(0, len(row_heights) - 1) * row_gap_ft
+    elevation_row_height = max((elevation_boxes[view.side].h for view in elevation_views), default=0)
+    top_down_height_ft = sum(row_heights) + max(0, len(row_heights) - 1) * row_gap_ft
     level_origins = _level_layout_origins(level_rows, level_boxes, padding, level_gap_ft, row_gap_ft)
+    front_anchor = _front_elevation_anchor(level_order, level_boxes, level_origins, elevation_views, elevation_padding_ft)
+    elevation_origins = _elevation_layout_origins(
+        elevation_views,
+        elevation_boxes,
+        front_anchor if front_anchor is not None else padding,
+        padding + top_down_height_ft + row_gap_ft,
+        level_gap_ft,
+    )
+    elevation_right = max(
+        (elevation_origins[view.side][0] + elevation_boxes[view.side].w for view in elevation_views),
+        default=padding,
+    )
+    total_width_ft = max([*row_widths, elevation_right - padding])
+    total_height_ft = top_down_height_ft + (row_gap_ft + elevation_row_height if elevation_views else 0)
     width = int((total_width_ft + padding * 2) * scale)
     height = int((total_height_ft + padding * 2) * scale)
     exterior_opening_mask_stroke = (EXTERIOR_WALL_THICKNESS_FT + 0.2) * scale
@@ -313,7 +350,8 @@ def render_wall_plan_svg(
         )
     )
     parts.extend(_render_compass(plan.compass, scale, _compass_center(plan.compass, level_boxes, padding, level_gap_ft, scale)))
-    for level_id, level in plan.levels.items():
+    for level_id in level_order:
+        level = plan.levels[level_id]
         level_box = level_boxes[level_id]
         level_origin = level_origins[level_id]
         x_offset = (level_origin[0] - level_box.x) * scale
@@ -431,6 +469,14 @@ def render_wall_plan_svg(
             f"{escape((level.title or level.id).upper())}</text>"
         )
         parts.append("</g>")
+    for view in elevation_views:
+        origin = elevation_origins[view.side]
+        parts.append(
+            f'<g class="elevation-view" data-fp-kind="elevation" data-fp-id="{escape(view.side)}" '
+            f'transform="translate({origin[0] * scale:.3f} {origin[1] * scale:.3f})">'
+        )
+        parts.extend(_render_elevation_view(plan, view, elevation_padding_ft, scale))
+        parts.append("</g>")
     parts.append("</svg>")
     svg = "\n".join(parts) + "\n"
     if path is not None:
@@ -440,9 +486,17 @@ def render_wall_plan_svg(
 
 
 def _level_layout_rows(level_ids: list[str]) -> list[list[str]]:
-    if len(level_ids) <= 2:
-        return [level_ids]
-    return [level_ids[:2], level_ids[2:]]
+    return [level_ids]
+
+
+def _level_render_order(plan: WallPlan) -> list[str]:
+    foundation_levels = [
+        level_id
+        for level_id, level in plan.levels.items()
+        if level_id.upper().startswith("F") or level.foundations
+    ]
+    other_levels = [level_id for level_id in plan.levels if level_id not in foundation_levels]
+    return [*foundation_levels, *other_levels]
 
 
 def _level_layout_origins(
@@ -462,6 +516,1022 @@ def _level_layout_origins(
             x_cursor += level_boxes[level_id].w + level_gap_ft
         y_cursor += row_height + row_gap_ft
     return origins
+
+
+def _front_elevation_anchor(
+    level_order: list[str],
+    level_boxes: dict[str, Rect],
+    level_origins: dict[str, tuple[float, float]],
+    views: list[ElevationView],
+    elevation_padding: float,
+) -> float | None:
+    south = next((view for view in views if view.side == "south"), None)
+    if south is None:
+        return None
+    anchor_level = next((level_id for level_id in level_order if not level_id.upper().startswith("F")), None)
+    if anchor_level is None:
+        return None
+    level_box = level_boxes[anchor_level]
+    level_origin = level_origins[anchor_level]
+    return level_origin[0] - level_box.x - elevation_padding + south.span_start
+
+
+def _elevation_layout_origins(
+    views: list[ElevationView],
+    boxes: dict[str, Rect],
+    x_start: float,
+    y_start: float,
+    gap: float,
+) -> dict[str, tuple[float, float]]:
+    origins = {}
+    x_cursor = x_start
+    for view in views:
+        origins[view.side] = (x_cursor, y_start)
+        x_cursor += boxes[view.side].w + gap
+    return origins
+
+
+def _elevation_views(plan: WallPlan) -> list[ElevationView]:
+    if not _unique_roofs(plan):
+        return []
+    boxes = [_level_bbox(level) for level in plan.levels.values() if level.walls or level.roofs]
+    if not boxes:
+        return []
+    plan_box = bbox_union(boxes).padded(EXTERIOR_WALL_THICKNESS_FT)
+    max_height = max(
+        [
+            _plan_story_count(plan) * _plan_floor_to_floor(plan),
+            *(_roof_peak_height(roof) for level in plan.levels.values() for roof in level.roofs),
+            *(_tower_cap_top(roof) for level in plan.levels.values() for roof in level.roofs if _is_tower_roof(roof)),
+        ]
+    )
+    return [
+        ElevationView("south", "SOUTH / FRONT ELEVATION", "x", plan_box.left, plan_box.right, max_height),
+        ElevationView("east", "EAST ELEVATION", "y", plan_box.top, plan_box.bottom, max_height),
+        ElevationView("north", "NORTH ELEVATION", "x", plan_box.left, plan_box.right, max_height),
+        ElevationView("west", "WEST ELEVATION", "y", plan_box.top, plan_box.bottom, max_height),
+    ]
+
+
+def _render_elevation_view(plan: WallPlan, view: ElevationView, padding: float, scale: float) -> list[str]:
+    baseline = padding + view.height
+
+    def sx(value: float) -> float:
+        return (padding + value - view.span_start) * scale
+
+    def sy(height: float) -> float:
+        return (baseline - height) * scale
+
+    parts = [
+        f'<text class="elevation-label" x="{(padding + view.width / 2) * scale:.3f}" '
+        f'y="{(baseline + 1.35) * scale:.3f}">{escape(view.title)}</text>',
+        f'<line class="elevation-ground" x1="{padding * scale:.3f}" y1="{baseline * scale:.3f}" '
+        f'x2="{(padding + view.width) * scale:.3f}" y2="{baseline * scale:.3f}" />',
+    ]
+    items: list[dict[str, object]] = []
+    for level_index, (level_id, level) in enumerate(_elevation_levels(plan)):
+        base_height = level_index * _plan_floor_to_floor(plan)
+        items.extend(_elevation_wall_items(plan, level, level_id, view, sx, sy, base_height))
+    roofs = _unique_roofs(plan)
+    items.extend(_elevation_roof_items(roofs, view, sx, sy))
+    for level_index, (level_id, level) in enumerate(_elevation_levels(plan)):
+        base_height = level_index * _plan_floor_to_floor(plan)
+        items.extend(_elevation_window_items(level, level_id, roofs, view, sx, sy, base_height))
+    for item in sorted(items, key=lambda item: (float(item["depth"]), int(item["priority"]))):
+        item_svg = item["svg"]
+        if isinstance(item_svg, list):
+            parts.extend(item_svg)
+        elif isinstance(item_svg, str):
+            parts.append(item_svg)
+    for roof in roofs:
+        if _is_tower_roof(roof):
+            parts.extend(_render_elevation_tower_lantern(roof, view, sx, sy))
+    parts.extend(_render_elevation_dimensions(view, padding, baseline, scale))
+    return parts
+
+
+def _elevation_levels(plan: WallPlan) -> list[tuple[str, WallLevel]]:
+    return [
+        (level_id, level)
+        for level_id, level in plan.levels.items()
+        if not level_id.upper().startswith("F") and level.walls
+    ]
+
+
+def _plan_story_count(plan: WallPlan) -> int:
+    return max(1, len(_elevation_levels(plan)))
+
+
+def _plan_floor_to_floor(plan: WallPlan) -> float:
+    for stair in plan.stairs:
+        if stair.floor_to_floor > EPSILON:
+            return stair.floor_to_floor
+    return 10.0
+
+
+def _unique_roofs(plan: WallPlan) -> list[RoofSection]:
+    roofs: dict[str, RoofSection] = {}
+    for level in plan.levels.values():
+        for roof in level.roofs:
+            roofs[roof.id] = roof
+    return list(roofs.values())
+
+
+def _render_elevation_walls(
+    plan: WallPlan,
+    level: WallLevel,
+    level_id: str,
+    view: ElevationView,
+    sx: Any,
+    sy: Any,
+    base_height: float,
+) -> list[str]:
+    return [
+        svg
+        for item in _elevation_wall_items(plan, level, level_id, view, sx, sy, base_height)
+        for svg in item["svg"]
+        if isinstance(item["svg"], list)
+    ]
+
+
+def _elevation_wall_items(
+    plan: WallPlan,
+    level: WallLevel,
+    level_id: str,
+    view: ElevationView,
+    sx: Any,
+    sy: Any,
+    base_height: float,
+) -> list[dict[str, object]]:
+    items: list[dict[str, object]] = []
+    floor_to_floor = _plan_floor_to_floor(plan)
+    for wall in level.walls:
+        if wall.kind != "exterior" or _wall_elevation_side(wall) != view.side:
+            continue
+        span_start, span_end = _elevation_wall_span(wall, view)
+        if span_end <= span_start + EPSILON:
+            continue
+        top_height = _wall_elevation_top(plan, wall, level_id, base_height, floor_to_floor)
+        if top_height <= base_height + EPSILON:
+            continue
+        items.append(
+            {
+                "depth": _elevation_depth(wall.point_at(wall.length / 2), view),
+                "priority": 20,
+                "svg": [
+                    f'<rect class="elevation-wall" data-fp-level="{escape(level_id)}" data-fp-id="{escape(wall.id)}" '
+                    f'x="{sx(span_start):.3f}" y="{sy(top_height):.3f}" '
+                    f'width="{(span_end - span_start) * plan.scale:.3f}" height="{(top_height - base_height) * plan.scale:.3f}" />'
+                ],
+            }
+        )
+    return items
+
+
+def _wall_elevation_top(
+    plan: WallPlan,
+    wall: WallSegment,
+    level_id: str,
+    base_height: float,
+    floor_to_floor: float,
+) -> float:
+    default_top = base_height + floor_to_floor
+    side = _wall_elevation_side(wall)
+    midpoint = wall.point_at(wall.length / 2)
+    roof_tops = [
+        roof.eave_height
+        for roof in _unique_roofs(plan)
+        if roof.eave_height is not None
+        and side in roof.eave_sides
+        and _roof_rect_contains_side_point(roof.rect, side, midpoint)
+        and roof.eave_height > base_height + EPSILON
+    ]
+    if roof_tops:
+        return min(default_top, max(roof_tops))
+    if level_id.upper() == "L3":
+        tower_roofs = [
+            roof.eave_height
+            for roof in _unique_roofs(plan)
+            if _is_tower_roof(roof)
+            and roof.eave_height is not None
+            and _point_in_rect_projection(midpoint, roof.rect)
+            and roof.eave_height > base_height + EPSILON
+        ]
+        if tower_roofs:
+            return max(tower_roofs)
+    return default_top
+
+
+def _roof_rect_contains_side_point(rect: Rect, side: str | None, point: Point) -> bool:
+    if side == "north":
+        return abs(point.y - rect.top) <= EPSILON and rect.left - EPSILON <= point.x <= rect.right + EPSILON
+    if side == "south":
+        return abs(point.y - rect.bottom) <= EPSILON and rect.left - EPSILON <= point.x <= rect.right + EPSILON
+    if side == "east":
+        return abs(point.x - rect.right) <= EPSILON and rect.top - EPSILON <= point.y <= rect.bottom + EPSILON
+    if side == "west":
+        return abs(point.x - rect.left) <= EPSILON and rect.top - EPSILON <= point.y <= rect.bottom + EPSILON
+    return False
+
+
+def _point_in_rect_projection(point: Point, rect: Rect) -> bool:
+    return rect.left - EPSILON <= point.x <= rect.right + EPSILON and rect.top - EPSILON <= point.y <= rect.bottom + EPSILON
+
+
+def _elevation_roof_items(roofs: list[RoofSection], view: ElevationView, sx: Any, sy: Any) -> list[dict[str, object]]:
+    items: list[dict[str, object]] = []
+    for roof in sorted(roofs, key=_roof_render_order):
+        if _roof_open_gable_end_for_view(roof, view.side) is not None:
+            items.extend(_elevation_open_gable_items(roof, view, sx, sy, roofs))
+            continue
+        for face in _roof_faces(roof):
+            if not _roof_face_visible_from_elevation(face, view):
+                continue
+            depth = _elevation_face_depth(face, view)
+            raw_projected = _project_roof_face_to_elevation(face, view)
+            for projected in _elevation_visible_roof_face_projections(roof, face, roofs, view):
+                if len(projected) < 2:
+                    continue
+                if _elevation_projected_area(projected) > 0.01:
+                    items.append(
+                        {
+                            "depth": depth,
+                            "priority": 10,
+                            "svg": _elevation_projected_path(projected, sx, sy, "elevation-roof"),
+                        }
+                    )
+                    for edge in _elevation_visible_face_edge_lines(projected, raw_projected):
+                        items.append(
+                            {
+                                "depth": depth,
+                                "priority": 11,
+                                "svg": _elevation_projected_polyline(edge, sx, sy, "elevation-roof-line"),
+                            }
+                        )
+                else:
+                    strip = _elevation_projected_strip(projected, sx, sy, "elevation-roof-edge-fill")
+                    if strip is not None:
+                        items.append({"depth": depth, "priority": 12, "svg": strip})
+    return items
+
+
+def _elevation_visible_roof_face_projections(
+    roof: RoofSection,
+    face: dict[str, object],
+    roofs: list[RoofSection],
+    view: ElevationView,
+) -> list[list[tuple[float, float]]]:
+    projected = _project_roof_face_to_elevation(face, view)
+    if _elevation_projected_area(projected) <= 0.01:
+        return [projected]
+
+    pieces = [[Point(horizontal, height) for horizontal, height in projected]]
+    for occluder in _elevation_roof_occluder_polygons(roof, face, roofs, view):
+        next_pieces: list[list[Point]] = []
+        for piece in pieces:
+            next_pieces.extend(_subtract_convex_polygon(piece, occluder))
+        pieces = [piece for piece in next_pieces if _polygon_area_abs(piece) > 0.01]
+        if not pieces:
+            break
+    return [[(point.x, point.y) for point in piece] for piece in pieces]
+
+
+def _elevation_visible_face_edge_lines(
+    projected: list[tuple[float, float]],
+    raw_projected: list[tuple[float, float]],
+) -> list[list[tuple[float, float]]]:
+    if len(projected) < 2 or len(raw_projected) < 2:
+        return []
+    lines: list[list[tuple[float, float]]] = []
+    raw_edges = list(zip(raw_projected, [*raw_projected[1:], raw_projected[0]]))
+    for start, end in zip(projected, [*projected[1:], projected[0]]):
+        if _elevation_segment_length(start, end) <= 0.05:
+            continue
+        if any(_elevation_segment_lies_on_segment(start, end, raw_start, raw_end) for raw_start, raw_end in raw_edges):
+            lines.append([start, end])
+    return lines
+
+
+def _elevation_segment_lies_on_segment(
+    start: tuple[float, float],
+    end: tuple[float, float],
+    raw_start: tuple[float, float],
+    raw_end: tuple[float, float],
+) -> bool:
+    return _elevation_point_on_segment(start, raw_start, raw_end) and _elevation_point_on_segment(end, raw_start, raw_end)
+
+
+def _elevation_point_on_segment(
+    point: tuple[float, float],
+    start: tuple[float, float],
+    end: tuple[float, float],
+) -> bool:
+    px, py = point
+    sx, sy = start
+    ex, ey = end
+    dx = ex - sx
+    dy = ey - sy
+    length = (dx * dx + dy * dy) ** 0.5
+    if length <= EPSILON:
+        return _elevation_segment_length(point, start) <= 1e-5
+    cross = abs((px - sx) * dy - (py - sy) * dx) / length
+    if cross > 1e-4:
+        return False
+    dot = (px - sx) * dx + (py - sy) * dy
+    return -1e-4 <= dot <= dx * dx + dy * dy + 1e-4
+
+
+def _elevation_segment_length(
+    start: tuple[float, float],
+    end: tuple[float, float],
+) -> float:
+    return ((start[0] - end[0]) ** 2 + (start[1] - end[1]) ** 2) ** 0.5
+
+
+def _elevation_roof_occluder_polygons(
+    roof: RoofSection,
+    face: dict[str, object],
+    roofs: list[RoofSection],
+    view: ElevationView,
+) -> list[list[Point]]:
+    roof_eave_height = roof.eave_height or 0.0
+    face_depth = _elevation_face_depth(face, view)
+    occluders: list[list[Point]] = []
+    for other in roofs:
+        if other.id == roof.id:
+            continue
+        if (other.eave_height or 0.0) + 1e-5 < roof_eave_height:
+            continue
+        if _elevation_roof_occlusion_depth(other, view) + 1e-5 < face_depth:
+            continue
+        occluders.extend(_elevation_roof_volume_projection_polygons(other, view))
+    return occluders
+
+
+def _elevation_roof_occlusion_depth(roof: RoofSection, view: ElevationView) -> float:
+    rect = _roof_wall_eave_rect(roof)
+    return _elevation_depth(Point(rect.cx, rect.cy), view)
+
+
+def _elevation_roof_volume_projection_polygons(roof: RoofSection, view: ElevationView) -> list[list[Point]]:
+    rect = _roof_wall_eave_rect(roof)
+    if view.axis == "x":
+        span_start, span_end = sorted(
+            (
+                _elevation_orient_projected_value(rect.left, view),
+                _elevation_orient_projected_value(rect.right, view),
+            )
+        )
+    else:
+        span_start, span_end = sorted(
+            (
+                _elevation_orient_projected_value(rect.top, view),
+                _elevation_orient_projected_value(rect.bottom, view),
+            )
+        )
+    eave_height = roof.eave_height or 0.0
+    polygons: list[list[Point]] = []
+    if span_end > span_start + EPSILON and eave_height > EPSILON:
+        polygons.append(
+            [
+                Point(span_start, 0.0),
+                Point(span_end, 0.0),
+                Point(span_end, eave_height),
+                Point(span_start, eave_height),
+            ]
+        )
+
+    wall_points = _orient_elevation_projected_points(_open_gable_wall_points(roof, view.side), view)
+    if wall_points is not None and len(wall_points) >= 3:
+        polygons.append([Point(horizontal, height) for horizontal, height in wall_points])
+
+    for face in _roof_faces(roof):
+        if not _roof_face_visible_from_elevation(face, view):
+            continue
+        projected = _project_roof_face_to_elevation(face, view)
+        if _elevation_projected_area(projected) > 0.01:
+            polygons.append([Point(horizontal, height) for horizontal, height in projected])
+    return polygons
+
+
+def _elevation_open_gable_clipped_endpoint_indices(
+    roof: RoofSection,
+    roofs: list[RoofSection],
+    view: ElevationView,
+) -> set[int]:
+    wall_points = _orient_elevation_projected_points(_open_gable_wall_points(roof, view.side), view)
+    edge_points = _orient_elevation_projected_points(_open_gable_edge_points(roof, view.side), view)
+    if wall_points is None or edge_points is None or len(wall_points) < 3 or len(edge_points) < 3:
+        return set()
+    clipped: set[int] = set()
+    intervals = [
+        interval
+        for other in roofs
+        if other.id != roof.id
+        for interval in _elevation_roof_wall_intervals(other, view)
+    ]
+    for endpoint_index in (0, 2):
+        wall_horizontal = wall_points[endpoint_index][0]
+        edge_horizontal = edge_points[endpoint_index][0]
+        if abs(edge_horizontal - wall_horizontal) <= EPSILON:
+            continue
+        direction = 1 if edge_horizontal > wall_horizontal else -1
+        probe = wall_horizontal + direction * min(abs(edge_horizontal - wall_horizontal), 0.25)
+        for start, end in intervals:
+            if start - 1e-5 <= probe <= end + 1e-5 and (
+                start - 1e-5 <= wall_horizontal <= end + 1e-5
+                or (direction > 0 and start <= wall_horizontal + 1e-5 <= end + abs(edge_horizontal - wall_horizontal) + 1e-5)
+                or (direction < 0 and start - abs(edge_horizontal - wall_horizontal) - 1e-5 <= wall_horizontal <= end + 1e-5)
+            ):
+                clipped.add(endpoint_index)
+                break
+    return clipped
+
+
+def _elevation_roof_wall_intervals(roof: RoofSection, view: ElevationView) -> list[tuple[float, float]]:
+    rect = _roof_wall_eave_rect(roof)
+    if view.axis == "x":
+        start, end = sorted(
+            (
+                _elevation_orient_projected_value(rect.left, view),
+                _elevation_orient_projected_value(rect.right, view),
+            )
+        )
+    else:
+        start, end = sorted(
+            (
+                _elevation_orient_projected_value(rect.top, view),
+                _elevation_orient_projected_value(rect.bottom, view),
+            )
+        )
+    return [(start, end)] if end > start + EPSILON else []
+
+
+def _roof_face_visible_from_elevation(face: dict[str, object], view: ElevationView) -> bool:
+    plane = face.get("plane")
+    if not isinstance(plane, tuple):
+        return False
+    a, b, _ = plane
+    if abs(a) <= EPSILON and abs(b) <= EPSILON:
+        return True
+    vx, vy = _elevation_view_vector(view)
+    return (-a * vx - b * vy) > 1e-5
+
+
+def _elevation_view_vector(view: ElevationView) -> tuple[float, float]:
+    if view.side == "south":
+        return (0.0, 1.0)
+    if view.side == "north":
+        return (0.0, -1.0)
+    if view.side == "east":
+        return (1.0, 0.0)
+    if view.side == "west":
+        return (-1.0, 0.0)
+    return (0.0, 0.0)
+
+
+def _elevation_open_gable_items(
+    roof: RoofSection,
+    view: ElevationView,
+    sx: Any,
+    sy: Any,
+    roofs: list[RoofSection] | None = None,
+    visible_faces: dict[str, list[dict[str, object]]] | None = None,
+) -> list[dict[str, object]]:
+    wall_points = _orient_elevation_projected_points(_open_gable_wall_points(roof, view.side), view)
+    edge_points = _orient_elevation_projected_points(_open_gable_edge_points(roof, view.side), view)
+    if wall_points is None or edge_points is None:
+        return []
+    depth_point = _open_gable_depth_point(roof, view.side)
+    if depth_point is None:
+        return []
+    depth = _elevation_depth(depth_point, view)
+    clipped_endpoint_indices = _elevation_open_gable_clipped_endpoint_indices(roof, roofs or [], view)
+    edge_fill = _open_gable_roof_thickness_fill(wall_points, edge_points, sx, sy, clipped_endpoint_indices)
+    edge_line = _elevation_projected_polyline(
+        _open_gable_roof_edge_outline(wall_points, edge_points, clipped_endpoint_indices),
+        sx,
+        sy,
+        "elevation-roof-edge",
+    )
+    return [
+        {
+            "depth": depth,
+            "priority": 18,
+            "svg": _elevation_projected_path(wall_points, sx, sy, "elevation-gable-wall"),
+        },
+        {
+            "depth": depth,
+            "priority": 19,
+            "svg": edge_fill,
+        },
+        {
+            "depth": depth,
+            "priority": 36,
+            "svg": edge_line,
+        },
+    ]
+
+
+def _open_gable_roof_thickness_fill(
+    wall_points: list[tuple[float, float]],
+    edge_points: list[tuple[float, float]],
+    sx: Any,
+    sy: Any,
+    clipped_endpoint_indices: set[int] | None = None,
+) -> list[str]:
+    if len(wall_points) < 3 or len(edge_points) < 3:
+        return []
+    del clipped_endpoint_indices
+    left_low, right_low = _open_gable_eave_low_points(wall_points, edge_points)
+    strips = [
+        [left_low, edge_points[0], edge_points[1], wall_points[1], wall_points[0]],
+        [edge_points[1], edge_points[2], right_low, wall_points[2], wall_points[1]],
+    ]
+    return [_elevation_projected_path(strip, sx, sy, "elevation-roof-edge-fill") for strip in strips]
+
+
+def _open_gable_roof_edge_outline(
+    wall_points: list[tuple[float, float]],
+    edge_points: list[tuple[float, float]],
+    clipped_endpoint_indices: set[int] | None = None,
+) -> list[tuple[float, float]]:
+    if len(wall_points) < 3 or len(edge_points) < 3:
+        return edge_points
+    del clipped_endpoint_indices
+    left_low, right_low = _open_gable_eave_low_points(wall_points, edge_points)
+    return _dedupe_elevation_points([left_low, edge_points[0], edge_points[1], edge_points[2], right_low])
+
+
+def _open_gable_eave_low_points(
+    wall_points: list[tuple[float, float]],
+    edge_points: list[tuple[float, float]],
+) -> tuple[tuple[float, float], tuple[float, float]]:
+    return (
+        _open_gable_square_cap_low_point(edge_points[0], wall_points[0], wall_points[1]),
+        _open_gable_square_cap_low_point(edge_points[2], wall_points[2], wall_points[1]),
+    )
+
+
+def _open_gable_square_cap_low_point(
+    edge_eave: tuple[float, float],
+    wall_eave: tuple[float, float],
+    peak: tuple[float, float],
+) -> tuple[float, float]:
+    roof_run = peak[0] - wall_eave[0]
+    if abs(roof_run) <= EPSILON:
+        return wall_eave
+    slope = (peak[1] - wall_eave[1]) / roof_run
+    if abs(slope) <= EPSILON:
+        return (edge_eave[0], wall_eave[1])
+    lower_intercept = wall_eave[1] - slope * wall_eave[0]
+    cap_slope = -1 / slope
+    cap_intercept = edge_eave[1] - cap_slope * edge_eave[0]
+    cap_x = (cap_intercept - lower_intercept) / (slope - cap_slope)
+    cap_y = slope * cap_x + lower_intercept
+    return cap_x, cap_y
+
+
+def _project_roof_face_to_elevation(face: dict[str, object], view: ElevationView) -> list[tuple[float, float]]:
+    points = face.get("points")
+    plane = face.get("plane")
+    if not isinstance(points, list) or not isinstance(plane, tuple):
+        return []
+    projected = [(_elevation_project_point(point, view), _roof_plane_z(plane, point)) for point in points]
+    return _dedupe_elevation_points(projected)
+
+
+def _elevation_face_depth(face: dict[str, object], view: ElevationView) -> float:
+    points = face.get("points")
+    if not isinstance(points, list) or not points:
+        return 0.0
+    return sum(_elevation_depth(point, view) for point in points) / len(points)
+
+
+def _roof_plane_z(plane: tuple[float, float, float], point: Point) -> float:
+    return plane[0] * point.x + plane[1] * point.y + plane[2]
+
+
+def _elevation_projected_path(projected: list[tuple[float, float]], sx: Any, sy: Any, class_name: str) -> str:
+    commands = [
+        f"{'M' if index == 0 else 'L'} {sx(horizontal):.3f} {sy(height):.3f}"
+        for index, (horizontal, height) in enumerate(projected)
+    ]
+    return f'<path class="{class_name}" d="{" ".join(commands)} Z" />'
+
+
+def _elevation_projected_polyline(projected: list[tuple[float, float]], sx: Any, sy: Any, class_name: str) -> str:
+    commands = [
+        f"{'M' if index == 0 else 'L'} {sx(horizontal):.3f} {sy(height):.3f}"
+        for index, (horizontal, height) in enumerate(projected)
+    ]
+    return f'<path class="{class_name}" d="{" ".join(commands)}" />'
+
+
+def _elevation_projected_line(projected: list[tuple[float, float]], sx: Any, sy: Any, class_name: str) -> str | None:
+    unique = _dedupe_elevation_points(projected)
+    if len(unique) < 2:
+        return None
+    first, second = _farthest_elevation_points(unique)
+    if ((first[0] - second[0]) ** 2 + (first[1] - second[1]) ** 2) ** 0.5 <= 0.05:
+        return None
+    return (
+        f'<line class="{class_name}" x1="{sx(first[0]):.3f}" y1="{sy(first[1]):.3f}" '
+        f'x2="{sx(second[0]):.3f}" y2="{sy(second[1]):.3f}" />'
+    )
+
+
+def _elevation_projected_strip(
+    projected: list[tuple[float, float]],
+    sx: Any,
+    sy: Any,
+    class_name: str,
+    thickness: float = 0.42,
+) -> str | None:
+    unique = _dedupe_elevation_points(projected)
+    if len(unique) < 2:
+        return None
+    first, second = _farthest_elevation_points(unique)
+    strip = _elevation_segment_strip(first, second, thickness)
+    if strip is None:
+        return None
+    return _elevation_projected_path(strip, sx, sy, class_name)
+
+
+def _elevation_projected_polyline_strips(
+    projected: list[tuple[float, float]],
+    sx: Any,
+    sy: Any,
+    class_name: str,
+    thickness: float = 0.42,
+) -> list[str]:
+    strips = []
+    for first, second in zip(projected, projected[1:]):
+        strip = _elevation_segment_strip(first, second, thickness)
+        if strip is not None:
+            strips.append(_elevation_projected_path(strip, sx, sy, class_name))
+    return strips
+
+
+def _elevation_segment_strip(
+    first: tuple[float, float],
+    second: tuple[float, float],
+    thickness: float,
+) -> list[tuple[float, float]] | None:
+    dx = second[0] - first[0]
+    dy = second[1] - first[1]
+    length = (dx * dx + dy * dy) ** 0.5
+    if length <= 0.05:
+        return None
+    nx = -dy / length * thickness / 2
+    ny = dx / length * thickness / 2
+    return [
+        (first[0] + nx, first[1] + ny),
+        (second[0] + nx, second[1] + ny),
+        (second[0] - nx, second[1] - ny),
+        (first[0] - nx, first[1] - ny),
+    ]
+
+
+def _elevation_projected_area(projected: list[tuple[float, float]]) -> float:
+    if len(projected) < 3:
+        return 0.0
+    area = 0.0
+    for (x1, y1), (x2, y2) in zip(projected, [*projected[1:], projected[0]]):
+        area += x1 * y2 - x2 * y1
+    return abs(area) / 2
+
+
+def _dedupe_elevation_points(points: list[tuple[float, float]]) -> list[tuple[float, float]]:
+    deduped: list[tuple[float, float]] = []
+    for point in points:
+        if not deduped or abs(point[0] - deduped[-1][0]) > 1e-5 or abs(point[1] - deduped[-1][1]) > 1e-5:
+            deduped.append(point)
+    if len(deduped) > 1 and abs(deduped[0][0] - deduped[-1][0]) <= 1e-5 and abs(deduped[0][1] - deduped[-1][1]) <= 1e-5:
+        deduped.pop()
+    return deduped
+
+
+def _farthest_elevation_points(points: list[tuple[float, float]]) -> tuple[tuple[float, float], tuple[float, float]]:
+    best = (points[0], points[1])
+    best_distance = -1.0
+    for index, first in enumerate(points):
+        for second in points[index + 1 :]:
+            distance = (first[0] - second[0]) ** 2 + (first[1] - second[1]) ** 2
+            if distance > best_distance:
+                best = (first, second)
+                best_distance = distance
+    return best
+
+
+def _roof_open_gable_end_for_view(roof: RoofSection, side: str) -> str | None:
+    end = _roof_end_for_view_side(roof, side)
+    if end is None:
+        return None
+    mode = roof.mode.replace("-", "_")
+    if mode == "hip":
+        return None
+    kind = roof.start if end == "start" else roof.end
+    return end if kind.replace("-", "_") == "open" else None
+
+
+def _roof_end_for_view_side(roof: RoofSection, side: str) -> str | None:
+    horizontal = _roof_ridge_is_horizontal(roof, _roof_eave_rect(roof))
+    if horizontal:
+        if side == "west":
+            return "start"
+        if side == "east":
+            return "end"
+    else:
+        if side == "north":
+            return "start"
+        if side == "south":
+            return "end"
+    return None
+
+
+def _open_gable_wall_points(roof: RoofSection, side: str) -> list[tuple[float, float]] | None:
+    rect = _roof_wall_eave_rect(roof)
+    eave_height = roof.eave_height or 0
+    peak_height = _roof_peak_height_for_rect(roof, rect)
+    if side == "north" and _roof_open_gable_end_for_view(roof, side) is not None:
+        return [(rect.left, eave_height), (rect.cx, peak_height), (rect.right, eave_height)]
+    if side == "south" and _roof_open_gable_end_for_view(roof, side) is not None:
+        return [(rect.left, eave_height), (rect.cx, peak_height), (rect.right, eave_height)]
+    if side == "west" and _roof_open_gable_end_for_view(roof, side) is not None:
+        return [(rect.top, eave_height), (rect.cy, peak_height), (rect.bottom, eave_height)]
+    if side == "east" and _roof_open_gable_end_for_view(roof, side) is not None:
+        return [(rect.top, eave_height), (rect.cy, peak_height), (rect.bottom, eave_height)]
+    return None
+
+
+def _open_gable_edge_points(roof: RoofSection, side: str) -> list[tuple[float, float]] | None:
+    rect = _roof_eave_rect(roof)
+    eave_height = roof.eave_height or 0
+    peak_height = _roof_peak_height(roof)
+    if side in {"north", "south"} and _roof_open_gable_end_for_view(roof, side) is not None:
+        return [(rect.left, eave_height), (rect.cx, peak_height), (rect.right, eave_height)]
+    if side in {"east", "west"} and _roof_open_gable_end_for_view(roof, side) is not None:
+        return [(rect.top, eave_height), (rect.cy, peak_height), (rect.bottom, eave_height)]
+    return None
+
+
+def _open_gable_depth_point(roof: RoofSection, side: str) -> Point | None:
+    rect = roof.rect
+    if side == "north":
+        return Point(rect.cx, rect.top)
+    if side == "south":
+        return Point(rect.cx, rect.bottom)
+    if side == "east":
+        return Point(rect.right, rect.cy)
+    if side == "west":
+        return Point(rect.left, rect.cy)
+    return None
+
+
+def _roof_elevation_span(roof: RoofSection, view: ElevationView) -> tuple[float, float]:
+    rect = _roof_eave_rect(roof)
+    if view.axis == "x":
+        return rect.left, rect.right
+    return rect.top, rect.bottom
+
+
+def _elevation_axis_crosses_roof_ridge(roof: RoofSection, axis: str) -> bool:
+    ridge_horizontal = _roof_ridge_is_horizontal(roof, _roof_eave_rect(roof))
+    return (axis == "x" and not ridge_horizontal) or (axis == "y" and ridge_horizontal)
+
+
+def _roof_peak_height(roof: RoofSection) -> float:
+    return _roof_peak_height_for_rect(roof, _roof_eave_rect(roof))
+
+
+def _roof_peak_height_for_rect(roof: RoofSection, rect: Rect) -> float:
+    eave_height = roof.eave_height or 0
+    pitch = roof.pitch if roof.pitch is not None else 8 / 12
+    across = rect.h if _roof_ridge_is_horizontal(roof, rect) else rect.w
+    return eave_height + max(0, across / 2) * pitch
+
+
+def _render_elevation_windows(
+    level: WallLevel,
+    level_id: str,
+    roofs: list[RoofSection],
+    view: ElevationView,
+    sx: Any,
+    sy: Any,
+    base_height: float,
+) -> list[str]:
+    return [
+        svg
+        for item in _elevation_window_items(level, level_id, roofs, view, sx, sy, base_height)
+        for svg in item["svg"]
+        if isinstance(item["svg"], list)
+    ]
+
+
+def _elevation_window_items(
+    level: WallLevel,
+    level_id: str,
+    roofs: list[RoofSection],
+    view: ElevationView,
+    sx: Any,
+    sy: Any,
+    base_height: float,
+) -> list[dict[str, object]]:
+    wall_by_id = {wall.id: wall for wall in level.walls}
+    items: list[dict[str, object]] = []
+    for opening in level.openings:
+        if opening.kind != "window":
+            continue
+        wall = wall_by_id.get(opening.wall)
+        if wall is None or wall.kind != "exterior" or _wall_elevation_side(wall) != view.side:
+            continue
+        start = _elevation_project_point(wall.point_at(opening.offset), view)
+        end = _elevation_project_point(wall.point_at(opening.offset + opening.width), view)
+        span_start, span_end = sorted((start, end))
+        sill = base_height + 3.0
+        height = _window_height(opening)
+        arched = base_height >= _DEFAULT_FLOOR_TO_FLOOR - EPSILON and _wall_is_open_gable_end(wall, roofs, view.side)
+        items.append(
+            {
+                "depth": _elevation_depth(wall.point_at(opening.offset + opening.width / 2), view),
+                "priority": 25,
+                "svg": [
+                    _elevation_window_path(span_start, span_end, sill, height, arched, sx, sy, level_id, opening.id),
+                    *_elevation_window_lites(span_start, span_end, sill, height, arched, sx, sy),
+                ],
+            }
+        )
+    return items
+
+
+_DEFAULT_FLOOR_TO_FLOOR = 10.0
+
+
+def _wall_is_open_gable_end(wall: WallSegment, roofs: list[RoofSection], side: str) -> bool:
+    midpoint = wall.point_at(wall.length / 2)
+    for roof in roofs:
+        if _roof_open_gable_end_for_view(roof, side) is None:
+            continue
+        rect = roof.rect
+        if side == "north" and abs(midpoint.y - rect.top) <= EPSILON and rect.left - EPSILON <= midpoint.x <= rect.right + EPSILON:
+            return True
+        if side == "south" and abs(midpoint.y - rect.bottom) <= EPSILON and rect.left - EPSILON <= midpoint.x <= rect.right + EPSILON:
+            return True
+        if side == "east" and abs(midpoint.x - rect.right) <= EPSILON and rect.top - EPSILON <= midpoint.y <= rect.bottom + EPSILON:
+            return True
+        if side == "west" and abs(midpoint.x - rect.left) <= EPSILON and rect.top - EPSILON <= midpoint.y <= rect.bottom + EPSILON:
+            return True
+    return False
+
+
+def _window_height(opening: WallOpening) -> float:
+    del opening
+    return 4.0
+
+
+def _elevation_window_path(
+    span_start: float,
+    span_end: float,
+    sill: float,
+    height: float,
+    arched: bool,
+    sx: Any,
+    sy: Any,
+    level_id: str,
+    opening_id: str,
+) -> str:
+    if not arched:
+        return (
+            f'<rect class="elevation-window" data-fp-level="{escape(level_id)}" data-fp-id="{escape(opening_id)}" '
+            f'x="{sx(span_start):.3f}" y="{sy(sill + height):.3f}" width="{(sx(span_end) - sx(span_start)):.3f}" '
+            f'height="{(height) * (sx(1) - sx(0)):.3f}" />'
+        )
+    arch_rise = min(2.0, max(1.1, (span_end - span_start) * 0.23))
+    shoulder = sill + height
+    control_y = shoulder + arch_rise * 1.18
+    return (
+        f'<path class="elevation-window elevation-window-arched" data-fp-level="{escape(level_id)}" '
+        f'data-fp-id="{escape(opening_id)}" d="M {sx(span_start):.3f} {sy(sill):.3f} '
+        f'L {sx(span_start):.3f} {sy(shoulder):.3f} '
+        f'C {sx(span_start):.3f} {sy(control_y):.3f} {sx(span_end):.3f} {sy(control_y):.3f} {sx(span_end):.3f} {sy(shoulder):.3f} '
+        f'L {sx(span_end):.3f} {sy(sill):.3f} Z" />'
+    )
+
+
+def _elevation_window_lites(
+    span_start: float,
+    span_end: float,
+    sill: float,
+    height: float,
+    arched: bool,
+    sx: Any,
+    sy: Any,
+) -> list[str]:
+    parts = []
+    mid = (span_start + span_end) / 2
+    arch_rise = min(2.0, max(1.1, (span_end - span_start) * 0.23)) if arched else 0.0
+    top = sill + height + arch_rise
+    parts.append(f'<line class="elevation-window-lite" x1="{sx(mid):.3f}" y1="{sy(sill):.3f}" x2="{sx(mid):.3f}" y2="{sy(top):.3f}" />')
+    if not arched:
+        parts.append(f'<line class="elevation-window-lite" x1="{sx(span_start):.3f}" y1="{sy(sill + height / 2):.3f}" x2="{sx(span_end):.3f}" y2="{sy(sill + height / 2):.3f}" />')
+    else:
+        parts.append(f'<line class="elevation-window-lite" x1="{sx(span_start):.3f}" y1="{sy(sill + height / 2):.3f}" x2="{sx(span_end):.3f}" y2="{sy(sill + height / 2):.3f}" />')
+    return parts
+
+
+def _render_elevation_tower_lantern(roof: RoofSection, view: ElevationView, sx: Any, sy: Any) -> list[str]:
+    span_start, span_end = _roof_elevation_span(roof, view)
+    width = span_end - span_start
+    if width <= EPSILON:
+        return []
+    inset = width * 0.18
+    eave_height = roof.eave_height or 0
+    lantern_top = eave_height + 7.5
+    cap_top = _tower_cap_top(roof)
+    lantern_left = span_start + inset
+    lantern_right = span_end - inset
+    cap_mid = (span_start + span_end) / 2
+    return [
+        f'<path class="elevation-tower-lantern" d="M {sx(lantern_left):.3f} {sy(eave_height):.3f} '
+        f'L {sx(lantern_right):.3f} {sy(eave_height):.3f} L {sx(lantern_right - inset * 0.22):.3f} {sy(lantern_top):.3f} '
+        f'L {sx(lantern_left + inset * 0.22):.3f} {sy(lantern_top):.3f} Z" />',
+        f'<path class="elevation-tower-cap" d="M {sx(lantern_left - inset * 0.2):.3f} {sy(lantern_top):.3f} '
+        f'L {sx(cap_mid):.3f} {sy(cap_top):.3f} L {sx(lantern_right + inset * 0.2):.3f} {sy(lantern_top):.3f} Z" />',
+    ]
+
+
+def _tower_cap_top(roof: RoofSection) -> float:
+    return (roof.eave_height or 0) + 10.5
+
+
+def _is_tower_roof(roof: RoofSection) -> bool:
+    return "tower" in roof.id.lower()
+
+
+def _render_elevation_dimensions(view: ElevationView, padding: float, baseline: float, scale: float) -> list[str]:
+    span_y = baseline + 2.0
+    height_x = padding + view.width + 1.25
+    return [
+        f'<line class="dimension" x1="{padding * scale:.3f}" y1="{span_y * scale:.3f}" '
+        f'x2="{(padding + view.width) * scale:.3f}" y2="{span_y * scale:.3f}" />',
+        f'<text class="dimension-label" x="{(padding + view.width / 2) * scale:.3f}" y="{(span_y + 0.62) * scale:.3f}">{_format_ft(view.width)}</text>',
+        f'<line class="dimension" x1="{height_x * scale:.3f}" y1="{baseline * scale:.3f}" '
+        f'x2="{height_x * scale:.3f}" y2="{(baseline - view.height) * scale:.3f}" />',
+        f'<text class="dimension-label" x="{(height_x + 0.55) * scale:.3f}" y="{(baseline - view.height / 2) * scale:.3f}" '
+        f'transform="rotate(-90 {(height_x + 0.55) * scale:.3f} {(baseline - view.height / 2) * scale:.3f})">{_format_ft(view.height)}</text>',
+    ]
+
+
+def _wall_elevation_side(wall: WallSegment) -> str | None:
+    return _roof_boundary_side(wall)
+
+
+def _elevation_wall_span(wall: WallSegment, view: ElevationView) -> tuple[float, float]:
+    start, end = sorted((_elevation_project_point(wall.at, view), _elevation_project_point(wall.end, view)))
+    return start - EXTERIOR_WALL_THICKNESS_FT, end + EXTERIOR_WALL_THICKNESS_FT
+
+
+def _elevation_project_point(point: Point, view: ElevationView) -> float:
+    value = point.x if view.axis == "x" else point.y
+    return _elevation_orient_projected_value(value, view)
+
+
+def _elevation_orient_projected_value(value: float, view: ElevationView) -> float:
+    if view.side == "east":
+        return view.span_start + view.span_end - value
+    return value
+
+
+def _orient_elevation_projected_points(
+    points: list[tuple[float, float]] | None,
+    view: ElevationView,
+) -> list[tuple[float, float]] | None:
+    if points is None:
+        return None
+    oriented = [(_elevation_orient_projected_value(horizontal, view), height) for horizontal, height in points]
+    if view.side == "east":
+        oriented.reverse()
+    return oriented
+
+
+def _elevation_depth(point: Point, view: ElevationView) -> float:
+    if view.side == "south":
+        return point.y
+    if view.side == "north":
+        return -point.y
+    if view.side == "east":
+        return point.x
+    if view.side == "west":
+        return -point.x
+    return 0.0
+
+
+def _format_ft(value: float) -> str:
+    rounded = round(value * 2) / 2
+    if abs(rounded - round(rounded)) <= EPSILON:
+        return f"{int(round(rounded))}'"
+    return f"{rounded:g}'"
 
 
 def _render_foundations(foundations: list[FoundationPlan], level_id: str, scale: float) -> list[str]:
@@ -1052,6 +2122,14 @@ def _roof_ridge(data: dict[str, Any]) -> str | None:
 
 def _roof_eave_rect(roof: RoofSection) -> Rect:
     overhang = EXTERIOR_WALL_THICKNESS_FT + roof.eave_margin
+    return _roof_rect_with_overhang(roof, overhang)
+
+
+def _roof_wall_eave_rect(roof: RoofSection) -> Rect:
+    return _roof_rect_with_overhang(roof, EXTERIOR_WALL_THICKNESS_FT)
+
+
+def _roof_rect_with_overhang(roof: RoofSection, overhang: float) -> Rect:
     north = overhang if "north" in roof.eave_sides else 0
     east = overhang if "east" in roof.eave_sides else 0
     south = overhang if "south" in roof.eave_sides else 0
@@ -1818,6 +2896,8 @@ def _render_feature_fixture(feature: Feature, box: Rect, level_id: str, scale: f
         return [f'<path class="piano-fixture" {attrs} {_feature_rotation_attr(feature, box, scale)}d="{body}" />']
     if feature.kind == "spiral_stair":
         return _render_spiral_stair_fixture(feature, box, attrs, scale)
+    if feature.kind == "deck":
+        return _render_deck_fixture(feature, box, attrs, scale)
     if feature.polygon is not None:
         return [f'<path class="fixture" {attrs} d="{_polygon_path(feature.polygon, scale)}" />']
     return [
@@ -1825,6 +2905,25 @@ def _render_feature_fixture(feature: Feature, box: Rect, level_id: str, scale: f
         f'width="{box.w * scale:.3f}" height="{box.h * scale:.3f}" '
         f'{_feature_rotation_attr(feature, box, scale)}{_feature_corner_attrs(feature, scale)} />'
     ]
+
+
+def _render_deck_fixture(feature: Feature, box: Rect, attrs: str, scale: float) -> list[str]:
+    transform = _feature_rotation_attr(feature, box, scale)
+    parts = [
+        f'<rect class="deck-fixture" {attrs} x="{box.x * scale:.3f}" y="{box.y * scale:.3f}" '
+        f'width="{box.w * scale:.3f}" height="{box.h * scale:.3f}" '
+        f'{transform}{_feature_corner_attrs(feature, scale)} />'
+    ]
+    spacing = 1.25
+    radius = 0.07 * scale
+    x = box.x + spacing / 2
+    while x < box.right - 1e-6:
+        y = box.y + spacing / 2
+        while y < box.bottom - 1e-6:
+            parts.append(f'<circle class="deck-dot" cx="{x * scale:.3f}" cy="{y * scale:.3f}" r="{radius:.3f}" />')
+            y += spacing
+        x += spacing
+    return parts
 
 
 def _feature_shape_path(feature: Feature, box: Rect, scale: float) -> str:

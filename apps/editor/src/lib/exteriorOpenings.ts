@@ -14,10 +14,10 @@ export function openingReferenceForWall(
   wallId: string,
   line: WallLine | null
 ): { wall: string } | SpaceSideRef {
-  if (!line || GENERATED_EXTERIOR_WALL_ID.test(wallId)) {
-    return { wall: wallId };
-  }
-  return inferSpaceSideForWallLine(data, levelId, line) ?? { wall: wallId };
+  void data;
+  void levelId;
+  void line;
+  return { wall: wallId };
 }
 
 export function inferSpaceSideForWallLine(data: AnyRecord, levelId: string, line: WallLine): SpaceSideRef | null {
@@ -70,31 +70,10 @@ export function stabilizeGeneratedExteriorWallOpenings(
   levelId: string,
   wallLineForId: (wallId: string) => WallLine | null
 ) {
-  const openings = ((data.levels as AnyRecord | undefined)?.[levelId]?.openings ?? []) as AnyRecord[];
-  let changed = false;
-  for (const opening of openings) {
-    if (
-      typeof opening.wall !== "string" ||
-      !GENERATED_EXTERIOR_WALL_ID.test(opening.wall) ||
-      opening.space ||
-      opening.side
-    ) {
-      continue;
-    }
-    const line = wallLineForId(opening.wall);
-    if (!line) {
-      continue;
-    }
-    const stableRef = inferSpaceSideForWallLine(data, levelId, line);
-    if (!stableRef) {
-      continue;
-    }
-    opening.space = stableRef.space;
-    opening.side = stableRef.side;
-    delete opening.wall;
-    changed = true;
-  }
-  return changed;
+  void data;
+  void levelId;
+  void wallLineForId;
+  return false;
 }
 
 function intervalOverlap(a1: number, a2: number, b1: number, b2: number) {
