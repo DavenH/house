@@ -2943,36 +2943,94 @@ def _feature_rotation_attr(feature: Feature, box: Rect, scale: float) -> str:
 def _render_spiral_stair_fixture(feature: Feature, box: Rect, attrs: str, scale: float) -> list[str]:
     cx = box.cx * scale
     cy = box.cy * scale
-    radius = min(box.w, box.h) * scale / 2
-    inner = radius * 0.22
-    outer = radius * 0.82
+    feature_radius_ft = min(box.w, box.h) / 2
+    radius = feature_radius_ft * scale
+    outer_handrail = radius * 0.92
+    center_column = min(0.32, feature_radius_ft * 0.14) * scale
+    code_clear_width = min(2.17 * scale, max(outer_handrail - center_column - 0.08 * scale, 0))
+    inner_handrail = max(center_column + 0.08 * scale, outer_handrail - code_clear_width)
+    tread_inner = inner_handrail
+    tread_outer = outer_handrail
+    measurement_radius = min(tread_outer, tread_inner + 0.984 * scale)
     transform = _feature_rotation_attr(feature, box, scale)
     parts = [
         f'<circle class="spiral-stair-fixture" {attrs} {transform}cx="{cx:.3f}" cy="{cy:.3f}" r="{radius:.3f}" />',
-        f'<circle class="spiral-stair-well" {attrs} {transform}cx="{cx:.3f}" cy="{cy:.3f}" r="{inner:.3f}" />',
     ]
-    for index in range(14):
-        angle = radians(-110 + index * 25)
-        x1 = cx + cos(angle) * inner
-        y1 = cy + sin(angle) * inner
-        x2 = cx + cos(angle) * outer
-        y2 = cy + sin(angle) * outer
+
+    tread_count = 13
+    start_angle = -145
+    sweep = 300
+    tread_sweep = sweep / tread_count
+    for index in range(tread_count):
+        a0 = start_angle + index * tread_sweep
+        a1 = a0 + tread_sweep
+        parts.append(
+            f'<path class="spiral-stair-tread-fill" {attrs} {transform}'
+            f'd="{_annular_sector_path(cx, cy, tread_inner, tread_outer, a0, a1)}" />'
+        )
+        x1, y1 = _polar(cx, cy, tread_inner, a0)
+        x2, y2 = _polar(cx, cy, tread_outer, a0)
         parts.append(
             f'<line class="spiral-stair-tread" {attrs} {transform}'
             f'x1="{x1:.3f}" y1="{y1:.3f}" x2="{x2:.3f}" y2="{y2:.3f}" />'
         )
-    spiral_points = []
-    for index in range(34):
-        fraction = index / 33
-        angle = radians(-120 + fraction * 540)
-        current_radius = inner + (outer - inner) * fraction
-        spiral_points.append((cx + cos(angle) * current_radius, cy + sin(angle) * current_radius))
-    path = " ".join(
-        ("M" if index == 0 else "L") + f" {x:.3f} {y:.3f}"
-        for index, (x, y) in enumerate(spiral_points)
+
+    end_x1, end_y1 = _polar(cx, cy, tread_inner, start_angle + sweep)
+    end_x2, end_y2 = _polar(cx, cy, tread_outer, start_angle + sweep)
+    parts.extend(
+        [
+            f'<line class="spiral-stair-tread" {attrs} {transform}'
+            f'x1="{end_x1:.3f}" y1="{end_y1:.3f}" x2="{end_x2:.3f}" y2="{end_y2:.3f}" />',
+            f'<path class="spiral-stair-handrail" {attrs} {transform}'
+            f'd="{_arc_path(cx, cy, tread_outer, start_angle, start_angle + sweep)}" />',
+            f'<path class="spiral-stair-handrail" {attrs} {transform}'
+            f'd="{_arc_path(cx, cy, tread_inner, start_angle, start_angle + sweep)}" />',
+            f'<path class="spiral-stair-clear" {attrs} {transform}'
+            f'd="{_arc_path(cx, cy, measurement_radius, start_angle, start_angle + sweep)}" />',
+            f'<circle class="spiral-stair-column" {attrs} {transform}cx="{cx:.3f}" cy="{cy:.3f}" '
+            f'r="{center_column:.3f}" />',
+        ]
     )
-    parts.append(f'<path class="spiral-stair-well" {attrs} {transform}d="{path}" />')
+
+    arrow = _arc_path(cx, cy, (tread_inner + tread_outer) / 2, -128, 122)
+    arrow_x, arrow_y = _polar(cx, cy, (tread_inner + tread_outer) / 2, 122)
+    parts.append(f'<path class="spiral-stair-arrow" {attrs} {transform}d="{arrow}" />')
+    parts.append(
+        f'<path class="spiral-stair-arrow" {attrs} {transform}'
+        f'd="M {arrow_x:.3f} {arrow_y:.3f} l {-0.16 * scale:.3f} {-0.05 * scale:.3f} '
+        f'm {0.16 * scale:.3f} {0.05 * scale:.3f} l {-0.05 * scale:.3f} {0.16 * scale:.3f}" />'
+    )
+
     return parts
+
+
+def _polar(cx: float, cy: float, radius: float, angle_degrees: float) -> tuple[float, float]:
+    angle = radians(angle_degrees)
+    return cx + cos(angle) * radius, cy + sin(angle) * radius
+
+
+def _arc_path(cx: float, cy: float, radius: float, start_degrees: float, end_degrees: float) -> str:
+    x1, y1 = _polar(cx, cy, radius, start_degrees)
+    x2, y2 = _polar(cx, cy, radius, end_degrees)
+    large_arc = 1 if abs(end_degrees - start_degrees) > 180 else 0
+    sweep = 1 if end_degrees > start_degrees else 0
+    return f"M {x1:.3f} {y1:.3f} A {radius:.3f} {radius:.3f} 0 {large_arc} {sweep} {x2:.3f} {y2:.3f}"
+
+
+def _annular_sector_path(
+    cx: float, cy: float, inner_radius: float, outer_radius: float, start_degrees: float, end_degrees: float
+) -> str:
+    ox1, oy1 = _polar(cx, cy, outer_radius, start_degrees)
+    ox2, oy2 = _polar(cx, cy, outer_radius, end_degrees)
+    ix2, iy2 = _polar(cx, cy, inner_radius, end_degrees)
+    ix1, iy1 = _polar(cx, cy, inner_radius, start_degrees)
+    large_arc = 1 if abs(end_degrees - start_degrees) > 180 else 0
+    return (
+        f"M {ox1:.3f} {oy1:.3f} "
+        f"A {outer_radius:.3f} {outer_radius:.3f} 0 {large_arc} 1 {ox2:.3f} {oy2:.3f} "
+        f"L {ix2:.3f} {iy2:.3f} "
+        f"A {inner_radius:.3f} {inner_radius:.3f} 0 {large_arc} 0 {ix1:.3f} {iy1:.3f} Z"
+    )
 
 
 def _feature_clearance_outer_path(feature: Feature, clear_box: Rect, scale: float) -> str:

@@ -1350,6 +1350,85 @@ def test_intent_wall_openings_allow_multiple_windows_on_same_wall_span() -> None
     ]
 
 
+def test_intent_exterior_opening_resolves_semantic_mass_side_after_perimeter_changes() -> None:
+    base_plan = intent_plan_from_dict(
+        {
+            "type": "intent_plan",
+            "plan": "semantic-exterior-window-base-test",
+            "masses": {
+                "body": {
+                    "rects": [
+                        {"id": "main", "x": [0, 12], "y": [0, 8]},
+                        {"id": "target", "x": [12, 20], "y": [0, 8]},
+                    ]
+                }
+            },
+            "levels": {
+                "L1": {
+                    "spaces": {"room": {"rect": [12, 0, 8, 8]}},
+                    "openings": [
+                        {
+                            "id": "target_south_window",
+                            "exterior": {"mass": "target", "side": "south"},
+                            "offset": 2,
+                            "width": 3,
+                            "kind": "window",
+                        }
+                    ],
+                }
+            },
+        }
+    )
+    changed_plan = intent_plan_from_dict(
+        {
+            "type": "intent_plan",
+            "plan": "semantic-exterior-window-changed-test",
+            "masses": {
+                "body": {
+                    "rects": [
+                        {"id": "main", "x": [0, 12], "y": [0, 8]},
+                        {"id": "target", "x": [12, 20], "y": [0, 8]},
+                        {"id": "tower", "x": [8, 12], "y": [8, 12]},
+                    ]
+                }
+            },
+            "levels": {
+                "L1": {
+                    "spaces": {"room": {"rect": [12, 0, 8, 8]}},
+                    "openings": [
+                        {
+                            "id": "target_south_window",
+                            "exterior": "target.south",
+                            "offset": 2,
+                            "width": 3,
+                            "kind": "window",
+                        }
+                    ],
+                }
+            },
+        }
+    )
+
+    base_opening = next(
+        opening for opening in base_plan.levels["L1"].openings if opening.id == "target_south_window"
+    )
+    changed_opening = next(
+        opening for opening in changed_plan.levels["L1"].openings if opening.id == "target_south_window"
+    )
+
+    assert base_opening.wall != changed_opening.wall
+    assert changed_opening.width == 3
+    assert changed_opening.offset == pytest.approx(2)
+
+    changed_wall = next(
+        wall for wall in changed_plan.levels["L1"].walls if wall.id == changed_opening.wall
+    )
+    assert changed_wall.at.x == pytest.approx(20)
+    assert changed_wall.at.y == pytest.approx(8)
+    assert changed_wall.direction == "W"
+    assert changed_wall.length == pytest.approx(8)
+
+
 def test_intent_space_side_opening_respects_explicit_offset_on_reversed_wall() -> None:
     plan = intent_plan_from_dict(
         {
@@ -2311,8 +2390,13 @@ def test_wall_plan_renders_spiral_stair_feature() -> None:
     svg = render_wall_plan_svg(plan)
 
     assert 'class="spiral-stair-fixture"' in svg
+    assert 'class="spiral-stair-tread-fill"' in svg
     assert 'class="spiral-stair-tread"' in svg
-    assert 'class="spiral-stair-well"' in svg
+    assert 'class="spiral-stair-handrail"' in svg
+    assert 'class="spiral-stair-column"' in svg
+    assert 'class="spiral-stair-opening"' not in svg
+    assert "660mm min clear" not in svg
+    assert "190mm tread @300mm" not in svg
     assert 'data-fp-id="tower_spiral"' in svg
     assert 'SPIRAL/STAIR</text>' in svg
 

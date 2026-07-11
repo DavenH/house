@@ -509,7 +509,7 @@
       window.addEventListener("pointermove", handleWindowPointerMove);
       window.addEventListener("pointerup", handleWindowPointerUp, { once: true });
       void tick().then(() => markSelectedInSvg(canvasElement, selected));
-      void tick().then(() => jumpToSelectedYaml());
+      void tick().then(() => jumpToSelectedYaml({ force: true }));
       return;
     }
     if (kind === "opening") {
@@ -525,7 +525,7 @@
       window.addEventListener("pointermove", handleWindowPointerMove);
       window.addEventListener("pointerup", handleWindowPointerUp, { once: true });
       void tick().then(() => markSelectedInSvg(canvasElement, selected));
-      void tick().then(() => jumpToSelectedYaml());
+      void tick().then(() => jumpToSelectedYaml({ force: true }));
       return;
     }
     if (kind === "wall") {
@@ -541,7 +541,7 @@
       window.addEventListener("pointermove", handleWindowPointerMove);
       window.addEventListener("pointerup", handleWindowPointerUp, { once: true });
       void tick().then(() => markSelectedInSvg(canvasElement, selected));
-      void tick().then(() => jumpToSelectedYaml());
+      void tick().then(() => jumpToSelectedYaml({ force: true }));
       return;
     }
     const feature = ((data.levels as AnyRecord)?.[levelFromSvg]?.features ?? {})[id] as AnyRecord | undefined;
@@ -552,7 +552,7 @@
     activeLevel = levelFromSvg;
     if (feature.wrap || feature.along || feature.extrude) {
       void tick().then(() => markSelectedInSvg(canvasElement, selected));
-      void tick().then(() => jumpToSelectedYaml());
+      void tick().then(() => jumpToSelectedYaml({ force: true }));
       return;
     }
     feature.at ??= [20, 20];
@@ -570,7 +570,7 @@
     window.addEventListener("pointermove", handleWindowPointerMove);
     window.addEventListener("pointerup", handleWindowPointerUp, { once: true });
     void tick().then(() => markSelectedInSvg(canvasElement, selected));
-    void tick().then(() => jumpToSelectedYaml());
+    void tick().then(() => jumpToSelectedYaml({ force: true }));
   }
 
   function preventCanvasSelection(event: Event) {
@@ -691,11 +691,11 @@
     window.addEventListener("pointermove", handleWindowPointerMove);
     window.addEventListener("pointerup", handleWindowPointerUp, { once: true });
     void tick().then(() => markSelectedInSvg(canvasElement, selected));
-    void tick().then(() => jumpToSelectedYaml());
+    void tick().then(() => jumpToSelectedYaml({ force: true }));
   }
 
   function createSelectedSpaceEdgeDrag(event: PointerEvent, targetKind: SelectionKind) {
-    if (selected.kind !== "space" || !selected.id || targetKind === "opening") {
+    if (selected.kind !== "space" || !selected.id || targetKind !== "space") {
       return null;
     }
     return createSpaceEdgeDrag(selected.id, selected.level || activeLevel, event, 1.25);
@@ -988,7 +988,7 @@
   function selectObject(kind: SelectionKind, id: string, index?: number) {
     selected = { kind, level: selected.level || activeLevel, id, index };
     void tick().then(() => markSelectedInSvg(canvasElement, selected));
-    void tick().then(() => jumpToSelectedYaml());
+    void tick().then(() => jumpToSelectedYaml({ force: true }));
   }
 
   async function jumpToSelectedYaml(options: { force?: boolean } = {}) {

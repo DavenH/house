@@ -56,8 +56,8 @@ notes:
   - 'The second-floor tower is treated as stair circulation up to the nest, not as storage.'
   - 'Variant: removes the dining projection and mirrors the right gable northward across the main ridge.'
 datums:
-  x: {west: 4.5, storage_e: 8, left_w: 4.5, closet_w: 15, gallery_w: 15, left_e: 20.5, stair_w: 26.5, stair_e: 38, piano_w: 29.5, tower_e: 38, right_w: 38, suite_hall_e: 42.5, pantry_w: 53, room_split: 50.5, suite_closet_split: 50.5, pantry_e: 57, dining_w: 57, right_e: 57, east_projection_e: 63.5, e: 31.5}
-  y: {right_gable_n: -2, gable_n: 4.5, main_n: 8, ensuite_s: 8, bath_s: 14, pool_room_s: 12, stair_s: 18.5, kid_room_split: 15.5, east_projection_n: 17.5, closet_s: 18, kitchen_dining_n: 27.5, public_split: 23.5, lower_storage_n: 25.5, entry_s: 28, terrace_s: 40.5, main_ridge: 18, east_projection_s: 28, tower_s: 30, gable_s: 32, main_s: 40.5}
+  x: {west: 4.5, storage_e: 8, left_w: 4.5, closet_w: 16.5, gallery_w: 15, left_e: 20.5, stair_w: 26.5, stair_e: 38, piano_w: 29.5, tower_e: 38, right_w: 38, suite_hall_e: 43, pantry_w: 53, room_split: 47.5, suite_closet_split: 50, pantry_e: 57, dining_w: 56, right_e: 56, east_projection_e: 63.5, e: 31.5}
+  y: {right_gable_n: -2, gable_n: 4.5, main_n: 8, ensuite_s: 7, bath_s: 14, l2_public_bath_n: 12.5, pool_room_s: 12, stair_s: 18, kid_room_1_s: 14.5, kid_room_split: 18.5, kid_room_3_n: 22.5, suite_bedroom_n: 17, east_projection_n: 17.5, closet_s: 18, kitchen_dining_n: 27.5, public_split: 23, lower_storage_n: 25.5, entry_s: 28, terrace_s: 40.5, main_ridge: 18, east_projection_s: 28, tower_s: 30, master_bedroom_s: 33, gable_s: 32, main_s: 40.5}
 masses:
   shared_body:
     levels:
@@ -69,7 +69,7 @@ masses:
       - {id: left_gable, levels: [L1, L2], roof: {mode: open_gable, eave_height: 17.5, ridge: y}, x: [left_w, left_e], y: [gable_n, gable_s]}
       - {id: stair_core, levels: [L2], roof: {enabled: false}, x: [left_e, right_w], y: [main_n, public_split]}
       - {id: right_wing_lower, levels: [L1], roof: {enabled: false}, x: [right_w, right_e], y: [right_gable_n, main_s]}
-      - {id: right_gable, levels: [L2], roof: {mode: open_gable, eave_height: 17.5, ridge: y, eaves: [north, east, south, west]}, x: [right_w, right_e], y: [right_gable_n, tower_s]}
+      - {id: right_gable, levels: [L2], roof: {mode: open_gable, eave_height: 17.5, ridge: y, eaves: [north, east, south, west]}, x: [right_w, right_e], y: [right_gable_n, master_bedroom_s]}
       - {id: tower, roof: {mode: hip, eave_height: 30}, x: [e, tower_e], y: [public_split, tower_s]}
 levels:
   L1:
@@ -88,25 +88,25 @@ levels:
       kitchen: {x: [right_w, room_split], y: [kitchen_dining_n, main_s], privacy: public, label: /KITCHEN}
       dining: {x: [room_split, right_e], y: [kitchen_dining_n, main_s], label: DINING, privacy: public}
     features:
-      piano: {kind: piano, within: library, at: [9.5, 19.5], size: [7.5, 5], label: PIANO, avoid_openings: true, clearance: {around: 1}, rotation: 225}
-      piano_bench: {kind: rectangle, within: library, at: [13, 23.5], size: [1, 2], label: '', rotation: 45, clearance: {around: 1}}
+      piano: {kind: piano, within: library, at: [8.5, 20], size: [7.5, 5], label: PIANO, avoid_openings: true, clearance: {around: 1}, rotation: 270}
+      piano_bench: {kind: rectangle, within: library, at: [8.5, 24.5], size: [1, 2], label: '', rotation: 90, clearance: {around: 1}}
       library_north_books: {kind: rectangle, within: library, at: [10, 14.5], size: [11, 0.8], label: ''}
-      hearth_fireplace: {kind: rectangle, at: [45.5, 19.5], size: [2, 6], label: HEARTH}
-      great_room_couch: {kind: rectangle, within: great_room, at: [54.5, 19.5], size: [3, 5], label: COUCH}
-      great_room_chair_w: {kind: rectangle, within: great_room, at: [50.5, 15], size: [3, 3], label: CHAIR}
-      great_room_chair_e: {kind: rectangle, within: great_room, at: [50.5, 24], size: [3, 3], label: CHAIR}
-      great_room_coffee_table: {kind: rectangle, within: great_room, at: [50.5, 19.5], size: [2, 3], label: '', clearance: {around: 1}}
-      dining_table: {kind: rectangle, within: dining, at: [53, 35], size: [3, 6], label: TABLE, clearance: {around: 2.5}}
+      hearth_fireplace: {kind: rectangle, at: [44, 20], size: [2, 6], label: HEARTH}
+      great_room_couch: {kind: rectangle, within: great_room, at: [53, 20], size: [3, 7], label: COUCH}
+      great_room_chair_w: {kind: rectangle, within: great_room, at: [49.5, 24.5], size: [3, 3], label: CHAIR}
+      great_room_chair_e: {kind: rectangle, within: great_room, at: [49.5, 15.5], size: [3, 3], label: CHAIR}
+      great_room_coffee_table: {kind: rectangle, within: great_room, at: [49, 20], size: [2, 3], label: '', clearance: {around: 1}}
+      dining_table: {kind: rectangle, within: dining, at: [52, 35], size: [3, 6], label: TABLE, clearance: {around: 2.5}}
       kitchen_counters: {kind: counter, wrap: {space: kitchen, sides: [west, south], depth: 2}}
-      kitchen_island: {kind: rectangle, size: [3, 4], at: [44.5, 33.5], label: ISLAND, clearance: {walls: 4, around: 3}}
+      kitchen_island: {kind: rectangle, size: [3, 4], at: [46, 36.5], label: ISLAND, clearance: {walls: 4, around: 0}}
       refrigerator: {kind: rectangle, within: kitchen, at: [39.25, 28.5], size: [2.5, 3], label: FRIDGE}
-      air_exchanger: {kind: rectangle, within: hearth_storage, at: [23.5, 10], size: [2, 2], label: AIR/EXCH}
-      hot_water_tank: {kind: rectangle, within: hearth_storage, at: [23.5, 12.5], size: [1.5, 1.5], label: HWT}
-      water_tank: {kind: rectangle, within: hearth_storage, at: [23.5, 15], size: [1.5, 1.5], label: WATER/TANK}
-      electrical_panel: {kind: rectangle, within: hearth_storage, at: [23.5, 16.5], size: [2, 1], label: ELEC/PANEL}
+      air_exchanger: {kind: rectangle, within: hearth_storage, at: [22, 10.5], size: [2, 2], label: AIR/EXCH}
+      hot_water_tank: {kind: rectangle, within: hearth_storage, at: [22, 13], size: [1.5, 1.5], label: HWT}
+      water_tank: {kind: rectangle, within: hearth_storage, at: [22, 15], size: [1.5, 1.5], label: WATER/TANK}
+      electrical_panel: {kind: rectangle, within: hearth_storage, at: [25.5, 12.5], size: [1, 2], label: ELEC/PANEL}
       library_reading_seat: {kind: rectangle, within: library, at: [7, 30], size: [4, 2], label: READING/SEAT}
       studio_desk: {kind: rectangle, within: library, at: [15, 29.5], size: [5, 1.5], label: DESK}
-      pool_table: {kind: rectangle, within: pool_room, at: [47.5, 5], size: [8, 4], label: 'POOL TABLE', clearance: {walls: 2.5, around: 5}}
+      pool_table: {kind: rectangle, within: pool_room, at: [47, 5], size: [8, 4], label: 'POOL TABLE', clearance: {walls: 2.5, around: 5}}
     connections:
       - {between: [bathroom, library], width: 3, offset: 8.5}
       - {between: [entrance, hall], kind: arch, width: 6, offset: 2.5}
@@ -131,77 +131,75 @@ levels:
       - [hall, hearth_storage]
     openings:
       - {id: front_door, space: entrance, side: south, width: 3.5, kind: door, swing: in-left, offset: 4}
-      - {id: bath_window, wall: exterior_5, offset: 6.5, width: 5, kind: window}
+      - {id: bath_window, wall: exterior_5, offset: 5.5, width: 5, kind: window}
       - {id: stair_window, wall: exterior_7, offset: 9.75, width: 4, kind: window}
       - {id: great_room_window, wall: exterior_1, offset: 5.5, width: 8, kind: window}
       - {id: great_room_east_window, wall: exterior_14, offset: 18.5, width: 6, kind: window}
-      - {id: kitchen_window, wall: exterior_6, offset: 11, width: 5, kind: window}
-      - {id: office_window, wall: exterior_4, offset: 5, width: 7, kind: window}
+      - {id: kitchen_window, wall: exterior_6, offset: 11, width: 4.5, kind: window}
+      - {id: office_window, wall: exterior_4, offset: 4.5, width: 7, kind: window}
       - {id: dining_east_window, wall: exterior_14, offset: 33.5, width: 5, kind: window}
       - {id: exterior_6_window, wall: exterior_3, offset: 3, width: 1, kind: window}
-      - {id: exterior_15_window, wall: exterior_13, offset: 6.5, width: 4, kind: window}
+      - {id: exterior_15_window, wall: exterior_13, offset: 5.5, width: 6, kind: window}
       - {id: exterior_14_window, kind: window, width: 5, offset: 4, wall: exterior_14}
-      - {id: exterior_6_window_2, kind: window, width: 5, offset: 2, wall: exterior_6}
+      - {id: exterior_6_window_2, kind: window, width: 4.5, offset: 2, wall: exterior_6}
       - {id: exterior_12_window, kind: window, width: 4, offset: 3.5, wall: exterior_12}
-      - {id: exterior_13_window, kind: window, width: 5, offset: 20.5, wall: exterior_13}
+      - {id: exterior_13_window, kind: window, width: 4, offset: 21, wall: exterior_13}
+      - {id: exterior_11_window, kind: window, width: 4, offset: 4, wall: exterior_11}
     overlays:
       plumbing:
-        - {id: cold_main_l1, label: 'COLD WATER', color: '#2678b9', width: 0.16, points: [[5, 14], [8, 14], [21, 14], [21, 18.5], [38, 18.5], [38, 22.5], [38, 34.5], [40, 34.5]]}
-        - {id: cold_riser_l1, kind: riser, label: RISER, color: '#2678b9', width: 0.16, points: [[8, 13], [8, 13]]}
-      annotations:
-        - {id: cold_laundry_l1_note, label: 'LAUNDRY CW', color: '#5d5751', width: 0.04, points: [[4, 13], [4, 10]]}
-        - {id: cold_bath_l1_note, label: 'BATH CW', color: '#5d5751', width: 0.04, points: [[13, 13], [13, 8]]}
-        - {id: cold_kitchen_l1_note, label: 'KITCHEN CW', color: '#5d5751', width: 0.04, points: [[45, 28], [48, 30]]}
+        - {id: cold_main_l1, label: 'COLD WATER', color: '#2678b9', width: 0.16, points: [[5, 14], [8, 14], [20.5, 14], [20.5, 18], [38, 18], [38, 22.5], [38, 34.5], [40, 34.5]]}
+        - {id: cold_riser_l1, kind: riser, label: RISER, color: '#2678b9', width: 0.16, points: [[21, 17.5], [21, 17.5]]}
+      annotations: null
   L2:
     title: 'Second Floor'
     derive_partitions: true
     spaces:
-      kid_room_1: {x: [left_w, left_e], y: [gable_n, kid_room_split], label: 'ROOM 1', privacy: private}
-      kid_room_2: {x: [left_w, closet_w], y: [kid_room_split, gable_s], label: 'ROOM 2', privacy: private}
-      kids_hall: {x: [closet_w, left_e], y: [kid_room_split, public_split], label: HALL, privacy: circulation}
-      suite_gym: {x: [closet_w, left_e], y: [public_split, gable_s], label: FLEX/STUDY, privacy: semi_private}
-      laundry: {x: [left_e, stair_w], y: [main_n, bath_s], label: LAUNDRY, privacy: service}
+      kid_room_1: {x: [left_w, left_e], y: [gable_n, kid_room_1_s], label: 'ROOM 1', privacy: private}
+      kid_storage: {x: [left_w, closet_w], y: [kid_room_1_s, kid_room_3_n], label: STORAGE, privacy: service}
+      kid_room_3: {x: [left_w, left_e], y: [kid_room_3_n, gable_s], label: 'ROOM 3', privacy: private}
+      kids_hall: {x: [closet_w, left_e], y: [kid_room_1_s, kid_room_3_n], label: HALL, privacy: circulation}
+      laundry: {x: [left_e, stair_w], y: [main_n, l2_public_bath_n], label: LAUNDRY, privacy: service}
       stair: {x: [stair_w, stair_e], y: [main_n, stair_s], privacy: circulation}
-      public_bath: {x: [left_e, stair_w], y: [bath_s, stair_s], label: BATH, privacy: private}
+      public_bath: {x: [left_e, stair_w], y: [l2_public_bath_n, stair_s], label: BATH, privacy: private}
       upper_landing: {x: [left_e, right_w], y: [stair_s, public_split], label: 'UPPER HALL', privacy: circulation}
-      tower: {x: [e, tower_e], y: [public_split, tower_s], label: NEST/STAIR, privacy: circulation}
+      tower: {x: [e, tower_e], y: [public_split, tower_s], label: '', privacy: circulation}
       suite_hall: {x: [right_w, suite_hall_e], y: [ensuite_s, public_split], label: MASTER/HALL, privacy: circulation}
       master_sitting: {x: [suite_hall_e, right_e], y: [right_gable_n, ensuite_s], label: MASTER/GYM, privacy: private}
-      ensuite_bathroom: {x: [suite_hall_e, suite_closet_split], y: [ensuite_s, stair_s], label: ENSUITE/BATHROOM, privacy: private}
-      walk_in_closet: {x: [suite_closet_split, right_e], y: [ensuite_s, stair_s], label: WALK-IN/CLOSET, privacy: private}
-      master_bedroom: {x: [suite_hall_e, right_e], y: [stair_s, tower_s], label: MASTER/BEDROOM, privacy: private}
-      terrace: {x: [right_w, right_e], y: [tower_s, terrace_s], label: BALCONY, privacy: public}
+      ensuite_bathroom: {x: [suite_hall_e, suite_closet_split], y: [ensuite_s, suite_bedroom_n], label: ENSUITE/BATHROOM, privacy: private}
+      walk_in_closet: {x: [suite_closet_split, right_e], y: [ensuite_s, suite_bedroom_n], label: WALK-IN/CLOSET, privacy: private}
+      master_bedroom: {x: [suite_hall_e, right_e], y: [suite_bedroom_n, master_bedroom_s], label: MASTER/BEDROOM, privacy: private}
+      terrace: {x: [right_w, right_e], y: [master_bedroom_s, terrace_s], label: BALCONY, privacy: public}
     features:
-      chimney: {kind: rectangle, at: [45.5, 19.5], size: [4, 1.5], label: CHIMNEY}
-      washer: {kind: rectangle, within: laundry, at: [22, 11.5], size: [2.5, 2.5], label: W}
-      dryer: {kind: rectangle, within: laundry, at: [25, 11.5], size: [2.5, 2.5], label: D}
-      gym_mat: {kind: rectangle, within: suite_gym, at: [18.25, 27.5], size: [3, 5], label: MAT}
-      suite_gym_mat: {kind: rectangle, within: master_sitting, at: [51, 3], size: [4, 3], label: MAT}
-      queen_bed: {kind: rectangle, within: master_bedroom, at: [48.5, 25.5], size: [5, 7], label: BED, clearance: {left: 1, right: 1, top: 1, foot: 1}, avoid_openings: true}
-      kid_1_bed: {kind: rectangle, within: kid_room_1, at: [11, 10], size: [4, 6], label: BED}
-      kid_2_bed: {kind: rectangle, within: kid_room_2, at: [9, 27], size: [4, 6], label: BED}
+      chimney: {kind: rectangle, at: [44, 20], size: [1.5, 5], label: CHIMNEY}
+      washer: {kind: rectangle, within: laundry, at: [22.5, 10.5], size: [2.5, 2.5], label: W}
+      dryer: {kind: rectangle, within: laundry, at: [25, 10.5], size: [2.5, 2.5], label: D}
+      suite_gym_mat: {kind: rectangle, within: master_sitting, at: [43.5, 2], size: [5.5, 2.5], label: MAT}
+      queen_bed: {kind: rectangle, within: master_bedroom, at: [49.5, 29.5], size: [7, 5], label: BED, clearance: {left: 1, right: 1, top: 1, foot: 1}, avoid_openings: true}
+      kid_1_bed: {kind: rectangle, within: kid_room_1, at: [7.5, 9.5], size: [6, 4], label: BED}
+      kid_storage_shelves: {kind: rectangle, within: kid_storage, at: [7, 21.5], size: [5, 1], label: SHELVES}
+      kid_3_bed: {kind: rectangle, within: kid_room_3, at: [7.5, 27.5], size: [6, 4], label: BED}
       tower_spiral: {kind: spiral_stair, within: tower, size: [6, 6], label: ''}
-      master_balcony_deck: {kind: deck, within: terrace, at: [47.5, 35.25], size: [19, 10], label: BALCONY}
+      master_balcony_deck: {kind: deck, within: terrace, at: [47, 37.5], size: [19, 7.5], label: BALCONY}
     connections:
       - {between: [public_bath, upper_landing], width: 3, swing: in-right}
-      - {between: [kids_hall, upper_landing], kind: arch, width: 4, offset: 1}
-      - {between: [kids_hall, kid_room_1], width: 3, offset: 2}
-      - {between: [kids_hall, kid_room_2], width: 3, offset: 3}
-      - {between: [kids_hall, suite_gym], kind: arch, width: 3.5, offset: 1}
+      - {between: [kids_hall, upper_landing], kind: arch, width: 4, offset: 0.25}
+      - {between: [kids_hall, kid_room_1], width: 2.5, offset: 1, swing: out-left}
+      - {between: [kids_hall, kid_storage], width: 3, offset: 2.5}
+      - {between: [kids_hall, kid_room_3], width: 2.5, offset: 1}
       - {between: [upper_landing, tower], width: 3}
-      - {between: [upper_landing, suite_hall], width: 3.5, offset: 1}
-      - {between: [suite_hall, ensuite_bathroom], width: 3, offset: 3.5}
-      - {between: [master_bedroom, walk_in_closet], width: 3, offset: 1.5, kind: arch}
-      - {between: [master_sitting, ensuite_bathroom], width: 3, offset: 3}
+      - {between: [upper_landing, suite_hall], width: 5, offset: 1, kind: open}
+      - {between: [master_bedroom, walk_in_closet], width: 3, offset: 1, kind: arch}
+      - {between: [master_sitting, ensuite_bathroom], width: 3, offset: 2.5}
       - {between: [master_bedroom, terrace], kind: open, offset: 0}
-      - {between: [ensuite_bathroom, master_bedroom], kind: door, width: 3, offset: 5}
+      - {between: [ensuite_bathroom, master_bedroom], kind: door, width: 3, offset: 3.5}
+      - {between: [laundry, public_bath], kind: open, width: 6}
     access:
       - [upper_landing, public_bath]
       - [stair, laundry]
       - [upper_landing, kids_hall]
       - [kids_hall, kid_room_1]
-      - [kids_hall, kid_room_2]
-      - [kids_hall, suite_gym]
+      - [kids_hall, kid_storage]
+      - [kids_hall, kid_room_3]
       - [upper_landing, tower]
       - [upper_landing, suite_hall]
       - [suite_hall, ensuite_bathroom]
@@ -210,25 +208,23 @@ levels:
       - [master_sitting, ensuite_bathroom]
       - [master_bedroom, terrace]
     openings:
-      - {id: master_south_window, wall: exterior_3, offset: 6, width: 7, kind: window}
-      - {id: master_east_window, wall: exterior_12, offset: 24.5, width: 4, kind: window}
-      - {id: kid_1_west_window, wall: exterior_11, offset: 20, width: 4, kind: window}
-      - {id: kid_2_west_window, wall: exterior_11, offset: 6, width: 4, kind: window}
-      - {id: gym_east_window, wall: exterior_8, offset: 3, width: 4, kind: window}
-      - {id: exterior_4_window, wall: exterior_3, offset: 22, width: 1, kind: window}
-      - {id: exterior_8_window, wall: exterior_6, offset: 9, width: 4, kind: window}
-      - {id: exterior_1_window, kind: window, width: 7, offset: 6, wall: exterior_1}
-      - {id: exterior_11_window, kind: window, width: 4, offset: 4, wall: exterior_11}
-      - {id: exterior_12_window, kind: window, width: 4, offset: 2, wall: exterior_12}
-      - {id: exterior_5_window, kind: window, width: 5, offset: 6, wall: exterior_5}
-      - {id: exterior_4_window_2, kind: window, width: 5, offset: 6, wall: exterior_4}
+      - {id: master_south_window, wall: exterior_5, offset: 5, width: 8, kind: window}
+      - {id: master_east_window, wall: exterior_14, offset: 24.5, width: 5, kind: window}
+      - {id: kid_1_west_window, wall: exterior_13, offset: 20.5, width: 4, kind: window}
+      - {id: kid_storage_west_window, wall: exterior_13, offset: 12.25, width: 3, kind: window}
+      - {id: kid_3_west_window, wall: exterior_13, offset: 2.5, width: 4, kind: window}
+      - {id: exterior_4_window, wall: exterior_3, offset: 3, width: 1, kind: window}
+      - {id: exterior_8_window, wall: exterior_7, offset: 9.5, width: 4, kind: window}
+      - {id: exterior_1_window, kind: window, width: 7, offset: 5.5, wall: exterior_1}
+      - {id: exterior_12_window, kind: window, width: 4, offset: 2, wall: exterior_14}
+      - {id: exterior_5_window, kind: window, width: 5, offset: 5.5, wall: exterior_6}
+      - {id: exterior_4_window_2, kind: window, width: 5, offset: 5.5, wall: exterior_4}
+      - {id: exterior_10_window, kind: window, width: 4, offset: 3.5, wall: exterior_11}
     overlays:
       plumbing:
-        - {id: cold_riser_l2, kind: riser, label: RISER, color: '#2678b9', width: 0.16, points: [[8, 10], [8, 10]]}
-        - {id: cold_main_l2, label: 'COLD WATER', color: '#2678b9', width: 0.16, points: [[8.5, 9.5], [24.5, 18.5], [38, 18.5], [46.5, 18.5]]}
-      annotations:
-        - {id: cold_public_bath_l2_note, label: 'BATH CW', color: '#5d5751', width: 0.04, points: [[24, 19], [23, 18]]}
-        - {id: cold_ensuite_l2_note, label: 'ENSUITE CW', color: '#5d5751', width: 0.04, points: [[52, 19], [52, 18]]}
+        - {id: cold_riser_l2, kind: riser, label: RISER, color: '#2678b9', width: 0.16, points: [[25, 13.5], [25, 13.5]]}
+        - {id: cold_main_l2, label: 'COLD WATER', color: '#2678b9', width: 0.16, points: [[26.5, 11], [26.5, 18], [38, 18], [49, 12]]}
+      annotations: null
   L3:
     title: Nest
     derive_partitions: true
