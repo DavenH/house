@@ -212,7 +212,7 @@
     try {
       plans = await listPlans();
       selectedPlan =
-        plans.find((plan) => plan.name === "master-south.yaml")?.name ??
+        plans.find((plan) => plan.name === "master-south-no-dining.yaml")?.name ??
         plans[0]?.name ??
         "";
       if (selectedPlan) {

@@ -297,10 +297,14 @@ def _level_mass_rects(
         if level_id not in _mass_level_ids(mass_data, [level_id]):
             continue
         for rect_spec in mass_data.get("rects") or ():
+            if _rect_is_roof_only(rect_spec):
+                continue
             if level_id in _rect_level_ids(rect_spec, mass_data, [level_id], level_elevations):
                 rects.append(_rect_from_spec(rect_spec, datums))
         if "rect" in mass_data:
             rect_spec = mass_data["rect"]
+            if _rect_is_roof_only(rect_spec):
+                continue
             if level_id in _rect_level_ids(rect_spec, mass_data, [level_id], level_elevations):
                 rects.append(_rect_from_spec(rect_spec, datums))
     return rects
@@ -317,6 +321,8 @@ def _level_mass_rects_by_id(
         if level_id not in _mass_level_ids(mass_data, [level_id]):
             continue
         for index, rect_spec in enumerate(_mass_rect_specs(mass_data), start=1):
+            if _rect_is_roof_only(rect_spec):
+                continue
             if level_id not in _rect_level_ids(rect_spec, mass_data, [level_id], level_elevations):
                 continue
             rect = _rect_from_spec(rect_spec, datums)
@@ -454,6 +460,8 @@ def _foundation_source_rects(
         if mass_id not in selected_ids:
             continue
         for rect_spec in _mass_rect_specs(mass_data):
+            if _rect_is_roof_only(rect_spec):
+                continue
             if source_level in _rect_level_ids(rect_spec, mass_data, [source_level], level_elevations):
                 rects.append(_rect_from_spec(rect_spec, datums))
     return rects
@@ -536,6 +544,10 @@ def _mass_rect_specs(mass_data: dict[str, Any]) -> list[Any]:
     if "rect" in mass_data:
         specs.append(mass_data["rect"])
     return specs
+
+
+def _rect_is_roof_only(rect_spec: Any) -> bool:
+    return isinstance(rect_spec, dict) and bool(rect_spec.get("roof_only"))
 
 
 def _roof_options(data: Any) -> dict[str, Any]:

@@ -163,6 +163,55 @@ def test_intent_plan_renders_lower_roof_on_higher_levels() -> None:
     assert "eave 10" not in svg
 
 
+def test_intent_plan_roof_only_mass_rect_does_not_add_walls_or_foundation() -> None:
+    plan = intent_plan_from_dict(
+        {
+            "type": "intent_plan",
+            "plan": "roof-only-cover-test",
+            "story": {"floor_to_floor": 10},
+            "roof": {"pitch": "8:12", "eave_margin": 1.5},
+            "masses": {
+                "body": {
+                    "levels": ["L1", "L2"],
+                    "rects": [
+                        {"id": "main", "x": ["w", "e"], "y": ["n", "s"]},
+                        {
+                            "id": "covered_patio",
+                            "levels": ["L1"],
+                            "roof_only": True,
+                            "roof": {"mode": "open_gable", "eave_height": 10, "ridge": "y"},
+                            "x": ["w", "e"],
+                            "y": ["s", "patio_s"],
+                        },
+                    ],
+                }
+            },
+            "datums": {
+                "x": {"w": 0, "e": 20},
+                "y": {"n": 0, "s": 12, "patio_s": 18},
+            },
+            "levels": {
+                "L1": {"spaces": {"main": {"x": ["w", "e"], "y": ["n", "s"]}}},
+                "L2": {"spaces": {"upper": {"x": ["w", "e"], "y": ["n", "s"]}}},
+            },
+            "foundations": {
+                "F1": {
+                    "source_level": "L1",
+                    "masses": ["body"],
+                    "insulation_margin": 0,
+                    "footing_width": 0,
+                }
+            },
+        }
+    )
+
+    exterior_walls = [wall for wall in plan.levels["L1"].walls if wall.kind == "exterior"]
+    foundation = plan.levels["F1"].foundations[0]
+    assert len(exterior_walls) == 4
+    assert max(point.y for loop in foundation.body_loops for point in loop) == pytest.approx(13)
+    assert [roof.id for roof in plan.levels["L2"].roofs] == ["covered_patio"]
+
+
 def test_intent_plan_clips_promoted_lower_roof_under_higher_eave() -> None:
     plan = intent_plan_from_dict(
         {
