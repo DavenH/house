@@ -54,7 +54,6 @@
     moveSharedWall,
     moveSpaceEdgeForDrag,
     openingAxisDelta,
-    spaceSideOpeningOffsetBounds,
     spaceEdgeCoordinate,
     resolveSpaceRect,
     snapToGrid
@@ -213,7 +212,7 @@
     try {
       plans = await listPlans();
       selectedPlan =
-        plans.find((plan) => plan.name === "master-south.yaml")?.name ??
+        plans.find((plan) => plan.name === "master-south-no-dining.yaml")?.name ??
         plans[0]?.name ??
         "";
       if (selectedPlan) {
@@ -465,6 +464,9 @@
   }
 
   function handleCanvasPointerDown(event: PointerEvent) {
+    if (event.button !== 0) {
+      return;
+    }
     const element = (event.target as Element | null)?.closest?.("[data-fp-kind][data-fp-id]") as
       | SVGGraphicsElement
       | null;
@@ -473,7 +475,12 @@
     }
     const rawKind = element.getAttribute("data-fp-kind") ?? "";
     const kind = normalizeSvgKind(rawKind);
-    if (!["feature", "wall", "opening", "overlay", "space"].includes(kind) || event.button !== 0) {
+    const selectedSpaceDrag = createSelectedSpaceEdgeDrag(event, kind);
+    if (selectedSpaceDrag) {
+      beginSpaceEdgeDrag(selectedSpaceDrag, event);
+      return;
+    }
+    if (!["feature", "wall", "opening", "overlay", "space"].includes(kind)) {
       return;
     }
     const id = element.getAttribute("data-fp-id") ?? "";
@@ -483,18 +490,7 @@
       if (!spaceDrag) {
         return;
       }
-      event.preventDefault();
-      window.getSelection()?.removeAllRanges();
-      canvasElement?.setPointerCapture?.(event.pointerId);
-      selected = { kind: "space", level: levelFromSvg, id };
-      activeLevel = levelFromSvg;
-      drag = spaceDrag;
-      dragStartYamlText = yamlText;
-      setDragCursor(spaceDrag.orientation === "vertical" ? "ew" : "ns");
-      window.addEventListener("pointermove", handleWindowPointerMove);
-      window.addEventListener("pointerup", handleWindowPointerUp, { once: true });
-      void tick().then(() => markSelectedInSvg(canvasElement, selected));
-      void tick().then(() => jumpToSelectedYaml());
+      beginSpaceEdgeDrag(spaceDrag, event);
       return;
     }
     event.preventDefault();
@@ -513,7 +509,7 @@
       window.addEventListener("pointermove", handleWindowPointerMove);
       window.addEventListener("pointerup", handleWindowPointerUp, { once: true });
       void tick().then(() => markSelectedInSvg(canvasElement, selected));
-      void tick().then(() => jumpToSelectedYaml());
+      void tick().then(() => jumpToSelectedYaml({ force: true }));
       return;
     }
     if (kind === "opening") {
@@ -529,7 +525,7 @@
       window.addEventListener("pointermove", handleWindowPointerMove);
       window.addEventListener("pointerup", handleWindowPointerUp, { once: true });
       void tick().then(() => markSelectedInSvg(canvasElement, selected));
-      void tick().then(() => jumpToSelectedYaml());
+      void tick().then(() => jumpToSelectedYaml({ force: true }));
       return;
     }
     if (kind === "wall") {
@@ -545,7 +541,7 @@
       window.addEventListener("pointermove", handleWindowPointerMove);
       window.addEventListener("pointerup", handleWindowPointerUp, { once: true });
       void tick().then(() => markSelectedInSvg(canvasElement, selected));
-      void tick().then(() => jumpToSelectedYaml());
+      void tick().then(() => jumpToSelectedYaml({ force: true }));
       return;
     }
     const feature = ((data.levels as AnyRecord)?.[levelFromSvg]?.features ?? {})[id] as AnyRecord | undefined;
@@ -556,7 +552,7 @@
     activeLevel = levelFromSvg;
     if (feature.wrap || feature.along || feature.extrude) {
       void tick().then(() => markSelectedInSvg(canvasElement, selected));
-      void tick().then(() => jumpToSelectedYaml());
+      void tick().then(() => jumpToSelectedYaml({ force: true }));
       return;
     }
     feature.at ??= [20, 20];
@@ -574,7 +570,7 @@
     window.addEventListener("pointermove", handleWindowPointerMove);
     window.addEventListener("pointerup", handleWindowPointerUp, { once: true });
     void tick().then(() => markSelectedInSvg(canvasElement, selected));
-    void tick().then(() => jumpToSelectedYaml());
+    void tick().then(() => jumpToSelectedYaml({ force: true }));
   }
 
   function preventCanvasSelection(event: Event) {
@@ -683,7 +679,29 @@
     void renderCurrentYaml({ rollbackData });
   }
 
-  function createSpaceEdgeDrag(id: string, levelId: string, event: PointerEvent) {
+  function beginSpaceEdgeDrag(spaceDrag: NonNullable<DragState> & { type: "space-edge" }, event: PointerEvent) {
+    event.preventDefault();
+    window.getSelection()?.removeAllRanges();
+    canvasElement?.setPointerCapture?.(event.pointerId);
+    selected = { kind: "space", level: spaceDrag.level, id: spaceDrag.id };
+    activeLevel = spaceDrag.level;
+    drag = spaceDrag;
+    dragStartYamlText = yamlText;
+    setDragCursor(spaceDrag.orientation === "vertical" ? "ew" : "ns");
+    window.addEventListener("pointermove", handleWindowPointerMove);
+    window.addEventListener("pointerup", handleWindowPointerUp, { once: true });
+    void tick().then(() => markSelectedInSvg(canvasElement, selected));
+    void tick().then(() => jumpToSelectedYaml({ force: true }));
+  }
+
+  function createSelectedSpaceEdgeDrag(event: PointerEvent, targetKind: SelectionKind) {
+    if (selected.kind !== "space" || !selected.id || targetKind !== "space") {
+      return null;
+    }
+    return createSpaceEdgeDrag(selected.id, selected.level || activeLevel, event, 1.25);
+  }
+
+  function createSpaceEdgeDrag(id: string, levelId: string, event: PointerEvent, hitTolerance = 1.25) {
     const rect = resolveSpaceRect(data, levelId, id);
     if (!rect) {
       return null;
@@ -692,7 +710,12 @@
     const scale = Number(data.scale ?? 16);
     const x = point.x / scale;
     const y = point.y / scale;
-    if (x < rect.left - 0.75 || x > rect.right + 0.75 || y < rect.top - 0.75 || y > rect.bottom + 0.75) {
+    if (
+      x < rect.left - hitTolerance ||
+      x > rect.right + hitTolerance ||
+      y < rect.top - hitTolerance ||
+      y > rect.bottom + hitTolerance
+    ) {
       return null;
     }
     const edgeDistances: Array<{ edge: SpaceEdge; distance: number }> = [
@@ -702,7 +725,7 @@
       { edge: "bottom", distance: Math.abs(y - rect.bottom) }
     ];
     const nearest = edgeDistances.sort((a, b) => a.distance - b.distance)[0];
-    if (!nearest || nearest.distance > 0.75) {
+    if (!nearest || nearest.distance > hitTolerance) {
       return null;
     }
     const orientation: "vertical" | "horizontal" = nearest.edge === "left" || nearest.edge === "right" ? "vertical" : "horizontal";
@@ -941,27 +964,14 @@
       setError("Dragging openings along angled walls is not supported yet. Edit the offset in YAML or the inspector.");
       return null;
     }
-    const opening = (source === "connection" ? selectedLevel.connections?.[index] : selectedLevel.openings?.[index]) as
-      | AnyRecord
-      | undefined;
-    const openingLine = lineFromSvgElement(element, Number(data.scale ?? 16));
-    const offsetBounds =
-      source === "opening" &&
-      opening?.space &&
-      opening?.side &&
-      openingLine
-        ? spaceSideOpeningDragBounds(data, levelForOpening, opening, direction, openingLine, startOffset, width, wallLength)
-        : { min: 0, max: Math.max(0, wallLength - width) };
+    const offsetBounds = { min: 0, max: Math.max(0, wallLength - width) };
     return {
       type: "opening" as const,
       id,
       level: levelForOpening,
       index,
       source,
-      preserveSpaceSide:
-        source === "opening" &&
-        Boolean((selectedLevel.openings?.[index] as AnyRecord | undefined)?.space) &&
-        Boolean((selectedLevel.openings?.[index] as AnyRecord | undefined)?.side),
+      preserveSpaceSide: false,
       startPoint: svgPoint(canvasElement, event),
       wall,
       direction,
@@ -975,27 +985,10 @@
     };
   }
 
-  function spaceSideOpeningDragBounds(
-    sourceData: AnyRecord,
-    levelId: string,
-    opening: AnyRecord,
-    direction: WallDirection,
-    openingLine: WallLine,
-    startOffset: number,
-    width: number,
-    wallLength: number
-  ) {
-    const rect = resolveSpaceRect(sourceData, levelId, String(opening.space));
-    if (!rect) {
-      return { min: 0, max: Math.max(0, wallLength - width) };
-    }
-    return spaceSideOpeningOffsetBounds(direction, openingLine, startOffset, width, rect, String(opening.side), wallLength);
-  }
-
   function selectObject(kind: SelectionKind, id: string, index?: number) {
     selected = { kind, level: selected.level || activeLevel, id, index };
     void tick().then(() => markSelectedInSvg(canvasElement, selected));
-    void tick().then(() => jumpToSelectedYaml());
+    void tick().then(() => jumpToSelectedYaml({ force: true }));
   }
 
   async function jumpToSelectedYaml(options: { force?: boolean } = {}) {

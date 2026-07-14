@@ -16,7 +16,7 @@ costing:
     roofing:
       label: Roofing assembly
       unit: sq ft
-      unit_cost: 2.5
+      unit_cost: 4
     interior_framing:
       label: Interior framing lumber
       unit: sq ft wall

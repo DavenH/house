@@ -20,7 +20,7 @@ describe("exterior opening stabilization", () => {
     });
   });
 
-  it("converts generated exterior wall openings to stable space-side openings", () => {
+  it("keeps generated exterior wall openings wall-bound", () => {
     const data = planData();
     const wallLines: Record<string, WallLine> = {
       exterior_5: { x1: 63, y1: 28, x2: 54, y2: 28 }
@@ -28,23 +28,25 @@ describe("exterior opening stabilization", () => {
 
     const changed = stabilizeGeneratedExteriorWallOpenings(data, "L1", (wallId) => wallLines[wallId] ?? null);
 
-    expect(changed).toBe(true);
+    expect(changed).toBe(false);
     expect(data.levels.L1.openings[0]).toEqual({
       id: "dining_south_window",
+      wall: "exterior_5",
       offset: 3,
       width: 5,
-      kind: "window",
-      space: "dining",
-      side: "south"
+      kind: "window"
     });
   });
 
-  it("keeps direct add-window references on generated exterior wall ids", () => {
+  it("uses wall references for direct add-window actions", () => {
     const data = planData();
     const line = { x1: 32, y1: 22.5, x2: 32, y2: 30 };
 
     expect(openingReferenceForWall(data, "L1", "exterior_15", line)).toEqual({
       wall: "exterior_15"
+    });
+    expect(openingReferenceForWall(data, "L1", "bathroom__dining_wall", line)).toEqual({
+      wall: "bathroom__dining_wall"
     });
   });
 });

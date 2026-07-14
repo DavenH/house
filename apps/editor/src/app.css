@@ -1218,6 +1218,19 @@ dd {
   margin-top: 2px;
 }
 
+.quantity-breakdown {
+  color: #776f66;
+  font-size: 10.5px;
+  line-height: 1.25;
+  list-style: disc;
+  margin: 5px 0 0 14px;
+  padding: 0;
+}
+
+.quantity-breakdown li + li {
+  margin-top: 2px;
+}
+
 .materials-table input {
   min-width: 0;
   text-align: right;

@@ -45,6 +45,7 @@ class IntentContext:
     datums: dict[str, dict[str, float]]
     spaces: dict[str, Rect]
     walls: dict[str, WallSegment]
+    masses: dict[str, Rect]
     openings: tuple[WallOpening, ...] = ()
 
 
@@ -118,13 +119,21 @@ def intent_plan_from_dict(data: dict[str, Any]) -> WallPlan:
             for space_id, space_data in (level_data.get("spaces") or {}).items()
         }
         mass_rects = _level_mass_rects(data.get("masses") or {}, level_id, datums, level_elevations)
+        mass_rects_by_id = _level_mass_rects_by_id(
+            data.get("masses") or {}, level_id, datums, level_elevations
+        )
         _require_valid_intent_level(level_id, level_data, mass_rects, spaces)
         level = WallLevel(id=level_id, title=level_data.get("title"))
         level.walls.extend(_boundary_walls(mass_rects, prefix="exterior"))
         if level_data.get("derive_partitions", False):
             level.walls.extend(_space_partition_walls(spaces))
         level.walls.extend(_partition_walls(level_data.get("partitions") or [], datums))
-        context = IntentContext(datums=datums, spaces=spaces, walls={wall.id: wall for wall in level.walls})
+        context = IntentContext(
+            datums=datums,
+            spaces=spaces,
+            walls={wall.id: wall for wall in level.walls},
+            masses=mass_rects_by_id,
+        )
         compiled_openings = (
             *_compile_connections(level_data.get("connections") or [], context),
             *_compile_openings(level_data.get("openings") or [], context),
@@ -133,6 +142,7 @@ def intent_plan_from_dict(data: dict[str, Any]) -> WallPlan:
             datums=datums,
             spaces=spaces,
             walls={wall.id: wall for wall in level.walls},
+            masses=mass_rects_by_id,
             openings=tuple(compiled_openings),
         )
         contexts[level_id] = context
@@ -287,12 +297,42 @@ def _level_mass_rects(
         if level_id not in _mass_level_ids(mass_data, [level_id]):
             continue
         for rect_spec in mass_data.get("rects") or ():
+            if _rect_is_roof_only(rect_spec):
+                continue
             if level_id in _rect_level_ids(rect_spec, mass_data, [level_id], level_elevations):
                 rects.append(_rect_from_spec(rect_spec, datums))
         if "rect" in mass_data:
             rect_spec = mass_data["rect"]
+            if _rect_is_roof_only(rect_spec):
+                continue
             if level_id in _rect_level_ids(rect_spec, mass_data, [level_id], level_elevations):
                 rects.append(_rect_from_spec(rect_spec, datums))
+    return rects
+
+
+def _level_mass_rects_by_id(
+    masses: dict[str, Any],
+    level_id: str,
+    datums: dict[str, dict[str, float]],
+    level_elevations: dict[str, float],
+) -> dict[str, Rect]:
+    rects: dict[str, Rect] = {}
+    for mass_id, mass_data in masses.items():
+        if level_id not in _mass_level_ids(mass_data, [level_id]):
+            continue
+        for index, rect_spec in enumerate(_mass_rect_specs(mass_data), start=1):
+            if _rect_is_roof_only(rect_spec):
+                continue
+            if level_id not in _rect_level_ids(rect_spec, mass_data, [level_id], level_elevations):
+                continue
+            rect = _rect_from_spec(rect_spec, datums)
+            rect_id = rect_spec.get("id") if isinstance(rect_spec, dict) else None
+            if rect_id:
+                rects[str(rect_id)] = rect
+            if len(_mass_rect_specs(mass_data)) == 1:
+                rects[str(mass_id)] = rect
+            else:
+                rects[f"{mass_id}_{index}"] = rect
     return rects
 
 
@@ -420,6 +460,8 @@ def _foundation_source_rects(
         if mass_id not in selected_ids:
             continue
         for rect_spec in _mass_rect_specs(mass_data):
+            if _rect_is_roof_only(rect_spec):
+                continue
             if source_level in _rect_level_ids(rect_spec, mass_data, [source_level], level_elevations):
                 rects.append(_rect_from_spec(rect_spec, datums))
     return rects
@@ -502,6 +544,10 @@ def _mass_rect_specs(mass_data: dict[str, Any]) -> list[Any]:
     if "rect" in mass_data:
         specs.append(mass_data["rect"])
     return specs
+
+
+def _rect_is_roof_only(rect_spec: Any) -> bool:
+    return isinstance(rect_spec, dict) and bool(rect_spec.get("roof_only"))
 
 
 def _roof_options(data: Any) -> dict[str, Any]:
@@ -1184,6 +1230,15 @@ def _compile_openings(openings: list[dict[str, Any]], context: IntentContext) ->
         kind = data.get("kind", "door")
         wall_id = data.get("wall")
         offset = data.get("offset")
+        if "exterior" in data:
+            wall, start, end = _wall_for_exterior_opening(context, data["exterior"])
+            width = float(data["width"])
+            if "offset" in data:
+                min_offset, max_offset = _opening_offset_bounds(wall, start, end, width)
+                offset = max(min(float(data["offset"]), max_offset), min_offset)
+            else:
+                offset = _opening_offset(wall, start, end, width, data.get("position", "center"))
+            wall_id = wall.id
         if "space" in data and "side" in data:
             space = context.spaces[data["space"]]
             side = _side(data["side"])
@@ -1196,11 +1251,14 @@ def _compile_openings(openings: list[dict[str, Any]], context: IntentContext) ->
                 offset = _opening_offset(wall, start, end, width, data.get("position", "center"))
             wall_id = wall.id
         width = float(data["width"]) if "width" in data else 0
-        if kind in {"open", "arch"} and wall_id in context.walls:
+        if wall_id in context.walls:
             wall = context.walls[wall_id]
-            offset = max(0, min(float(offset or 0), wall.length))
-            available = max(wall.length - offset, 0)
-            width = available if "width" not in data else min(width, available)
+            if kind in {"open", "arch"} and "width" not in data:
+                offset = max(0, min(float(offset or 0), wall.length))
+                width = max(wall.length - offset, 0)
+            else:
+                width = min(width, wall.length)
+                offset = max(0, min(float(offset or 0), max(wall.length - width, 0)))
         compiled.append(
             WallOpening(
                 id=data.get("id", f"opening_{index}"),
@@ -1212,6 +1270,50 @@ def _compile_openings(openings: list[dict[str, Any]], context: IntentContext) ->
             )
         )
     return compiled
+
+
+def _wall_for_exterior_opening(context: IntentContext, data: Any) -> tuple[WallSegment, float, float]:
+    if isinstance(data, str):
+        try:
+            mass_id, side_name = data.split(".", 1)
+        except ValueError as error:
+            raise ValueError(f"Exterior opening reference must be mass.side: {data!r}") from error
+        span = None
+    else:
+        mass_id = str(data["mass"])
+        side_name = str(data["side"])
+        span = data.get("span")
+    rect = context.masses.get(mass_id)
+    if rect is None:
+        raise ValueError(f"Unknown exterior mass reference {mass_id!r}")
+    side = _side(side_name)
+    return _wall_for_rect_side(context, rect, side, kind="exterior", span=span)
+
+
+def _wall_for_rect_side(
+    context: IntentContext, rect: Rect, side: Side, *, kind: str | None = None, span: Any = None
+) -> tuple[WallSegment, float, float]:
+    def side_span(default_start: float, default_end: float) -> tuple[float, float]:
+        if span is None:
+            return default_start, default_end
+        if not isinstance(span, list | tuple) or len(span) != 2:
+            raise ValueError(f"Exterior opening span must be [start, end]: {span!r}")
+        axis = "x" if side in {"north", "south"} else "y"
+        start = _value(span[0], context.datums, axis)
+        end = _value(span[1], context.datums, axis)
+        return min(start, end), max(start, end)
+
+    if side == "north":
+        start, end = side_span(rect.left, rect.right)
+        return _wall_for_boundary(context, "horizontal", rect.top, start, end, kind=kind)
+    if side == "south":
+        start, end = side_span(rect.left, rect.right)
+        return _wall_for_boundary(context, "horizontal", rect.bottom, start, end, kind=kind)
+    if side == "east":
+        start, end = side_span(rect.top, rect.bottom)
+        return _wall_for_boundary(context, "vertical", rect.right, start, end, kind=kind)
+    start, end = side_span(rect.top, rect.bottom)
+    return _wall_for_boundary(context, "vertical", rect.left, start, end, kind=kind)
 
 
 def _wall_for_space_side_for_opening(

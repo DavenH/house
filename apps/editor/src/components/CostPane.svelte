@@ -91,6 +91,13 @@
               <td>
                 <strong>{item.label}</strong>
                 <span>{item.notes}</span>
+                {#if item.breakdown?.length}
+                  <ul class="quantity-breakdown">
+                    {#each item.breakdown as line}
+                      <li>{line}</li>
+                    {/each}
+                  </ul>
+                {/if}
               </td>
               <td>{quantity(item.quantity)}</td>
               <td>{item.unit}</td>
@@ -131,6 +138,7 @@
       <dl class="assumptions-list">
         <dt>Current Assumptions</dt>
         <dd>Slab {estimate.assumptions.slabThicknessIn}" thick, footings {estimate.assumptions.footingWidthFt}' wide by {estimate.assumptions.footingDepthIn}" deep.</dd>
+        <dd>Pad insulation covers under-slab and perimeter apron at R{estimate.assumptions.padInsulationRMin}-R{estimate.assumptions.padInsulationRMax}.</dd>
         <dd>Interior walls {estimate.assumptions.interiorWallHeightFt}' high, exterior walls {estimate.assumptions.exteriorWallHeightFt}' high.</dd>
         <dd>Pad rebar grid at {estimate.assumptions.padRebarSpacingFt}' spacing with {estimate.assumptions.padRebarEdgeCoverIn}" edge cover.</dd>
       </dl>

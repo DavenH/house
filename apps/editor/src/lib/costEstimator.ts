@@ -12,6 +12,8 @@ export type CostAssumptions = {
   footingDepthIn: number;
   padWallMarginFt: number;
   padInsulationMarginFt: number;
+  padInsulationRMin: number;
+  padInsulationRMax: number;
   footingCenterOffsetFt: number;
   padRebarSpacingFt: number;
   padRebarEdgeCoverIn: number;
@@ -38,6 +40,7 @@ export type QuantityEstimate = {
   quantity: number;
   unit: string;
   notes: string;
+  breakdown?: string[];
 };
 
 export type CostEstimate = {
@@ -50,6 +53,21 @@ export type CostEstimate = {
 
 type Rect = SpaceRect;
 type Segment = { orientation: "horizontal" | "vertical"; fixed: number; start: number; end: number };
+type Side = "north" | "east" | "south" | "west";
+type RoofMass = {
+  id: string;
+  rect: Rect;
+  roof: AnyRecord;
+  pitch: number;
+  eaveHeight: number;
+  eaveMargin: number;
+  eaveSides: Side[];
+  ridge: "x" | "y";
+  start: "open" | "hip";
+  end: "open" | "hip";
+};
+
+const SIDES: Side[] = ["north", "east", "south", "west"];
 
 export const DEFAULT_COST_ASSUMPTIONS: CostAssumptions = {
   exteriorWallHeightFt: 10,
@@ -62,6 +80,8 @@ export const DEFAULT_COST_ASSUMPTIONS: CostAssumptions = {
   footingDepthIn: 12,
   padWallMarginFt: 1,
   padInsulationMarginFt: 4,
+  padInsulationRMin: 15,
+  padInsulationRMax: 20,
   footingCenterOffsetFt: 0.5,
   padRebarSpacingFt: 2,
   padRebarEdgeCoverIn: 2,
@@ -159,20 +179,22 @@ export function estimateCosts(
   const insulationRects = sourceRects.map((rect) => expandRect(rect, insulationMargin));
   const footingRects = sourceRects.map((rect) => expandRect(rect, footingOffset));
   const foundationPadArea = unionArea(padRects);
-  const padInsulationArea = Math.max(0, unionArea(insulationRects) - foundationPadArea);
+  const padInsulationArea = unionArea(insulationRects);
+  const padInsulationApronArea = Math.max(0, padInsulationArea - foundationPadArea);
   const footingLength = boundarySegments(footingRects).reduce((total, segment) => total + segment.end - segment.start, 0);
   const padRebarLength = scanlineLength(padRects, rebarSpacing, rebarCover);
   const footingRebarLength = footingLength * assumptions.footingRebarRuns;
   const interior = interiorWallStats(data, assumptions);
   const exteriorAssembly = exteriorWallAssemblyConfig(data, assumptions);
-  const exterior = exteriorWallStats(data, assumptions, exteriorAssembly.heightFt);
+  const exterior = exteriorWallStats(data, assumptions);
   const icfBlockArea = exteriorAssembly.icf.blockLengthFt * exteriorAssembly.icf.blockHeightFt;
   const icfBlockCount = icfBlockArea > 0 ? Math.ceil((exterior.netArea / icfBlockArea) * (1 + exteriorAssembly.icf.wastePercent / 100)) : 0;
   const icfCoreConcreteYd3 = exterior.netArea * (exteriorAssembly.icf.concreteThicknessIn / 12) / 27;
   const claddingArea = exterior.netArea * (1 + exteriorAssembly.cladding.wastePercent / 100);
   const flooringArea = floorAreaEstimate(data) * (1 + assumptions.flooringWastePercent / 100);
   const pexLength = plumbingPexLength(data, assumptions);
-  const roofArea = roofAreaEstimate(data, assumptions);
+  const roof = roofStats(data, assumptions);
+  const roofArea = roof.areaWithWaste;
   const concreteVolumeYd3 =
     (foundationPadArea * (assumptions.slabThicknessIn / 12) + footingLength * footingWidth * (assumptions.footingDepthIn / 12)) / 27;
 
@@ -184,7 +206,12 @@ export function estimateCosts(
       materialId: "concrete",
       quantity: concreteVolumeYd3,
       unit: "yd3",
-      notes: `${formatNumber(foundationPadArea)} sq ft slab, ${formatNumber(footingLength)} ft footing`
+      notes: `${formatNumber(foundationPadArea)} sq ft slab, ${formatNumber(footingLength)} ft footing`,
+      breakdown: [
+        `Slab volume: ${formatNumber(foundationPadArea)} sq ft x ${formatNumber(assumptions.slabThicknessIn)} in / 12`,
+        `Footing volume: ${formatNumber(footingLength)} ft x ${formatNumber(footingWidth)} ft x ${formatNumber(assumptions.footingDepthIn)} in / 12`,
+        "Total converted from cubic feet to cubic yards"
+      ]
     },
     {
       id: "pad_insulation",
@@ -193,7 +220,13 @@ export function estimateCosts(
       materialId: "pad_insulation",
       quantity: padInsulationArea,
       unit: "sq ft",
-      notes: `${formatNumber(insulationMargin)} ft perimeter apron beyond source mass`
+      notes: `Under-slab plus ${formatNumber(insulationMargin)} ft perimeter apron, R${formatNumber(assumptions.padInsulationRMin)}-R${formatNumber(assumptions.padInsulationRMax)}`,
+      breakdown: [
+        `Under-slab insulation covers the ${formatNumber(foundationPadArea)} sq ft concrete pad footprint`,
+        `Source mass union expanded by ${formatNumber(insulationMargin)} ft`,
+        `Perimeter apron beyond pad: ${formatNumber(padInsulationApronArea)} sq ft`,
+        `Total insulation board area: ${formatNumber(foundationPadArea)} sq ft under slab + ${formatNumber(padInsulationApronArea)} sq ft apron`
+      ]
     },
     {
       id: "pad_and_footing_rebar",
@@ -202,7 +235,11 @@ export function estimateCosts(
       materialId: "rebar",
       quantity: padRebarLength + footingRebarLength,
       unit: "ft",
-      notes: `${formatNumber(padRebarLength)} ft grid, ${formatNumber(footingRebarLength)} ft footing`
+      notes: `${formatNumber(padRebarLength)} ft grid, ${formatNumber(footingRebarLength)} ft footing`,
+      breakdown: [
+        `Pad grid scanlines at ${formatNumber(rebarSpacing)} ft spacing with ${formatNumber(rebarCover * 12)} in edge cover`,
+        `Footing rebar: ${formatNumber(footingLength)} ft footing x ${formatNumber(assumptions.footingRebarRuns)} runs`
+      ]
     },
     {
       id: "roofing_area",
@@ -211,7 +248,8 @@ export function estimateCosts(
       materialId: "roofing",
       quantity: roofArea,
       unit: "sq ft",
-      notes: `Includes ${assumptions.roofWastePercent}% waste and pitch slope factor`
+      notes: `Visible roof faces, ${assumptions.roofWastePercent}% waste`,
+      breakdown: roof.breakdown
     },
     {
       id: "interior_framing",
@@ -220,7 +258,11 @@ export function estimateCosts(
       materialId: "interior_framing",
       quantity: interior.netOneSideArea,
       unit: "sq ft wall",
-      notes: `${formatNumber(interior.length)} ft derived/explicit interior partitions`
+      notes: `${formatNumber(interior.length)} ft derived/explicit interior partitions`,
+      breakdown: [
+        `One-side gross area: ${formatNumber(interior.length)} ft x ${formatNumber(assumptions.interiorWallHeightFt)} ft`,
+        "Interior openings subtract one face from framing quantity"
+      ]
     },
     {
       id: "interior_wall_board",
@@ -229,7 +271,11 @@ export function estimateCosts(
       materialId: "interior_drywall",
       quantity: interior.netBothSidesArea,
       unit: "sq ft face",
-      notes: "Both faces, openings subtracted"
+      notes: "Both faces, openings subtracted",
+      breakdown: [
+        `Both-side gross area: ${formatNumber(interior.length)} ft x ${formatNumber(assumptions.interiorWallHeightFt)} ft x 2`,
+        "Interior openings subtract both wall-board faces"
+      ]
     },
     {
       id: "interior_doors",
@@ -238,7 +284,8 @@ export function estimateCosts(
       materialId: "interior_doors",
       quantity: interior.doorCount,
       unit: "each",
-      notes: `${formatNumber(interior.doorArea)} sq ft interior door openings`
+      notes: `${formatNumber(interior.doorArea)} sq ft interior door openings`,
+      breakdown: ["Counted from interior door/opening records"]
     },
     {
       id: "icf_blocks",
@@ -247,7 +294,12 @@ export function estimateCosts(
       materialId: "icf_block",
       quantity: icfBlockCount,
       unit: "block",
-      notes: `${formatNumber(exterior.netArea)} sq ft net wall, ${formatNumber(exteriorAssembly.icf.wastePercent)}% waste`
+      notes: `${formatNumber(exterior.netArea)} sq ft net wall, ${formatNumber(exteriorAssembly.icf.wastePercent)}% waste`,
+      breakdown: [
+        `Exterior wall net face area: ${formatNumber(exterior.netArea)} sq ft`,
+        `ICF block face area: ${formatNumber(exteriorAssembly.icf.blockLengthFt)} ft x ${formatNumber(exteriorAssembly.icf.blockHeightFt)} ft`,
+        `${formatNumber(exteriorAssembly.icf.wastePercent)}% waste, rounded up to whole blocks`
+      ]
     },
     {
       id: "icf_core_concrete",
@@ -256,7 +308,11 @@ export function estimateCosts(
       materialId: "concrete",
       quantity: icfCoreConcreteYd3,
       unit: "yd3",
-      notes: `${formatNumber(exteriorAssembly.icf.concreteThicknessIn)}" concrete core`
+      notes: `${formatNumber(exteriorAssembly.icf.concreteThicknessIn)}" concrete core`,
+      breakdown: [
+        `${formatNumber(exterior.netArea)} sq ft net exterior wall area x ${formatNumber(exteriorAssembly.icf.concreteThicknessIn)} in / 12`,
+        "Converted from cubic feet to cubic yards"
+      ]
     },
     {
       id: "exterior_cladding",
@@ -265,7 +321,8 @@ export function estimateCosts(
       materialId: "exterior_cladding",
       quantity: claddingArea,
       unit: "sq ft",
-      notes: `${formatNumber(exteriorAssembly.cladding.thicknessIn)}" thick, ${formatNumber(exteriorAssembly.cladding.wastePercent)}% waste`
+      notes: `${formatNumber(exteriorAssembly.cladding.thicknessIn)}" thick, ${formatNumber(exteriorAssembly.cladding.wastePercent)}% waste`,
+      breakdown: exterior.breakdown
     },
     {
       id: "window_area",
@@ -274,7 +331,8 @@ export function estimateCosts(
       materialId: "windows",
       quantity: exterior.windowArea,
       unit: "sq ft",
-      notes: `${formatNumber(exterior.windowCount)} exterior windows`
+      notes: `${formatNumber(exterior.windowCount)} exterior windows`,
+      breakdown: ["Sum of exterior window widths x configured/default window heights"]
     },
     {
       id: "exterior_doors",
@@ -283,7 +341,8 @@ export function estimateCosts(
       materialId: "exterior_doors",
       quantity: exterior.doorCount,
       unit: "each",
-      notes: `${formatNumber(exterior.doorArea)} sq ft exterior door area`
+      notes: `${formatNumber(exterior.doorArea)} sq ft exterior door area`,
+      breakdown: ["Counted from exterior door opening records"]
     },
     {
       id: "flooring",
@@ -292,7 +351,11 @@ export function estimateCosts(
       materialId: "flooring",
       quantity: flooringArea,
       unit: "sq ft",
-      notes: `Floor area plus ${assumptions.flooringWastePercent}% waste`
+      notes: `Floor area plus ${assumptions.flooringWastePercent}% waste`,
+      breakdown: [
+        "Union of authored spaces on each level",
+        `${formatNumber(assumptions.flooringWastePercent)}% flooring waste`
+      ]
     },
     {
       id: "pex_pipe",
@@ -301,7 +364,8 @@ export function estimateCosts(
       materialId: "pex_pipe",
       quantity: pexLength,
       unit: "ft",
-      notes: "First-pass wet-space plumbing allowance"
+      notes: "First-pass wet-space plumbing allowance",
+      breakdown: ["Explicit pex_length_ft if configured, otherwise wet-space count x per-wet-space allowance"]
     }
   ];
   const materialById: Record<string, MaterialCost> = {};
@@ -315,6 +379,8 @@ export function estimateCosts(
       exteriorWallHeightFt: exteriorAssembly.heightFt,
       footingWidthFt: footingWidth,
       padInsulationMarginFt: insulationMargin,
+      padInsulationRMin: assumptions.padInsulationRMin,
+      padInsulationRMax: assumptions.padInsulationRMax,
       padRebarSpacingFt: rebarSpacing,
       padRebarEdgeCoverIn: rebarCover * 12
     },
@@ -629,16 +695,28 @@ function isInteriorDoor(opening: AnyRecord): boolean {
   return kind === "door";
 }
 
-function exteriorWallStats(data: AnyRecord, assumptions: CostAssumptions, wallHeightFt: number) {
-  let length = 0;
+function exteriorWallStats(data: AnyRecord, assumptions: CostAssumptions) {
+  const masses = uniqueRoofMasses(data, assumptions);
+  const rects = masses.map((mass) => mass.rect);
+  let rectangularArea = 0;
+  let gableArea = 0;
   let openingsArea = 0;
   let windowArea = 0;
   let windowCount = 0;
   let doorArea = 0;
   let doorCount = 0;
+
+  for (const mass of masses) {
+    for (const side of SIDES) {
+      const exposedSegments = exposedSideSegments(mass.rect, side, rects);
+      rectangularArea += exposedSegments.reduce((sum, [start, end]) => sum + (end - start) * mass.eaveHeight, 0);
+      gableArea += openGableSide(mass, side)
+        ? exposedSegments.reduce((sum, [start, end]) => sum + gableSegmentArea(mass, side, start, end), 0)
+        : 0;
+    }
+  }
+
   for (const [levelId, rawLevel] of Object.entries((data.levels as AnyRecord | undefined) ?? {})) {
-    const rects = massRectsForLevel(data, levelId).map((item) => item.rect);
-    length += boundarySegments(rects).reduce((sum, segment) => sum + segment.end - segment.start, 0);
     const level = rawLevel as AnyRecord;
     for (const opening of level.openings ?? []) {
       if (!isExteriorOpening(opening)) {
@@ -656,14 +734,28 @@ function exteriorWallStats(data: AnyRecord, assumptions: CostAssumptions, wallHe
       }
     }
   }
+  const grossArea = rectangularArea + gableArea;
   return {
-    length,
-    netArea: Math.max(0, length * wallHeightFt - openingsArea),
+    length: masses.reduce(
+      (sum, mass) => sum + SIDES.reduce((sideSum, side) => sideSum + exposedSideSegments(mass.rect, side, rects).reduce((total, [start, end]) => total + end - start, 0), 0),
+      0
+    ),
+    grossArea,
+    rectangularArea,
+    gableArea,
+    netArea: Math.max(0, grossArea - openingsArea),
     openingsArea,
     windowArea,
     windowCount,
     doorArea,
-    doorCount
+    doorCount,
+    breakdown: [
+      `Exposed rectangular wall faces to roof eaves: ${formatNumber(rectangularArea)} sq ft`,
+      `Open-gable triangular wall faces: ${formatNumber(gableArea)} sq ft`,
+      `Exterior openings subtracted: ${formatNumber(openingsArea)} sq ft`,
+      "Faces are generated from unique mass rectangles and roof eave heights, not repeated per floor",
+      "Cladding quantity adds configured waste after net exterior face area"
+    ]
   };
 }
 
@@ -720,22 +812,227 @@ function isExteriorOpening(opening: AnyRecord): boolean {
   return Boolean(opening.space && opening.side);
 }
 
+function roofStats(data: AnyRecord, assumptions: CostAssumptions): { area: number; areaWithWaste: number; breakdown: string[] } {
+  const masses = uniqueRoofMasses(data, assumptions);
+  const sorted = [...masses].sort((a, b) => b.eaveHeight - a.eaveHeight);
+  const blockers: Rect[] = [];
+  let area = 0;
+  const breakdown: string[] = [];
+  for (const mass of sorted) {
+    const roofRect = roofEaveRect(mass);
+    const projected = rectVisibleArea(roofRect, blockers);
+    if (projected <= 0.01) {
+      blockers.push(roofRect);
+      breakdown.push(`${mass.id}: covered by higher/equal roof masses`);
+      continue;
+    }
+    const slopeFactor = Math.sqrt(1 + mass.pitch * mass.pitch);
+    const sloped = projected * slopeFactor;
+    area += sloped;
+    blockers.push(roofRect);
+    breakdown.push(
+      `${mass.id}: ${formatNumber(projected)} sq ft projected visible x ${formatNumber(slopeFactor)} slope = ${formatNumber(sloped)} sq ft`
+    );
+  }
+  return {
+    area,
+    areaWithWaste: area * (1 + assumptions.roofWastePercent / 100),
+    breakdown: [...breakdown, `${formatNumber(assumptions.roofWastePercent)}% roofing waste applied`]
+  };
+}
+
 function roofAreaEstimate(data: AnyRecord, assumptions: CostAssumptions): number {
+  return roofStats(data, assumptions).areaWithWaste;
+}
+
+function uniqueRoofMasses(data: AnyRecord, assumptions: CostAssumptions): RoofMass[] {
   const defaultPitch = pitchValue((data.roof as AnyRecord | undefined)?.pitch, assumptions);
-  let projected = 0;
-  for (const levelId of Object.keys((data.levels as AnyRecord | undefined) ?? {})) {
-    for (const { rect, spec } of massRectsForLevel(data, levelId)) {
-      const roof = ((spec.roof ?? {}) as AnyRecord);
+  const defaultMargin = numberFrom((data.roof as AnyRecord | undefined)?.eave_margin, 0);
+  const levelIds = Object.keys((data.levels as AnyRecord | undefined) ?? {});
+  const masses = (data.masses ?? {}) as AnyRecord;
+  const result: RoofMass[] = [];
+  for (const [massId, rawMass] of Object.entries(masses)) {
+    const mass = rawMass as AnyRecord;
+    const massLevels = Array.isArray(mass.levels) ? mass.levels.map(String) : typeof mass.level === "string" ? [mass.level] : levelIds;
+    for (const [index, spec] of rectSpecs(mass).entries()) {
+      const roof = ((spec.roof ?? mass.roof ?? {}) as AnyRecord);
       if (roof.enabled === false || roof.mode === false) {
         continue;
       }
+      const specLevels = Array.isArray(spec.levels) ? spec.levels.map(String) : typeof spec.level === "string" ? [spec.level] : massLevels;
+      const levelId = specLevels.find((candidate) => levelIds.includes(candidate)) ?? levelIds[0] ?? "L1";
+      const rect = resolveRectSpec(data, levelId, spec);
+      if (!rect) {
+        continue;
+      }
       const pitch = optionalPitchValue(roof.pitch ?? roof.roof_pitch) ?? defaultPitch;
-      const margin = Number(roof.eave_margin ?? (data.roof as AnyRecord | undefined)?.eave_margin ?? 0);
-      const roofRect = expandRect(rect, Number.isFinite(margin) ? margin : 0);
-      projected += roofRect.width * roofRect.height * Math.sqrt(1 + pitch * pitch);
+      const eaveHeight = numberFrom(roof.eave_height, assumptions.exteriorWallHeightFt);
+      const mode = String(roof.mode ?? "hip").replace("-", "_");
+      const [start, end] = roofEnds(roof, mode);
+      result.push({
+        id: String(spec.id ?? `${massId}_${index + 1}`),
+        rect,
+        roof,
+        pitch,
+        eaveHeight,
+        eaveMargin: numberFrom(roof.eave_margin, defaultMargin),
+        eaveSides: roofEaveSides(roof),
+        ridge: roofRidge(roof, rect),
+        start,
+        end
+      });
     }
   }
-  return projected * (1 + assumptions.roofWastePercent / 100);
+  if (!result.length) {
+    const fallbackLevel = levelIds[0] ?? "L1";
+    return massRectsForLevel(data, fallbackLevel).map(({ massId, rect }, index) => ({
+      id: massId || `mass_${index + 1}`,
+      rect,
+      roof: {},
+      pitch: defaultPitch,
+      eaveHeight: assumptions.exteriorWallHeightFt,
+      eaveMargin: defaultMargin,
+      eaveSides: [...SIDES],
+      ridge: rect.width >= rect.height ? "x" : "y",
+      start: "hip",
+      end: "hip"
+    }));
+  }
+  return result;
+}
+
+function roofEaveSides(roof: AnyRecord): Side[] {
+  const raw = roof.eave_sides ?? roof.eaves;
+  if (Array.isArray(raw)) {
+    const sides = raw.filter((side): side is Side => SIDES.includes(side as Side));
+    return sides.length ? sides : [...SIDES];
+  }
+  return [...SIDES];
+}
+
+function roofRidge(roof: AnyRecord, rect: Rect): "x" | "y" {
+  const ridge = String(roof.ridge ?? "");
+  if (ridge === "x" || ridge === "y") {
+    return ridge;
+  }
+  return rect.width >= rect.height ? "x" : "y";
+}
+
+function roofEnds(roof: AnyRecord, mode: string): ["open" | "hip", "open" | "hip"] {
+  if (mode === "hip") {
+    return ["hip", "hip"];
+  }
+  if (Array.isArray(roof.ends)) {
+    return [roofEndKind(roof.ends[0]), roofEndKind(roof.ends[1])];
+  }
+  return [roofEndKind(roof.start ?? "open"), roofEndKind(roof.end ?? "open")];
+}
+
+function roofEndKind(value: unknown): "open" | "hip" {
+  return String(value ?? "open").replace("-", "_") === "hip" ? "hip" : "open";
+}
+
+function roofEaveRect(mass: RoofMass): Rect {
+  const north = mass.eaveSides.includes("north") ? mass.eaveMargin : 0;
+  const east = mass.eaveSides.includes("east") ? mass.eaveMargin : 0;
+  const south = mass.eaveSides.includes("south") ? mass.eaveMargin : 0;
+  const west = mass.eaveSides.includes("west") ? mass.eaveMargin : 0;
+  return makeRect(mass.rect.left - west, mass.rect.top - north, mass.rect.right + east, mass.rect.bottom + south);
+}
+
+function rectVisibleArea(subject: Rect, blockers: Rect[]): number {
+  const xValues = [subject.left, subject.right];
+  const yValues = [subject.top, subject.bottom];
+  for (const blocker of blockers) {
+    xValues.push(blocker.left, blocker.right);
+    yValues.push(blocker.top, blocker.bottom);
+  }
+  const xs = uniqueSorted(xValues);
+  const ys = uniqueSorted(yValues);
+  let area = 0;
+  for (const [left, right] of pairs(xs)) {
+    for (const [top, bottom] of pairs(ys)) {
+      const x = (left + right) / 2;
+      const y = (top + bottom) / 2;
+      if (contains(subject, x, y) && !blockers.some((rect) => contains(rect, x, y))) {
+        area += (right - left) * (bottom - top);
+      }
+    }
+  }
+  return area;
+}
+
+function exposedSideSegments(rect: Rect, side: Side, allRects: Rect[]): Array<[number, number]> {
+  const horizontal = side === "north" || side === "south";
+  const start = horizontal ? rect.left : rect.top;
+  const end = horizontal ? rect.right : rect.bottom;
+  const sideCoordinates = [start, end];
+  for (const other of allRects) {
+    if (horizontal) {
+      sideCoordinates.push(other.left, other.right);
+    } else {
+      sideCoordinates.push(other.top, other.bottom);
+    }
+  }
+  const splitPoints = uniqueSorted(sideCoordinates).filter((point) => point >= start - 1e-6 && point <= end + 1e-6);
+  const exposed: Array<[number, number]> = [];
+  const epsilon = 1e-4;
+  for (const [segmentStart, segmentEnd] of pairs(splitPoints)) {
+    if (segmentEnd <= segmentStart + 1e-6) {
+      continue;
+    }
+    const mid = (segmentStart + segmentEnd) / 2;
+    const probe =
+      side === "north" ? { x: mid, y: rect.top - epsilon } :
+      side === "south" ? { x: mid, y: rect.bottom + epsilon } :
+      side === "east" ? { x: rect.right + epsilon, y: mid } :
+      { x: rect.left - epsilon, y: mid };
+    if (!allRects.some((other) => contains(other, probe.x, probe.y))) {
+      exposed.push([segmentStart, segmentEnd]);
+    }
+  }
+  return mergeIntervals(exposed);
+}
+
+function openGableSide(mass: RoofMass, side: Side): boolean {
+  if (mass.ridge === "x") {
+    if (side === "west") return mass.start === "open";
+    if (side === "east") return mass.end === "open";
+    return false;
+  }
+  if (side === "north") return mass.start === "open";
+  if (side === "south") return mass.end === "open";
+  return false;
+}
+
+function gableSegmentArea(mass: RoofMass, side: Side, segmentStart: number, segmentEnd: number): number {
+  const horizontal = side === "north" || side === "south";
+  const baseStart = horizontal ? mass.rect.left : mass.rect.top;
+  const baseLength = horizontal ? mass.rect.width : mass.rect.height;
+  if (baseLength <= 0) {
+    return 0;
+  }
+  const perpendicular = mass.ridge === "x" ? mass.rect.height : mass.rect.width;
+  const peakRise = Math.max(0, perpendicular / 2) * mass.pitch;
+  const start = Math.max(0, Math.min(baseLength, segmentStart - baseStart));
+  const end = Math.max(0, Math.min(baseLength, segmentEnd - baseStart));
+  if (end <= start || peakRise <= 0) {
+    return 0;
+  }
+  return triangularIntegral(end, baseLength, peakRise) - triangularIntegral(start, baseLength, peakRise);
+}
+
+function triangularIntegral(t: number, baseLength: number, peakRise: number): number {
+  const mid = baseLength / 2;
+  if (mid <= 0) {
+    return 0;
+  }
+  if (t <= mid) {
+    return peakRise * t * t / (2 * mid);
+  }
+  const leftHalfArea = peakRise * mid / 2;
+  const u = t - mid;
+  return leftHalfArea + peakRise * (u - u * u / (2 * mid));
 }
 
 function pitchValue(raw: unknown, assumptions: CostAssumptions): number {

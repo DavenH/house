@@ -1,3 +1,4 @@
+import re
 from pathlib import Path
 
 import pytest
@@ -17,7 +18,7 @@ from floorplan_lang import (
     render_svg,
     write_plan_yaml,
 )
-from floorplan_lang.wall_plan import load_wall_plan_yaml, render_wall_plan_svg, wall_plan_from_dict
+from floorplan_lang.wall_plan import render_wall_plan_svg, wall_plan_from_dict
 from floorplan_lang.yaml_io import plan_from_dict
 from tests.svg_assertions import assert_has_class, elements_with_class
 
@@ -162,6 +163,55 @@ def test_intent_plan_renders_lower_roof_on_higher_levels() -> None:
     assert "eave 10" not in svg
 
 
+def test_intent_plan_roof_only_mass_rect_does_not_add_walls_or_foundation() -> None:
+    plan = intent_plan_from_dict(
+        {
+            "type": "intent_plan",
+            "plan": "roof-only-cover-test",
+            "story": {"floor_to_floor": 10},
+            "roof": {"pitch": "8:12", "eave_margin": 1.5},
+            "masses": {
+                "body": {
+                    "levels": ["L1", "L2"],
+                    "rects": [
+                        {"id": "main", "x": ["w", "e"], "y": ["n", "s"]},
+                        {
+                            "id": "covered_patio",
+                            "levels": ["L1"],
+                            "roof_only": True,
+                            "roof": {"mode": "open_gable", "eave_height": 10, "ridge": "y"},
+                            "x": ["w", "e"],
+                            "y": ["s", "patio_s"],
+                        },
+                    ],
+                }
+            },
+            "datums": {
+                "x": {"w": 0, "e": 20},
+                "y": {"n": 0, "s": 12, "patio_s": 18},
+            },
+            "levels": {
+                "L1": {"spaces": {"main": {"x": ["w", "e"], "y": ["n", "s"]}}},
+                "L2": {"spaces": {"upper": {"x": ["w", "e"], "y": ["n", "s"]}}},
+            },
+            "foundations": {
+                "F1": {
+                    "source_level": "L1",
+                    "masses": ["body"],
+                    "insulation_margin": 0,
+                    "footing_width": 0,
+                }
+            },
+        }
+    )
+
+    exterior_walls = [wall for wall in plan.levels["L1"].walls if wall.kind == "exterior"]
+    foundation = plan.levels["F1"].foundations[0]
+    assert len(exterior_walls) == 4
+    assert max(point.y for loop in foundation.body_loops for point in loop) == pytest.approx(13)
+    assert [roof.id for roof in plan.levels["L2"].roofs] == ["covered_patio"]
+
+
 def test_intent_plan_clips_promoted_lower_roof_under_higher_eave() -> None:
     plan = intent_plan_from_dict(
         {
@@ -288,11 +338,13 @@ def test_wall_plan_renders_foundation_pad_footings_and_rebar() -> None:
     svg = render_wall_plan_svg(plan)
 
     assert 'data-fp-level="F1" data-fp-id="F1"' in svg
+    assert svg.index('data-fp-level="F1" data-fp-id="F1"') < svg.index('data-fp-level="L1" data-fp-id="L1"')
     assert 'class="foundation-insulation"' in svg
     assert 'class="foundation-pad"' in svg
     assert 'class="foundation-footing"' in svg
     assert 'class="foundation-footing-rebar"' in svg
     assert 'class="foundation-rebar"' in svg
+    assert 'class="elevation-view"' not in svg
     assert 'd="M 168.000 136.000 L -8.000 136.000 L -8.000 -8.000 L 168.000 -8.000 L 168.000 136.000"' in svg
     assert 'y1="-13.333"' in svg
     assert 'y2="141.333"' in svg
@@ -339,6 +391,77 @@ def test_wall_plan_renders_roof_modes() -> None:
     assert '<line class="roof-ridge" x1="944.000" y1="-48.000" x2="944.000" y2="208.000" />' in svg
     assert '<g class="roof-section roof-open_gable" data-fp-kind="roof" data-fp-layer="roofs" data-fp-level="L1" data-fp-id="tight">' in svg
     assert '<path class="roof-eave-stroke roof-eave-fill" d="M 1248.000 160.000 L 1088.000 160.000 L 1088.000 0.000 L 1248.000 0.000 L 1248.000 160.000" stroke-width="48.000" clip-path=' in svg
+
+
+def test_wall_plan_renders_orthographic_elevations() -> None:
+    plan = wall_plan_from_dict(
+        {
+            "plan": "elevation-test",
+            "levels": {
+                "L1": {
+                    "walls": [
+                        {"id": "north", "at": [0, 0], "dir": "E", "len": 20, "kind": "exterior"},
+                        {"id": "east", "at": [20, 0], "dir": "S", "len": 12, "kind": "exterior"},
+                        {"id": "south", "at": [20, 12], "dir": "W", "len": 20, "kind": "exterior"},
+                        {"id": "west", "at": [0, 12], "dir": "N", "len": 12, "kind": "exterior"},
+                    ],
+                    "openings": [
+                        {"id": "south_window", "wall": "south", "offset": 5, "width": 4, "kind": "window"},
+                        {"id": "east_window", "wall": "east", "offset": 2, "width": 3, "kind": "window"},
+                    ],
+                },
+                "L2": {
+                    "walls": [
+                        {"id": "north", "at": [0, 0], "dir": "E", "len": 20, "kind": "exterior"},
+                        {"id": "east", "at": [20, 0], "dir": "S", "len": 12, "kind": "exterior"},
+                        {"id": "south", "at": [20, 12], "dir": "W", "len": 20, "kind": "exterior"},
+                        {"id": "west", "at": [0, 12], "dir": "N", "len": 12, "kind": "exterior"},
+                    ],
+                    "openings": [
+                        {"id": "gable_window", "wall": "south", "offset": 7, "width": 6, "kind": "window"},
+                        {"id": "upper_east_window", "wall": "east", "offset": 6, "width": 3, "kind": "window"},
+                    ],
+                    "roofs": [
+                        {
+                            "id": "main_gable",
+                            "rect": [0, 0, 20, 12],
+                            "mode": "open_gable",
+                            "ridge": "y",
+                            "pitch": "8:12",
+                            "eave_height": 17.5,
+                        }
+                    ],
+                },
+            },
+        }
+    )
+
+    svg = render_wall_plan_svg(plan)
+
+    assert svg.count('class="elevation-view"') == 4
+    assert "SOUTH / FRONT ELEVATION" in svg
+    assert 'data-fp-kind="elevation" data-fp-id="east"' in svg
+    assert 'data-fp-id="south_window"' in svg
+    assert 'data-fp-id="gable_window"' in svg
+    assert 'class="elevation-window elevation-window-arched"' in svg
+    assert 'class="elevation-roof"' in svg
+    assert '<rect class="elevation-window" data-fp-level="L1" data-fp-id="south_window" x="272.000" y="338.667" width="64.000" height="64.000" />' in svg
+    assert '<rect class="elevation-window" data-fp-level="L1" data-fp-id="east_window" x="208.000" y="338.667" width="48.000" height="64.000" />' in svg
+    assert '<rect class="elevation-window" data-fp-level="L2" data-fp-id="upper_east_window" x="144.000" y="178.667" width="48.000" height="64.000" />' in svg
+    assert '<path class="elevation-window elevation-window-arched" data-fp-level="L2" data-fp-id="gable_window" d="M 208.000 242.667 L 208.000 178.667 C 208.000 152.612 304.000 152.612 304.000 178.667 L 304.000 242.667 Z" />' in svg
+    assert '<path class="elevation-gable-wall" d="M 80.000 170.667 L 256.000 53.333 L 432.000 170.667 Z" />' in svg
+    assert '<path class="elevation-roof-edge-fill" d="M 57.846 185.436 L 48.000 170.667 L 256.000 32.000 L 256.000 53.333 L 80.000 170.667 Z" />' in svg
+    assert '<path class="elevation-roof-edge-fill" d="M 256.000 32.000 L 464.000 170.667 L 454.154 185.436 L 432.000 170.667 L 256.000 53.333 Z" />' in svg
+    assert '<path class="elevation-roof-edge" d="M 57.846 185.436 L 48.000 170.667 L 256.000 32.000 L 464.000 170.667 L 454.154 185.436" />' in svg
+
+    level_match = re.search(r'id="L1"[^>]*transform="translate\(([-0-9.]+) [-0-9.]+\)"', svg)
+    front_match = re.search(
+        r'data-fp-kind="elevation" data-fp-id="south"[^>]*transform="translate\(([-0-9.]+) [-0-9.]+\)"',
+        svg,
+    )
+    assert level_match is not None
+    assert front_match is not None
+    assert float(front_match.group(1)) + 96 == pytest.approx(float(level_match.group(1)))
 
 
 def test_wall_plan_renders_roof_valleys_from_face_intersections() -> None:
@@ -598,10 +721,39 @@ def test_ridgestone_coplanar_right_gable_face_clips_internal_ridge() -> None:
         )
     ]
 
-    assert 'class="roof-ridge" x1="736.000" y1="288.000"' not in right_gable
-    assert 'class="roof-ridge" x1="736.000" y1="320.000" x2="736.000" y2="632.000"' in right_gable
-    assert 'class="roof-gable-end" x1="736.000" y1="288.000"' not in right_gable
-    assert 'class="roof-ridge" x1="-24.000" y1="288.000" x2="704.000" y2="288.000"' in main_gable
+    assert 'class="roof-ridge" x1="728.000" y1="288.000"' not in right_gable
+    assert 'class="roof-ridge" x1="728.000" y1="328.000" x2="728.000" y2="632.000"' in right_gable
+    assert 'class="roof-gable-end" x1="728.000" y1="288.000"' not in right_gable
+    assert 'class="roof-ridge" x1="-24.000" y1="288.000" x2="688.000" y2="288.000"' in main_gable
+
+
+def test_ridgestone_front_elevation_clips_dining_roof_at_right_gable_eave() -> None:
+    plan = load_intent_plan_yaml("artifacts/floorplans/master-south.yaml")
+
+    svg = render_wall_plan_svg(plan)
+    south = svg[
+        svg.index('data-fp-kind="elevation" data-fp-id="south"') : svg.index(
+            'data-fp-kind="elevation" data-fp-id="east"'
+        )
+    ]
+
+    assert '<path class="elevation-roof-connector"' not in south
+    assert 'class="elevation-roof-fill"' not in south
+    assert '<path class="elevation-roof-edge-fill" d="M 800.000 72.000 L 960.000 232.000 L 948.000 244.000 L 936.000 232.000 L 800.000 96.000 Z" />' in south
+    assert '<path class="elevation-roof-edge" d="M 652.000 244.000 L 640.000 232.000 L 800.000 72.000 L 960.000 232.000 L 948.000 244.000" />' in south
+    assert '<path class="elevation-roof" d="M 936.000 232.000 L 936.000 228.000 L 1128.000 228.000 L 1128.000 352.000 L 1056.000 352.000 Z" />' in south
+    assert '<path class="elevation-roof" d="M 936.000 232.000 L 1056.000 352.000 L 936.000 352.000 Z" />' in south
+    assert '<path class="elevation-roof-line" d="M 936.000 232.000 L 1056.000 352.000" />' not in south
+    assert '<path class="elevation-roof" d="M 1040.000 312.000 L 960.000 232.000' not in south
+    assert '<path class="elevation-roof" d="M 956.000 228.000 L 1128.000 228.000' not in south
+
+    east = svg[
+        svg.index('data-fp-kind="elevation" data-fp-id="east"') : svg.index(
+            'data-fp-kind="elevation" data-fp-id="north"'
+        )
+    ]
+    assert '<path class="elevation-roof" d="M 392.000 32.000 L 592.000 232.000 L 192.000 232.000 Z" />' in east
+    assert '<path class="elevation-roof" d="M 392.000 32.000 L 592.000 232.000 L 392.000 232.000 Z" />' not in east
 
 
 def test_wall_plan_roof_seams_are_symmetric_across_ridge() -> None:
@@ -1007,6 +1159,30 @@ def test_intent_plan_clamps_explicit_open_wall_opening_to_wall_length() -> None:
     assert not plan.validate(strict_features=False)
 
 
+def test_intent_plan_clamps_explicit_wall_window_to_wall_length() -> None:
+    plan = intent_plan_from_dict(
+        {
+            "type": "intent_plan",
+            "plan": "wall-window-clamp-test",
+            "masses": {"body": {"rect": [0, 0, 10, 8]}},
+            "levels": {
+                "L1": {
+                    "spaces": {"room": {"rect": [0, 0, 10, 8]}},
+                    "openings": [
+                        {"id": "stale_window", "wall": "exterior_1", "offset": 8, "width": 4, "kind": "window"}
+                    ],
+                }
+            },
+        }
+    )
+
+    opening = next(opening for opening in plan.levels["L1"].openings if opening.id == "stale_window")
+
+    assert opening.width == 4
+    assert opening.offset == pytest.approx(6)
+    assert not plan.validate(strict_features=False)
+
+
 def test_intent_plan_compiles_semantic_stair_solver_and_endpoint_openings() -> None:
     plan = intent_plan_from_dict(
         {
@@ -1195,6 +1371,111 @@ def test_intent_space_side_opening_respects_explicit_offset() -> None:
 
     assert opening.wall == "exterior_1"
     assert opening.offset == pytest.approx(7)
+
+
+def test_intent_wall_openings_allow_multiple_windows_on_same_wall_span() -> None:
+    plan = intent_plan_from_dict(
+        {
+            "type": "intent_plan",
+            "plan": "wall-window-test",
+            "masses": {"body": {"rect": [0, 0, 20, 10]}},
+            "levels": {
+                "L1": {
+                    "spaces": {"room": {"rect": [0, 0, 20, 10]}},
+                    "openings": [
+                        {"id": "north_window_w", "wall": "exterior_1", "offset": 3, "width": 4, "kind": "window"},
+                        {"id": "north_window_e", "wall": "exterior_1", "offset": 13, "width": 4, "kind": "window"},
+                    ],
+                }
+            },
+        }
+    )
+
+    openings = plan.levels["L1"].openings
+
+    assert [(opening.id, opening.wall, opening.offset, opening.width) for opening in openings] == [
+        ("north_window_w", "exterior_1", 3, 4),
+        ("north_window_e", "exterior_1", 13, 4),
+    ]
+
+
+def test_intent_exterior_opening_resolves_semantic_mass_side_after_perimeter_changes() -> None:
+    base_plan = intent_plan_from_dict(
+        {
+            "type": "intent_plan",
+            "plan": "semantic-exterior-window-base-test",
+            "masses": {
+                "body": {
+                    "rects": [
+                        {"id": "main", "x": [0, 12], "y": [0, 8]},
+                        {"id": "target", "x": [12, 20], "y": [0, 8]},
+                    ]
+                }
+            },
+            "levels": {
+                "L1": {
+                    "spaces": {"room": {"rect": [12, 0, 8, 8]}},
+                    "openings": [
+                        {
+                            "id": "target_south_window",
+                            "exterior": {"mass": "target", "side": "south"},
+                            "offset": 2,
+                            "width": 3,
+                            "kind": "window",
+                        }
+                    ],
+                }
+            },
+        }
+    )
+    changed_plan = intent_plan_from_dict(
+        {
+            "type": "intent_plan",
+            "plan": "semantic-exterior-window-changed-test",
+            "masses": {
+                "body": {
+                    "rects": [
+                        {"id": "main", "x": [0, 12], "y": [0, 8]},
+                        {"id": "target", "x": [12, 20], "y": [0, 8]},
+                        {"id": "tower", "x": [8, 12], "y": [8, 12]},
+                    ]
+                }
+            },
+            "levels": {
+                "L1": {
+                    "spaces": {"room": {"rect": [12, 0, 8, 8]}},
+                    "openings": [
+                        {
+                            "id": "target_south_window",
+                            "exterior": "target.south",
+                            "offset": 2,
+                            "width": 3,
+                            "kind": "window",
+                        }
+                    ],
+                }
+            },
+        }
+    )
+
+    base_opening = next(
+        opening for opening in base_plan.levels["L1"].openings if opening.id == "target_south_window"
+    )
+    changed_opening = next(
+        opening for opening in changed_plan.levels["L1"].openings if opening.id == "target_south_window"
+    )
+
+    assert base_opening.wall != changed_opening.wall
+    assert changed_opening.width == 3
+    assert changed_opening.offset == pytest.approx(2)
+
+    changed_wall = next(
+        wall for wall in changed_plan.levels["L1"].walls if wall.id == changed_opening.wall
+    )
+    assert changed_wall.at.x == pytest.approx(20)
+    assert changed_wall.at.y == pytest.approx(8)
+    assert changed_wall.direction == "W"
+    assert changed_wall.length == pytest.approx(8)
 
 
 def test_intent_space_side_opening_respects_explicit_offset_on_reversed_wall() -> None:
@@ -2158,8 +2439,13 @@ def test_wall_plan_renders_spiral_stair_feature() -> None:
     svg = render_wall_plan_svg(plan)
 
     assert 'class="spiral-stair-fixture"' in svg
+    assert 'class="spiral-stair-tread-fill"' in svg
     assert 'class="spiral-stair-tread"' in svg
-    assert 'class="spiral-stair-well"' in svg
+    assert 'class="spiral-stair-handrail"' in svg
+    assert 'class="spiral-stair-column"' in svg
+    assert 'class="spiral-stair-opening"' not in svg
+    assert "660mm min clear" not in svg
+    assert "190mm tread @300mm" not in svg
     assert 'data-fp-id="tower_spiral"' in svg
     assert 'SPIRAL/STAIR</text>' in svg
 
@@ -2471,8 +2757,8 @@ def test_wall_plan_validates_access_and_stack_members() -> None:
     assert any("stack 'tower_stack' cy mismatch" in error for error in errors)
 
 
-def test_wall_artifact_loads_and_renders(tmp_path: Path) -> None:
-    plan = load_wall_plan_yaml("artifacts/floorplans/studio-wing.yaml")
+def test_intent_artifact_loads_and_renders(tmp_path: Path) -> None:
+    plan = load_intent_plan_yaml("artifacts/floorplans/studio-wing.yaml")
     svg_path = tmp_path / "wall.svg"
 
     render_wall_plan_svg(plan, svg_path)

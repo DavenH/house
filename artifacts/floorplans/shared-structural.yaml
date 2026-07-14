@@ -9,7 +9,7 @@ compass:
   up_bearing: 115
   latitude: 45.96
 roof:
-  pitch: '8:12'
+  pitch: '8:8'
 costing:
   exterior_wall:
     height_ft: 10
