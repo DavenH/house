@@ -56,8 +56,8 @@ notes:
   - 'The second-floor tower is treated as stair circulation up to the nest, not as storage.'
   - 'Variant: removes the dining projection and mirrors the right gable northward across the main ridge.'
 datums:
-  x: {west: 5.5, storage_e: 8, left_w: 5.5, closet_w: 16.5, gallery_w: 15, left_e: 20.5, stair_w: 26.5, stair_e: 38, piano_w: 29.5, tower_e: 38, right_w: 38, suite_hall_e: 43, pantry_w: 53, room_split: 47.5, suite_closet_split: 50, pantry_e: 57, dining_w: 56, right_e: 56, east_projection_e: 63.5, e: 31.5}
-  y: {right_gable_n: -2, gable_n: 4.5, main_n: 8, ensuite_s: 7, bath_s: 14, l2_public_bath_n: 12.5, pool_room_s: 12.5, stair_s: 18, kid_room_1_s: 14.5, kid_room_split: 18.5, kid_room_3_n: 22.5, suite_bedroom_n: 17, east_projection_n: 17.5, closet_s: 18, kitchen_dining_n: 27.5, public_split: 23, lower_storage_n: 25.5, entry_s: 28, terrace_s: 40.5, main_ridge: 18, east_projection_s: 28, tower_s: 30, master_bedroom_s: 33, gable_s: 32, main_s: 40.5}
+  x: {west: 5.5, storage_e: 8, left_w: 5.5, closet_w: 16.5, gallery_w: 15, left_e: 20.5, stair_w: 26.5, stair_e: 38, piano_w: 29.5, tower_e: 38, right_w: 38, suite_hall_e: 43, pantry_w: 53, room_split: 47.5, suite_closet_split: 49.5, pantry_e: 57, dining_w: 56, right_e: 56, east_projection_e: 63.5, e: 31.5}
+  y: {right_gable_n: -2, gable_n: 4.5, main_n: 8, ensuite_s: 7, bath_s: 14, l2_public_bath_n: 12.5, pool_room_s: 12.5, stair_s: 18, kid_room_1_s: 14, kid_room_split: 18.5, kid_room_3_n: 22.5, suite_bedroom_n: 17, east_projection_n: 17.5, closet_s: 18, kitchen_dining_n: 27.5, public_split: 23, lower_storage_n: 25.5, entry_s: 28, terrace_s: 40.5, main_ridge: 18, east_projection_s: 28, tower_s: 30, master_bedroom_s: 33, gable_s: 32, main_s: 40.5}
 masses:
   shared_body:
     levels:
@@ -114,7 +114,7 @@ levels:
       - {between: [entrance, tower_closet], width: 3, kind: arch}
       - {between: [hall, hearth_storage], width: 3, offset: 1.5, swing: in-right}
       - {between: [hall, great_room], width: 4, kind: arch, offset: 0.5}
-      - {between: [pool_room, great_room], width: 6, kind: arch, offset: 6.5}
+      - {between: [pool_room, great_room], width: 7.5, kind: arch, offset: 5.5}
       - {between: [great_room, kitchen], kind: open, offset: 0}
       - {between: [great_room, dining], kind: open, offset: 0}
       - {between: [kitchen, dining], kind: open, offset: 0}
@@ -176,7 +176,7 @@ levels:
       suite_gym_mat: {kind: rectangle, within: master_sitting, at: [43.5, 2], size: [5.5, 2.5], label: MAT}
       queen_bed: {kind: rectangle, within: master_bedroom, at: [51.5, 25.5], size: [7, 5], label: BED, clearance: {left: 1, right: 1, top: 1, foot: 1}, avoid_openings: true}
       kid_1_bed: {kind: rectangle, within: kid_room_1, at: [9, 9.5], size: [6, 4], label: BED}
-      kid_storage_shelves: {kind: rectangle, within: kid_storage, at: [8.5, 21.5], size: [5, 1], label: SHELVES}
+      kid_storage_shelves: {kind: rectangle, within: kid_storage, at: [8.5, 21], size: [5, 1], label: SHELVES}
       kid_3_bed: {kind: rectangle, within: kid_room_3, at: [10, 28.5], size: [6, 4], label: BED}
       tower_spiral: {kind: spiral_stair, within: tower, size: [6, 6], label: ''}
       master_balcony_deck: {kind: deck, within: terrace, at: [47, 37.5], size: [19, 7.5], label: BALCONY}
