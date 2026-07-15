@@ -5,6 +5,118 @@ plan: master-south-no-dining
 roof:
   eave_margin: 1.5
 structural:
+  floor_system:
+    shared_depth_in: null
+    applies_to: [L2]
+  scheme_sets:
+    right_gable:
+      level: L2
+      source_mass: right_gable
+      active: clear_span_solid_sawn
+      schemes:
+        clear_span_solid_sawn:
+          name: Solid sawn
+          status: concept
+          framing_family: solid_sawn
+          joist_direction: x
+          support_lines:
+            - {id: west_support, from: [38, -2], to: [38, 33], kind: steel_transfer_beam, section: null}
+            - {id: east_support, from: [56, -2], to: [56, 33], kind: bearing_line, section: null}
+          joist_zones:
+            - {id: full_gable, x: [38, 56], y: [-2, 33]}
+        clear_span_engineered:
+          name: Engineered I-joists
+          status: concept
+          framing_family: engineered_wood_i_joist
+          product: null
+          joist_direction: x
+          support_lines:
+            - {id: west_support, from: [38, -2], to: [38, 33], kind: steel_transfer_beam, section: null}
+            - {id: east_support, from: [56, -2], to: [56, 33], kind: bearing_line, section: null}
+          joist_zones:
+            - {id: full_gable, x: [38, 56], y: [-2, 33]}
+          required_catalog_data: [depth, stiffness, moment_capacity, shear_capacity, vibration_limit, bearing, hole_zones, stock_lengths, price]
+        hearth_spine:
+          name: Hearth spine
+          status: concept
+          framing_family: solid_sawn_or_engineered_wood
+          primary_member_family: null
+          joist_direction: x
+          structural_core:
+            id: hearth_core
+            kind: independent_column_or_core
+            center: [44, 20]
+            size: [2, 6]
+            foundation: hearth_core_foundation
+            masonry_bearing: false
+          primary_members:
+            - {id: north_spine, from: [44, -2], to: [44, 17], family: null, section: null}
+            - {id: south_spine, from: [44, 23], to: [44, 33], family: null, section: null}
+          perimeter_supports:
+            - {id: west_support, from: [38, -2], to: [38, 33], kind: bearing_or_transfer_line, section: null}
+            - {id: east_support, from: [56, -2], to: [56, 33], kind: bearing_line, section: null}
+          joist_zones:
+            - {id: west_bay, x: [38, 44], y: [-2, 33], span_ft: 6}
+            - {id: east_bay, x: [44, 56], y: [-2, 33], span_ft: 12}
+          unresolved: [primary_member_family, primary_sections, core_section, connections, perimeter_reactions, foundation]
+      shared_checks: [strength, shear, deflection, vibration, bearing, connections, fire_protection, floor_depth, reactions, foundations, quantity, cost]
+  systems:
+    - id: left-gable-floor
+      name: Left gable floor
+      level: L2
+      status: concept
+      source_mass: left_gable
+      kind: floor
+      spaces: [kid_room_1, kid_storage, kid_room_3, kids_hall]
+      direction: x
+      supports:
+        west: {kind: bearing_line, status: verify}
+        east: {kind: bearing_line, status: verify}
+    - id: central-core-floor
+      name: Central core floor
+      level: L2
+      status: concept
+      source_mass: stair_core
+      kind: floor
+      spaces: [laundry, public_bath, upper_landing]
+      void_spaces: [stair]
+      direction: y
+      supports:
+        north: {kind: bearing_line, status: verify}
+        south: {kind: transfer_line, status: proposed}
+    - id: tower-stair-opening
+      name: Tower stair opening
+      level: L2
+      status: concept
+      source_mass: tower
+      kind: stair_opening
+      spaces: [tower]
+      direction: y
+      supports:
+        north: {kind: header, status: unresolved}
+        south: {kind: rim_or_header, status: unresolved}
+    - id: master-balcony-floor
+      name: Master balcony floor
+      level: L2
+      status: concept
+      kind: floor
+      spaces: [terrace]
+      direction: y
+      supports:
+        north: {kind: ledger_or_beam, status: proposed}
+        south: {kind: exterior_beam, status: proposed}
+    - id: right-gable-floor
+      name: Right gable floor
+      level: L2
+      status: concept
+      source_mass: right_gable
+      kind: floor
+      spaces: [master_sitting, suite_hall, ensuite_bathroom, walk_in_closet, master_bedroom]
+      direction: x
+      supports:
+        west: {kind: steel_transfer_beam, status: proposed}
+        east: {kind: bearing_line, status: verify}
+      note: 'Concept framing extent only. Bearing, product, connections, loads, and support below require design.'
   bearing:
     point_loads:
       -
@@ -88,8 +200,8 @@ levels:
       kitchen: {x: [right_w, room_split], y: [kitchen_dining_n, main_s], privacy: public, label: /KITCHEN}
       dining: {x: [room_split, right_e], y: [kitchen_dining_n, main_s], label: DINING, privacy: public}
     features:
-      piano: {kind: piano, within: library, at: [10, 20.5], size: [7.5, 5], label: PIANO, avoid_openings: true, clearance: {around: 1}, rotation: 270}
-      piano_bench: {kind: rectangle, within: library, at: [10, 25.5], size: [1, 2], label: '', rotation: 90, clearance: {around: 1}}
+      piano: {kind: piano, within: library, at: [10, 19], size: [7.5, 5], label: PIANO, avoid_openings: true, clearance: {around: 1}, rotation: 225}
+      piano_bench: {kind: rectangle, within: library, at: [13.5, 22.5], size: [1, 2], label: '', rotation: 45, clearance: {around: 1}}
       library_north_books: {kind: rectangle, within: library, at: [11, 14.5], size: [10, 0.8], label: ''}
       hearth_fireplace: {kind: rectangle, at: [44, 20], size: [2, 6], label: HEARTH}
       great_room_couch: {kind: rectangle, within: great_room, at: [53, 20], size: [3, 7], label: COUCH}

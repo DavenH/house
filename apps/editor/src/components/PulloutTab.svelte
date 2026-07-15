@@ -1,7 +1,7 @@
 <script lang="ts">
   export let open = false;
-  export let variant: "yaml" | "inspector" | "cost";
-  export let icon: "code" | "search" | "calculator";
+  export let variant: "yaml" | "inspector" | "cost" | "structure";
+  export let icon: "code" | "search" | "calculator" | "structure";
   export let labelOpen: string;
   export let labelClosed: string;
   export let onToggle: () => void;
@@ -23,7 +23,7 @@
     {:else if icon === "search"}
       <circle cx="10.75" cy="10.75" r="5.75" />
       <path d="M15.25 15.25L20 20" />
-    {:else}
+    {:else if icon === "calculator"}
       <rect x="6" y="3.75" width="12" height="16.5" rx="1.5" />
       <path d="M8.5 7.25H15.5" />
       <path d="M9 11H9.05" />
@@ -34,6 +34,12 @@
       <path d="M15 14H15.05" />
       <path d="M9 17H9.05" />
       <path d="M12 17H15.05" />
+    {:else}
+      <path d="M3 18H21" />
+      <path d="M5 18V8H19V18" />
+      <path d="M5 11H19" />
+      <path d="M9 8V18" />
+      <path d="M15 8V18" />
     {/if}
   </svg>
 </button>

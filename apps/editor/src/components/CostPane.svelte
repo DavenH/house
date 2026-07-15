@@ -11,6 +11,7 @@
   export let planData: AnyRecord = {};
   export let open = false;
   export let materialCosts: MaterialCost[] = [];
+  export let supplementalFramingCost = 0;
   export let onToggle: () => void;
   export let onMaterialCostsChange: (materials: MaterialCost[]) => void = () => {};
 
@@ -60,7 +61,7 @@
 <section class:open class="panel cost-panel">
   <div class="panel-title">
     <h2>Costs</h2>
-    <span>{money(estimate.total)}</span>
+    <span>{money(estimate.total + supplementalFramingCost)}</span>
   </div>
 
   <div class="segmented-control" role="tablist" aria-label="Cost views">
@@ -106,6 +107,9 @@
             {/each}
           </tbody>
         {/each}
+        {#if supplementalFramingCost > 0}
+          <tbody><tr class="cost-section-row"><th colspan="3">Structural floor framing</th><th>{money(supplementalFramingCost)}</th></tr></tbody>
+        {/if}
       </table>
     {:else}
       <table class="cost-table materials-table">

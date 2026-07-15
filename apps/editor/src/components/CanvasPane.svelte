@@ -2,6 +2,9 @@
   import { onMount, tick } from "svelte";
   import type { PlanDocument, PlanSummary } from "../lib/api";
   import { serializeCanvasSvgForExport, serializePrintableFloorPages } from "../lib/canvasSvg";
+  import type { AnyRecord } from "../lib/types";
+  import { calculateJoist, compileStructuralSystem, type StructuralInputs, type StructuralPreset } from "../lib/structuralWorkspace";
+  import { applyStructuralCanvas, clearStructuralCanvas } from "../lib/structuralCanvas";
 
   type WebKitGestureEvent = Event & {
     clientX: number;
@@ -14,6 +17,10 @@
   export let selectedPlan = "";
   export let dirty = false;
   export let svg = "";
+  export let showStructure = false;
+  export let planData: AnyRecord = {};
+  export let structuralPreset: StructuralPreset = "framing";
+  export let structuralInputs: StructuralInputs;
   export let error = "";
   export let canvasZoom = 0.7;
   export let canvasElement: HTMLDivElement;
@@ -36,6 +43,12 @@
   let canvasPadY = 0;
   let lastPositionedPlan = "";
   let gestureStartZoom = canvasZoom;
+  let canvasView: "architecture" | "structure" = "architecture";
+  $: if (showStructure) canvasView = "structure";
+  $: displayedSvg = svg;
+  $: structuralSystem = compileStructuralSystem(planData, structuralInputs);
+  $: structuralResult = calculateJoist(structuralSystem, structuralInputs);
+  $: void updateStructuralDrawing(displayedSvg, canvasView, structuralSystem, structuralPreset, structuralResult, canvasElement);
   const layerOptions = [
     { id: "dimensions", label: "Dimensions", selectors: [".dimension", ".dimension-projection", ".dimension-label"] },
     { id: "compass", label: "Compass", selectors: [".compass"] },
@@ -57,9 +70,9 @@
   let availableLayerIds = new Set<string>();
   $: visibleLayerOptions = layerOptions.filter((layer) => availableLayerIds.has(layer.id));
 
-  $: void applySvgZoom(svg, canvasZoom, canvasElement);
-  $: void detectAvailableLayers(svg, canvasElement);
-  $: void applyLayerVisibility(svg, layerVisibility, canvasElement);
+  $: void applySvgZoom(displayedSvg, canvasZoom, canvasElement);
+  $: void detectAvailableLayers(displayedSvg, canvasElement);
+  $: void applyLayerVisibility(displayedSvg, layerVisibility, canvasElement);
 
   onMount(() => {
     const frame = canvasFrame;
@@ -79,10 +92,10 @@
   });
 
   function exportSvg() {
-    if (!svg) {
+    if (!displayedSvg) {
       return;
     }
-    const exportedSvg = serializeCanvasSvgForExport(canvasElement, svg);
+    const exportedSvg = serializeCanvasSvgForExport(canvasElement, displayedSvg);
     downloadBlob(exportedSvg, exportFilename(".svg"), "image/svg+xml;charset=utf-8");
   }
 
@@ -192,6 +205,12 @@
     }, {});
   }
 
+  async function updateStructuralDrawing(_svg: string, view: "architecture" | "structure", system: typeof structuralSystem, preset: StructuralPreset, result: typeof structuralResult, _root: HTMLDivElement | undefined) {
+    await tick();
+    if (view === "structure") applyStructuralCanvas(canvasElement, system, preset, result);
+    else clearStructuralCanvas(canvasElement);
+  }
+
   function updateCanvasExtents(svgWidth: number, svgHeight: number) {
     const frameWidth = canvasFrame?.clientWidth ?? 0;
     const frameHeight = canvasFrame?.clientHeight ?? 0;
@@ -246,7 +265,7 @@
     const contentY = canvasFrame.scrollTop + anchorY - canvasPadY;
     const ratio = nextZoom / currentZoom;
     canvasZoom = nextZoom;
-    await applySvgZoom(svg, nextZoom, canvasElement);
+    await applySvgZoom(displayedSvg, nextZoom, canvasElement);
     canvasFrame.scrollLeft = contentX * ratio + canvasPadX - anchorX;
     canvasFrame.scrollTop = contentY * ratio + canvasPadY - anchorY;
   }
@@ -268,7 +287,6 @@
       <div class="header-title">
         <span class="eyebrow">Ridgestone</span>
         <h1>Floor Plan Editor</h1>
-        <span class="current-plan-name">{document?.name ?? "No plan selected"}</span>
       </div>
       <div class="header-controls">
         <div class="toolbar-group plan-group">
@@ -288,6 +306,8 @@
           </label>
         </div>
         <div class="toolbar-group layers-group">
+          <button type="button" class:primary={canvasView === "architecture"} on:click={() => (canvasView = "architecture")}>Plan</button>
+          <button type="button" class:primary={canvasView === "structure"} on:click={() => (canvasView = "structure")}>Structure</button>
           <details class="layer-menu">
             <summary>Layers <span aria-hidden="true">▾</span></summary>
             <div class="layer-options">
@@ -323,7 +343,7 @@
           <div class="file-actions">
             <button type="button" disabled={!canUndo} aria-label="Undo" title="Undo" on:click={() => undo()}>↶</button>
             <button type="button" disabled={!canRedo} aria-label="Redo" title="Redo" on:click={() => redo()}>↷</button>
-            <button type="button" disabled={!svg} on:click={exportSvg}>Export SVG</button>
+            <button type="button" disabled={!displayedSvg} on:click={exportSvg}>Export SVG</button>
             <button type="button" disabled={!svg} on:click={exportPrintPages}>Print pages</button>
             <button type="button" class="primary" disabled={!dirty} on:click={() => saveCurrentPlan()}>Save</button>
           </div>
@@ -336,7 +356,7 @@
     {#if error}
       <div class="canvas-error" role="status">{error}</div>
     {/if}
-    {#if svg}
+    {#if displayedSvg}
       <div class="canvas-extent" style={`width:${contentWidth}px;height:${contentHeight}px;`}>
         <div
           class="svg-canvas"
@@ -353,7 +373,7 @@
           on:keydown={() => undefined}
           on:click={handleCanvasClick}
         >
-          {@html svg}
+          {@html displayedSvg}
         </div>
       </div>
     {:else}

@@ -13,6 +13,8 @@
   import CanvasPane from "./components/CanvasPane.svelte";
   import CostPane from "./components/CostPane.svelte";
   import InspectorPane from "./components/InspectorPane.svelte";
+  import StructuralPane from "./components/StructuralPane.svelte";
+  import { compileStructuralSystem, DEFAULT_STRUCTURAL_INPUTS, structuralMaterialSubtotal, type StructuralInputs, type StructuralPreset } from "./lib/structuralWorkspace";
   import YamlPane from "./components/YamlPane.svelte";
   import type {
     AnyRecord,
@@ -125,6 +127,9 @@
   let yamlOpen = false;
   let inspectorOpen = true;
   let costOpen = false;
+  let structureOpen = false;
+  let structuralPreset: StructuralPreset = "framing";
+  let structuralInputs: StructuralInputs = { ...DEFAULT_STRUCTURAL_INPUTS };
   let materialCosts: MaterialCost[] = DEFAULT_MATERIAL_COSTS.map((material) => ({ ...material }));
 
 
@@ -151,9 +156,10 @@
       : [];
   $: canUndo = undoStack.length > 0;
   $: canRedo = redoStack.length > 0;
-  $: currentCostTotal = estimateCosts(effectiveData, DEFAULT_COST_ASSUMPTIONS, materialCosts).total;
+  $: structuralCost = structuralMaterialSubtotal(compileStructuralSystem(effectiveData, structuralInputs), structuralInputs)?.total ?? 0;
+  $: currentCostTotal = estimateCosts(effectiveData, DEFAULT_COST_ASSUMPTIONS, materialCosts).total + structuralCost;
   $: undoCostTotal = undoStack.length
-    ? estimateCosts(withCurrentSharedDefaults(yamlToPlanData(undoStack[undoStack.length - 1])), DEFAULT_COST_ASSUMPTIONS, materialCosts).total
+    ? estimateCosts(withCurrentSharedDefaults(yamlToPlanData(undoStack[undoStack.length - 1])), DEFAULT_COST_ASSUMPTIONS, materialCosts).total + structuralCost
     : currentCostTotal;
   $: costDelta = currentCostTotal - undoCostTotal;
   $: totalFloorArea = floorAreaEstimate(effectiveData);
@@ -1086,6 +1092,7 @@
     if (next) {
       inspectorOpen = false;
       costOpen = false;
+      structureOpen = false;
     }
   }
 
@@ -1095,6 +1102,7 @@
     if (next) {
       yamlOpen = false;
       costOpen = false;
+      structureOpen = false;
     }
   }
 
@@ -1104,6 +1112,17 @@
     if (next) {
       yamlOpen = false;
       inspectorOpen = false;
+      structureOpen = false;
+    }
+  }
+
+  function toggleStructurePane() {
+    const next = !structureOpen;
+    structureOpen = next;
+    if (next) {
+      yamlOpen = false;
+      inspectorOpen = false;
+      costOpen = false;
     }
   }
 
@@ -1198,13 +1217,17 @@
   }
 </script>
 
-<main class:inspector-open={inspectorOpen} class:yaml-open={yamlOpen} class:cost-open={costOpen} class="editor-shell">
+<main class:inspector-open={inspectorOpen} class:yaml-open={yamlOpen} class:cost-open={costOpen} class:structure-open={structureOpen} class="editor-shell">
   <CanvasPane
     document={planDocument}
     {plans}
     bind:selectedPlan
     {dirty}
     {svg}
+    showStructure={structureOpen}
+    planData={effectiveData}
+    structuralPreset={structuralPreset}
+    structuralInputs={structuralInputs}
     {error}
     {selectPlan}
     {saveCurrentPlan}
@@ -1234,8 +1257,17 @@
     planData={effectiveData}
     open={costOpen}
     bind:materialCosts
+    supplementalFramingCost={structuralCost}
     onToggle={toggleCostPane}
     onMaterialCostsChange={handleMaterialCostsChange}
+  />
+
+  <StructuralPane
+    open={structureOpen}
+    planData={effectiveData}
+    bind:preset={structuralPreset}
+    bind:inputs={structuralInputs}
+    onToggle={toggleStructurePane}
   />
 
   <InspectorPane
